@@ -115,8 +115,8 @@ export function buildTransientLayersFromConstruction(
     const lambda_W_mK: number = lambdaCandidate;
     const densityCandidate = material.rho_kg_m3;
     const heatCapacityCandidate = material.c_J_kgK;
-    let density_kg_m3: number = Number.isFinite(densityCandidate) && densityCandidate !== undefined && densityCandidate > 0 ? densityCandidate : 1000;
-    let heatCapacity_J_kgK: number =
+    const density_kg_m3: number = Number.isFinite(densityCandidate) && densityCandidate !== undefined && densityCandidate > 0 ? densityCandidate : 1000;
+    const heatCapacity_J_kgK: number =
       Number.isFinite(heatCapacityCandidate) && heatCapacityCandidate !== undefined && heatCapacityCandidate > 0 ? heatCapacityCandidate : 840;
 
     if (!(Number.isFinite(densityCandidate) && densityCandidate !== undefined && densityCandidate > 0)) {

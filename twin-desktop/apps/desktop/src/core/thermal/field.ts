@@ -1,6 +1,6 @@
 import { pointToSegmentDistance, polygonContainsPoint } from "../../entities/geometry/geom";
 import type { BuildingModel, Vec2, Wall } from "../../entities/geometry/types";
-import { buildGeometryRenderModel, type GeometryRenderModel, type RoomVolumeDescriptor } from "../geometry/bimPipeline";
+import { buildGeometryRenderModel, dedupeRoomVolumesForModel, type GeometryRenderModel, type RoomVolumeDescriptor } from "../geometry/bimPipeline";
 import { getDefaultSurfaceResistanceProfile } from "../../norms/sp50_2024/heatTransferCoefficients";
 import {
   buildThermalPhysicsModel,
@@ -11,6 +11,10 @@ import {
 } from "./physics";
 
 const DEFAULT_EXTERNAL_DECAY_M = 1.65;
+/** Методика уровня «визуализация»: не подменяет RC и не является CFD. */
+export const THERMAL_FIELD_VISUALIZATION_SCOPE_RU =
+  "Поле температуры в плане строится как сглаженная скалярная функция от зональных температур помещений, локальных источников (оборудование, освещение, трубы, соляр) и граничных условий у наружных стен; это инженерная иллюстрация, а не решение уравнения теплопроводности в объёме (не CFD).";
+
 const MIN_ROOM_SAMPLE_STEP_M = 0.18;
 const MAX_ROOM_SAMPLE_STEP_M = 0.48;
 const MAX_ROOM_SAMPLES = 160;
@@ -21,6 +25,7 @@ const MAX_SOURCE_GAIN_C = 8.6;
 const MAX_WALL_COOLING_C = 5.2;
 const MIN_WALL_INTERACTION_M = 0.35;
 const DEFAULT_SURFACE_RESISTANCE = getDefaultSurfaceResistanceProfile();
+/** Согласовано с типовыми α стены из СП 50 (см. `getDefaultSurfaceResistanceProfile` / `computeWallProperties` с плёнками). */
 const INTERNAL_SURFACE_RESISTANCE = DEFAULT_SURFACE_RESISTANCE.internal_m2K_W;
 const EXTERNAL_SURFACE_RESISTANCE = DEFAULT_SURFACE_RESISTANCE.external_m2K_W;
 const INTERNAL_COUPLING_SURFACE_RESISTANCE = 0.17;
@@ -97,6 +102,8 @@ export interface ThermalFieldModel {
   boundaryByWallId: Map<string, ThermalFieldBoundary>;
   minTemperatureC: number;
   maxTemperatureC: number;
+  /** Отделение от RC/СП 50/MC: только интерпретация поля в плане. */
+  visualizationScopeRu: string;
 }
 
 export interface WallSurfaceTemperatureSample {
@@ -108,16 +115,28 @@ export interface WallSurfaceTemperatureSample {
 export function createThermalFieldModel(
   model: BuildingModel,
   options: ThermalFieldBuildOptions,
-  renderGeometry = buildGeometryRenderModel(model),
-  physics = buildThermalPhysicsModel(
-    model,
-    {
-      ...options,
-      fixedRoomTemperaturesC: options.roomTemperaturesC,
-    },
-    renderGeometry
-  )
+  renderGeometryArg?: GeometryRenderModel,
+  physicsArg?: ThermalPhysicsModel
 ): ThermalFieldModel {
+  const baseRender = renderGeometryArg ?? buildGeometryRenderModel(model);
+  const renderGeometry: GeometryRenderModel =
+    physicsArg === undefined
+      ? { ...baseRender, roomVolumes: dedupeRoomVolumesForModel(baseRender.roomVolumes, model.rooms, null) }
+      : baseRender;
+  const physicsBuilt =
+    physicsArg ??
+    buildThermalPhysicsModel(
+      model,
+      {
+        ...options,
+        fixedRoomTemperaturesC: options.roomTemperaturesC,
+      },
+      renderGeometry
+    );
+  const physics: ThermalPhysicsModel = {
+    ...physicsBuilt,
+    warnings: physicsBuilt.warnings ?? [],
+  };
   const detailScale = clamp(options.detailScale ?? 1, MIN_DETAIL_SCALE, MAX_DETAIL_SCALE);
   const rooms = renderGeometry.roomVolumes.map((room) =>
     createThermalRoom(room, physics.roomBalances.get(room.roomId), detailScale)
@@ -142,6 +161,7 @@ export function createThermalFieldModel(
     boundaryByWallId,
     minTemperatureC: options.outdoorTemperatureC,
     maxTemperatureC: Math.max(options.outdoorTemperatureC, ...rooms.map((room) => room.baseTemperatureC)),
+    visualizationScopeRu: THERMAL_FIELD_VISUALIZATION_SCOPE_RU,
   };
 
   rooms.forEach((room) => {

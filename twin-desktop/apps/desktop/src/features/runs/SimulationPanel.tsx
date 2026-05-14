@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { useBuildStore } from "../build/build.store";
 import { buildAdjacencyGraph } from "../../core/graph/adjacency";
 import { runThermalSimulation, type ThermalSimulationResult } from "../../core/thermal/solver";
+import type { EngineeringMetricCard } from "../../core/thermal/thermalDiagnostics";
 import { DEFAULT_THERMAL_OPTIONS } from "../build/components/ThermalSimulationPanel";
 import { formatEnergy, formatNumber } from "../../shared/utils/format";
 import type { ProjectKind } from "../../entities/project/project.store";
@@ -195,11 +196,39 @@ export function SimulationPanel({ projectId, projectKind, onSolveComplete }: Sim
         ) : (
           <div className="space-y-4">
             {result && (
-              <div className="grid gap-4 sm:grid-cols-3">
-                <MetricCard label="Потребление энергии" value={metrics.energyDemand} unit="kWh" />
-                <MetricCard label="Пиковая нагрузка" value={metrics.heatingLoad} unit="kW" />
-                <MetricCard label="Охлаждение" value={metrics.coolingLoad} unit="kW" />
-              </div>
+              <>
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <MetricCard label="Потребление энергии" value={metrics.energyDemand} unit="kWh" />
+                  <MetricCard label="Пиковая нагрузка" value={metrics.heatingLoad} unit="kW" />
+                  <MetricCard label="Охлаждение" value={metrics.coolingLoad} unit="kW" />
+                </div>
+                {result.diagnostics && (
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50/90 p-4 text-sm text-slate-700">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Методика RC (динамика)</p>
+                    <p className="mt-2 leading-relaxed text-slate-700">{result.diagnostics.engineering.calculationLevelRu}</p>
+                    <p className="mt-1 font-mono text-xs text-slate-600">{result.diagnostics.engineering.discreteBalanceEquation}</p>
+                    <p className="mt-1 text-xs text-slate-600">{result.diagnostics.engineering.infiltrationConductanceFormula}</p>
+                    <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Показатели с единицами и формулами</p>
+                    <ul className="mt-2 space-y-3">
+                      {result.diagnostics.metricCards.map((card) => (
+                        <li key={card.title} className="rounded-xl border border-slate-200 bg-white p-3">
+                          <div className="flex flex-wrap items-baseline justify-between gap-2">
+                            <span className="font-medium text-slate-900">{card.title}</span>
+                            <span className="text-slate-900">
+                              {card.valueText} <span className="text-slate-500">{card.unit}</span>{" "}
+                              <DiagnosticsStatusBadge status={card.status} />
+                            </span>
+                          </div>
+                          <p className="mt-1 text-xs text-slate-500">Формула: {card.formula}</p>
+                          <p className="mt-1 text-xs text-slate-600">{card.engineeringSenseRu}</p>
+                          <p className="mt-1 text-xs text-amber-900/80">Допущения: {card.assumptionsRu}</p>
+                        </li>
+                      ))}
+                    </ul>
+                    <p className="mt-3 text-xs text-slate-500">{result.diagnostics.engineering.notSp50NormativeCheckRu}</p>
+                  </div>
+                )}
+              </>
             )}
             {engineResult && (
               <div className="rounded-2xl border border-slate-100 bg-slate-50/80 p-4">
@@ -223,6 +252,16 @@ export function SimulationPanel({ projectId, projectKind, onSolveComplete }: Sim
       </div>
     </div>
   );
+}
+
+function DiagnosticsStatusBadge({ status }: { status: EngineeringMetricCard["status"] }) {
+  const map = {
+    ok: { label: "норма", className: "bg-emerald-100 text-emerald-800" },
+    attention: { label: "внимание", className: "bg-amber-100 text-amber-900" },
+    risk: { label: "риск", className: "bg-red-100 text-red-800" },
+  } as const;
+  const entry = map[status];
+  return <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${entry.className}`}>{entry.label}</span>;
 }
 
 function MetricCard({ label, value, unit }: { label: string; value: number | null; unit: string }) {

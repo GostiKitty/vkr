@@ -115,8 +115,8 @@ export interface OpeningBase {
   lost?: boolean;
 }
 
-export interface Door extends OpeningBase {}
-export interface Window extends OpeningBase {}
+export type Door = OpeningBase;
+export type Window = OpeningBase;
 
 export type Sp50BuildingCategory =
   | "residential"

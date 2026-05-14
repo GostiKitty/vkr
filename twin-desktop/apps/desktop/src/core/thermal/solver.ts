@@ -11,6 +11,7 @@ import {
   type SetpointSchedule,
 } from "./schedules";
 import { computeSimulationMetrics, type FrameInstant } from "./metrics";
+import { buildThermalSimulationDiagnostics, type ThermalSimulationDiagnostics } from "./thermalDiagnostics";
 
 const SECONDS_PER_HOUR = 3600;
 const DEFAULT_TIMESTEP_SECONDS = 600;
@@ -54,6 +55,10 @@ export interface ThermalTimelinePoint {
 export interface RoomThermalResult {
   roomId: string;
   timeline: Array<{ timeHours: number; temperatureC: number; heatingPowerW: number }>;
+  /**
+   * Тепловая энергия отопления за весь смоделированный период (24 ч или 7 суток), кВт·ч.
+   * Не «суточная» в календарном смысле при длине сценария 7 d — это интеграл мощности за весь период.
+   */
   dailyEnergyKWh: number;
   discomfortHours: number;
 }
@@ -62,10 +67,17 @@ export interface ThermalSimulationResult {
   timeline: ThermalTimelinePoint[];
   rooms: Record<string, RoomThermalResult>;
   summary: {
+    /** Максимум по времени суммы мощностей отопления по зонам, кВт. */
     peakLoadKW: number;
+    /** Интеграл суммарной мощности отопления за период сценария, кВт·ч. */
     totalEnergyKWh: number;
+    /** Сумма по зонам часов с температурой ниже уставки (>0,05 °C); может превышать длительность периода. */
     discomfortHours: number;
   };
+  /** Предупреждения тепловой модели здания (геометрия, запасные допущения). */
+  modelWarnings?: string[];
+  /** Разрез потерь, удельные показатели и проверка согласованности среза с дискретным балансом RC (не СП 50). */
+  diagnostics?: ThermalSimulationDiagnostics;
 }
 
 export interface SimulationScenario {
@@ -91,7 +103,7 @@ export function runThermalSimulation(
 ): ThermalSimulationResult {
   const durationHours = options.duration === "7d" ? 24 * 7 : 24;
   const timestepSeconds = Math.max(60, Math.round((options.timestepMinutes ?? 10) * 60));
-  const { model: thermalModel } = buildThermalModel(building, {
+  const { model: thermalModel, warnings: thermalModelWarnings } = buildThermalModel(building, {
     adjacency,
     infiltrationACH: options.infiltrationACH,
     effectiveMassFactor: options.engineering?.effectiveMassFactor ?? 1,
@@ -124,6 +136,19 @@ export function runThermalSimulation(
 
   const run = simulateThermalNetwork(thermalModel, scenario);
   const metrics = computeSimulationMetrics(run.metricFrames);
+  const diagnostics = buildThermalSimulationDiagnostics({
+    building,
+    model: thermalModel,
+    frames: run.frames,
+    metricFrames: run.metricFrames,
+    setpoints: scenario.setpoints,
+    gains: scenario.gains,
+    occupancy: scenario.occupancy,
+    timestepSeconds: scenario.timestepSeconds,
+    zoneSummary: metrics.zones,
+    totalEnergyKWh: metrics.totalEnergyJ / 3_600_000,
+    peakLoadKW: metrics.peakHeatingW / 1000,
+  });
 
   const rooms: Record<string, RoomThermalResult> = {};
   run.roomHistories.forEach((history, roomId) => {
@@ -144,9 +169,16 @@ export function runThermalSimulation(
       totalEnergyKWh: metrics.totalEnergyJ / 3_600_000,
       discomfortHours: metrics.discomfortSeconds / 3600,
     },
+    modelWarnings: thermalModelWarnings.length ? thermalModelWarnings : undefined,
+    diagnostics,
   };
 }
 
+/**
+ * Явная зональная RC-схема (одна температура воздуха на зону), дискретизация по времени:
+ * C_i (T_i^{n+1}−T_i^n)/Δt = Σ_j G_ij(T_j^n−T_i^n) + G_inf,i(T_n−T_i^n) + Σ_k G_k,ext(T_n−T_i^n) + Q̇_int + Q̇_ot .
+ * Температуры в К в потоках; Q̇_ot ≥ 0 поднимает T до уставки (см. тело цикла). Норматив СП 50 здесь не вычисляется.
+ */
 export function simulateThermalNetwork(model: ThermalModel, scenario: SimulationScenario): SimulationRunPayload {
   if (!model.zones.length) {
     throw new Error("Модель не содержит зон для расчёта.");
@@ -231,6 +263,12 @@ export function simulateThermalNetwork(model: ThermalModel, scenario: Simulation
         heatingPowerW = (deltaK * zone.capacitance_J_K) / timestepSeconds;
         nextTempK = setpointK;
       }
+      if (!Number.isFinite(heatingPowerW) || heatingPowerW < 0) {
+        heatingPowerW = 0;
+      }
+      if (!Number.isFinite(nextTempK)) {
+        nextTempK = currentTempK;
+      }
 
       frame.rooms[zone.id] = {
         temperatureC: currentTempC,
@@ -257,7 +295,10 @@ export function simulateThermalNetwork(model: ThermalModel, scenario: Simulation
     });
 
     frames.push(frame);
-    metricFrames.push(metricFrame);
+    // Интеграл мощности: один интервал на шаг; последняя итерация (t = T) — только снимок состояния, без лишнего Δt.
+    if (step < totalSteps) {
+      metricFrames.push(metricFrame);
+    }
     updates.forEach(({ zoneId, nextTempK }) => zoneState.set(zoneId, nextTempK));
   }
 

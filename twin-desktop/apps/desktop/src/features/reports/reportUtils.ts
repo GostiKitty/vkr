@@ -74,7 +74,7 @@ export function generateMonteCarloAnalytics(twin: Twin | null): MonteCarloAnalyt
     seed: 2026,
     parameters,
     scenarioBuilder,
-    heatingLoadThreshold: (twin.spaces.length || 1) * 1200,
+    heatingLoadThreshold: ((twin.spaces.length || 1) * 1200) / 1000,
     evaluationMode: "full-physics",
     morris: {
       levels: 6,
@@ -162,6 +162,7 @@ export function buildScientificReportData(args: BuildReportArgs): ScientificRepo
         args.uncertaintyRuns ?? 0
       }.`,
       "Parameters sampled: infiltration (uniform 0.15–0.60 ACH), internal gains (normal μ=8 W/m², σ=2), envelope U-value (uniform 0.18–0.35 W/m²K).",
+      "Примечание: отчётный Monte Carlo по данным Twin использует упрощённую нодовую модель по площадям помещений API, а не геометрическую модель конструктора; это иллюстрация метода, а не полноценный расчёт ограждения конкретного здания.",
     ],
   });
 

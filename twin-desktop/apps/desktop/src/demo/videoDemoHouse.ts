@@ -513,6 +513,7 @@ function buildVideoDemoModelInternal(): BuildingModel {
         levelId: LEVEL_ID,
         polygon: [
           { x: 0, y: 4.6 },
+          { x: 6.2, y: 4.6 },
           { x: 8.9, y: 4.6 },
           { x: 8.9, y: 8 },
           { x: 0, y: 8 },
@@ -589,6 +590,11 @@ export function buildVideoDemoHouseModel(): BuildingModel {
 
 export const videoDemoHouse: BuildingModel = buildVideoDemoHouseModel();
 
+/**
+ * Синтетический результат «динамики» для демо-сценария и записи видео.
+ * Не вызывает `runThermalSimulation` — не путайте с основным инженерным расчётом по `BuildingModel`.
+ * Для защиты используйте локальный расчёт в конструкторе; этот ряд служит только плавной анимацией графиков.
+ */
 export function buildVideoDemoThermalResult(model: BuildingModel = videoDemoHouse): ThermalSimulationResult {
   const roomEntries = model.rooms.map((room) => {
     const baseTemperature = VIDEO_DEMO_ROOM_TEMPERATURES[room.id] ?? 20;

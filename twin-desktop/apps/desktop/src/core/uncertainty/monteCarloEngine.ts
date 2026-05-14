@@ -27,8 +27,10 @@ export interface ThermalScenario {
 }
 
 export interface MonteCarloRunMetrics {
-  peakHeatingLoad: number; // Watts
-  annualEnergy: number; // kWh over simulation horizon
+  /** Пиковая тепловая нагрузка отопления, кВт */
+  peakHeatingLoad: number;
+  /** Энергия за горизонт симуляции, кВт·ч */
+  annualEnergy: number;
 }
 
 export interface MonteCarloRunSummary extends MonteCarloRunMetrics {
@@ -167,7 +169,7 @@ function createLoadTracker(dtHours: number): { observer: StepObserver; finalize:
   return {
     observer,
     finalize: () => ({
-      peakHeatingLoad,
+      peakHeatingLoad: peakHeatingLoad / 1000,
       annualEnergy: energyWh / 1000,
     }),
   };

@@ -1,6 +1,7 @@
 import { polygonArea, polygonContainsPoint, segmentLength } from "../../entities/geometry/geom";
 import type { BuildingModel, Vec2, Wall } from "../../entities/geometry/types";
-import { computeWallProperties } from "../../entities/material/types";
+import { DEFAULT_WALL_ASSEMBLY_ID } from "../../entities/material/types";
+import { computeWallFacadeConductances } from "./wallFacadeThermal";
 import { buildSmartModelSnapshot, type SmartEquipmentState, type SmartModelSnapshot, type SmartNetworkState } from "../networks/intelligence";
 import type { Orientation } from "../graph/adjacency";
 import { buildAdjacencyGraph } from "../graph/adjacency";
@@ -14,9 +15,6 @@ import {
 const AIR_DENSITY_KG_M3 = 1.204;
 const AIR_CP_J_KG_K = 1005;
 const DEFAULT_SETPOINT_C = 21;
-const DEFAULT_WALL_U_W_M2K = 1.4;
-const DEFAULT_WINDOW_U_W_M2K = 2.35;
-const DEFAULT_DOOR_U_W_M2K = 1.8;
 const DEFAULT_INFILTRATION_ACH = 0.45;
 const DEFAULT_VENTILATION_ACH = 0.18;
 const DEFAULT_LIGHTING_W_M2 = 2.6;
@@ -93,6 +91,8 @@ export interface ThermalPhysicsModel {
   surfaces: ThermalSurfaceEstimate[];
   roomSurfaces: Map<string, ThermalSurfaceEstimate[]>;
   adjacency: ReturnType<typeof buildAdjacencyGraph>;
+  /** Допущения и геометрические предупреждения (проёмы, оценки). */
+  warnings: string[];
 }
 
 type RoomSeed = {
@@ -145,7 +145,7 @@ export function buildThermalPhysicsModel(
   const networkContext = buildThermalNetworkContext(model, options);
   const levelMap = new Map(model.levels.map((level) => [level.id, level]));
   const orientationByWallId = new Map(adjacency.external.map((edge) => [edge.wallId, edge.orientation]));
-  const surfaces = buildSurfaceEstimates(renderGeometry, options, orientationByWallId);
+  const { surfaces, warnings: surfaceWarnings } = buildSurfaceEstimates(renderGeometry, options, orientationByWallId);
   const roomSurfaces = new Map<string, ThermalSurfaceEstimate[]>();
   surfaces.forEach((surface) => {
     if (surface.positiveRoomId) {
@@ -172,6 +172,7 @@ export function buildThermalPhysicsModel(
     surfaces,
     roomSurfaces,
     adjacency,
+    warnings: surfaceWarnings,
   };
 }
 
@@ -256,8 +257,9 @@ function buildSurfaceEstimates(
   renderGeometry: GeometryRenderModel,
   options: ThermalPhysicsOptions,
   orientationByWallId: Map<string, Orientation>
-): ThermalSurfaceEstimate[] {
-  return renderGeometry.walls.map(({ wall, openings }) => {
+): { surfaces: ThermalSurfaceEstimate[]; warnings: string[] } {
+  const warnings: string[] = [];
+  const surfaces = renderGeometry.walls.map(({ wall, openings }) => {
     const direction = normalize({ x: wall.b.x - wall.a.x, y: wall.b.y - wall.a.y });
     const normal = { x: -direction.y, y: direction.x };
     const midpoint = { x: (wall.a.x + wall.b.x) / 2, y: (wall.a.y + wall.b.y) / 2 };
@@ -270,24 +272,19 @@ function buildSurfaceEstimates(
       x: midpoint.x - normal.x * probeDistance,
       y: midpoint.y - normal.y * probeDistance,
     });
-    const wallAreaM2 = Math.max(0.25, segmentLength(wall.a, wall.b) * Math.max(0.2, wall.height_m));
-    const windowAreaM2 = openings
-      .filter((opening) => opening.type === "window")
-      .reduce((sum, opening) => sum + opening.widthM * opening.heightM, 0);
-    const doorAreaM2 = openings
-      .filter((opening) => opening.type === "door")
-      .reduce((sum, opening) => sum + opening.widthM * opening.heightM, 0);
-    const openingAreaM2 = windowAreaM2 + doorAreaM2;
-    const opaqueAreaM2 = Math.max(0.05, wallAreaM2 - openingAreaM2);
-    const wallProps = computeWallProperties(wall.layers, wall.wallAssemblyId);
-    const wallU = wallProps?.uValue ?? DEFAULT_WALL_U_W_M2K;
-    const weightedU =
-      (opaqueAreaM2 * wallU + windowAreaM2 * DEFAULT_WINDOW_U_W_M2K + doorAreaM2 * DEFAULT_DOOR_U_W_M2K) /
-      Math.max(0.1, wallAreaM2);
-    const effectiveR = 1 / Math.max(0.12, weightedU);
     const bridgeFactor = computeBridgeFactor(wall, openings, positiveRoom !== null && negativeRoom !== null);
     const windFactor = clamp(options.windFactor ?? DEFAULT_WIND_FACTOR, 0.4, 2.4);
-    const conductance_W_K = weightedU * wallAreaM2 * (positiveRoom && negativeRoom ? 1 : windFactor * bridgeFactor);
+    const conductanceMultiplier = positiveRoom && negativeRoom ? 1 : windFactor * bridgeFactor;
+    const facade = computeWallFacadeConductances(
+      wall,
+      openings,
+      wall.wallAssemblyId ?? DEFAULT_WALL_ASSEMBLY_ID,
+      conductanceMultiplier
+    );
+    warnings.push(...facade.warnings);
+    const { wallAreaM2, opaqueAreaM2, windowAreaM2, doorAreaM2, weightedU_W_m2K: weightedU } = facade;
+    const effectiveR = 1 / Math.max(0.12, weightedU);
+    const conductance_W_K = facade.conductanceTotal_W_K;
     const orientation = positiveRoom && negativeRoom ? null : orientationByWallId.get(wall.id) ?? estimateOrientation(wall);
     const solarGainW = computeSolarGainW(windowAreaM2, orientation, options);
 
@@ -295,7 +292,7 @@ function buildSurfaceEstimates(
       wallId: wall.id,
       levelId: wall.levelId,
       wall,
-      kind: positiveRoom && negativeRoom ? "internal" : "external",
+      kind: (positiveRoom && negativeRoom ? "internal" : "external") as "internal" | "external",
       positiveRoomId: positiveRoom?.roomId ?? null,
       negativeRoomId: negativeRoom?.roomId ?? null,
       orientation,
@@ -304,13 +301,14 @@ function buildSurfaceEstimates(
       windowAreaM2,
       doorAreaM2,
       effectiveU_W_m2K: weightedU * bridgeFactor,
-      effectiveR_m2K_W: effectiveR / bridgeFactor,
+      effectiveR_m2K_W: effectiveR / Math.max(1e-6, bridgeFactor),
       conductance_W_K,
       bridgeFactor,
       solarGainW,
       openingPerimeterM: openings.reduce((sum, opening) => sum + opening.widthM * 2 + opening.heightM * 2, 0),
     };
   });
+  return { surfaces, warnings };
 }
 
 function solveRoomBalances(

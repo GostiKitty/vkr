@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+﻿import { useEffect, useState } from "react";
 import { useProjectStore } from "../entities/project/project.store";
 import { navigate } from "./router";
 import { useDebugConsoleStore } from "../entities/debug/debugConsole.store";
@@ -76,7 +76,7 @@ export function TopBar({ currentPath }: TopBarProps) {
 
   return (
     <div className="sticky top-0 z-40 border-b border-slate-200 bg-white/90 backdrop-blur">
-      <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-6 py-4">
+      <div className="mx-auto flex max-w-[min(100%,92rem)] flex-wrap items-center justify-between gap-4 px-4 py-4 sm:px-6 xl:px-8">
         <div className="flex flex-wrap items-center gap-3">
           <span className="text-lg font-semibold text-slate-900">Гнёздышко</span>
           <nav className="flex gap-2">

@@ -26,6 +26,7 @@ import "./view3d/wallJoins.test.js";
 import "./ui/mojibake.test.js";
 import "./geometry/polygonArea.test.js";
 import "./thermal/singleZone.test.js";
+import "./thermal/wallFacadeAndDiagnostics.test.js";
 import "./thermal/transient1D.test.js";
 import "./thermal/transientMonteCarlo.test.js";
 import "./thermal/transientVisualization.test.js";

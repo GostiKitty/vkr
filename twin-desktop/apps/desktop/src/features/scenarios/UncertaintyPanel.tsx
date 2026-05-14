@@ -52,8 +52,8 @@ export function UncertaintyPanel() {
               onChange={(event) => setEvaluationMode(event.target.value as "full-physics" | "surrogate")}
               className="rounded-xl border border-slate-200 px-3 py-2 text-slate-900 focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
             >
-              <option value="full-physics">Full physics (точно)</option>
-              <option value="surrogate">Surrogate (быстро)</option>
+              <option value="full-physics">Полная физика (медленнее, точнее)</option>
+              <option value="surrogate">Суррогатная модель (быстро, нужна обученная модель)</option>
             </select>
           </label>
         </div>
@@ -73,9 +73,9 @@ export function UncertaintyPanel() {
       <div className="rounded-2xl border border-dashed border-slate-300 bg-white/60 p-4 text-sm text-slate-500">
         <p className="font-medium text-slate-600">Справка</p>
         <ul className="mt-2 list-disc space-y-1 pl-5">
-          <li>Full physics использует детальный решатель и занимает больше времени.</li>
-          <li>Surrogate mode ожидает наличие обученной модели и работает быстрее.</li>
-          <li>Вы можете изменить настройки в любое время — статус шагов обновится автоматически.</li>
+          <li>Режим «полная физика» использует детальный решатель и занимает больше времени.</li>
+          <li>Режим «суррогат» ожидает заранее обученные модели замены и работает быстрее.</li>
+          <li>Настройки можно менять в любой момент — статус шагов обновится автоматически.</li>
         </ul>
       </div>
     </form>

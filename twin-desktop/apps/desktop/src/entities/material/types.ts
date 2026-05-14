@@ -1,5 +1,10 @@
 import type { WallLayer } from "../geometry/types";
+import { calculateConstructionResistance } from "../../core/thermal/sp50/calculations";
 import { getMaterialThermalProperties } from "../../norms/sp50_2024/materialThermalProperties";
+import { EXTERNAL_HEAT_TRANSFER_COEFFICIENTS, INTERNAL_HEAT_TRANSFER_COEFFICIENTS } from "../../norms/sp50_2024/heatTransferCoefficients";
+
+const SP50_WALL_ALPHA_IN = INTERNAL_HEAT_TRANSFER_COEFFICIENTS.wall;
+const SP50_WALL_ALPHA_OUT = EXTERNAL_HEAT_TRANSFER_COEFFICIENTS.wall;
 
 export interface Material {
   id: string;
@@ -22,9 +27,27 @@ export interface WallAssembly {
 }
 
 export interface WallThermalProperties {
+  /** Полное R ограждения R_total = R_si + R_layers + R_se (или только слои без плёнок), м²·К/Вт. */
   rValue: number;
+  /** U_total = 1 / R_total, Вт/(м²·К). */
   uValue: number;
   heatCapacity_J_m2K: number;
+  /** Σ(d/λ) — сопротивление материальных слоёв, м²·К/Вт. */
+  rMaterialLayers_m2K_W: number;
+  /** R_si — внутреннее поверхностное (0, если плёнки СП 50 не включены). */
+  rSi_m2K_W: number;
+  /** R_se — наружное поверхностное. */
+  rSe_m2K_W: number;
+  /** R_total, м²·К/Вт (совпадает с rValue). */
+  rTotal_m2K_W: number;
+  /** U_layers = 1 / R_layers (без поверхностных сопротивлений). */
+  uMaterialLayers_W_m2K: number;
+  /** U_total = 1 / R_total (совпадает с uValue). */
+  uTotal_W_m2K: number;
+  /** @deprecated используйте rMaterialLayers_m2K_W */
+  rLayersOnly_m2K_W?: number;
+  /** @deprecated используйте uMaterialLayers_W_m2K */
+  uLayersOnly_W_m2K?: number;
 }
 
 function buildMaterialEntry(id: string, defaultThickness_m: number, fallbackName = id): Material {
@@ -92,16 +115,26 @@ export const DEFAULT_WALL_ASSEMBLY_ID = "masonry";
 export const getMaterial = (id: string): Material | undefined => MATERIAL_LIBRARY[id];
 export const getWallAssembly = (id: string): WallAssembly | undefined => WALL_ASSEMBLIES[id];
 
+export interface ComputeWallPropertiesOptions {
+  /**
+   * Если true — к сопротивлению слоёв добавляются типовые поверхностные сопротивления
+   * по СП 50.13330 (αв = 8.7, αн = 23 Вт/(м²·К) для стены), как в нормативном модуле.
+   * Используется в зональной динамической модели для согласования U с нормативной логикой.
+   */
+  includeSp50AirFilms?: boolean;
+}
+
 export function computeWallProperties(
   layers: WallLayer[] | undefined,
-  fallbackAssemblyId?: string
+  fallbackAssemblyId?: string,
+  options?: ComputeWallPropertiesOptions
 ): WallThermalProperties | null {
   const assembly = fallbackAssemblyId ? getWallAssembly(fallbackAssemblyId) : undefined;
   const effectiveLayers = layers?.length ? layers : assembly?.layers;
   if (!effectiveLayers || !effectiveLayers.length) {
     return null;
   }
-  let rTotal = 0;
+  let rLayers = 0;
   let heatCapacity = 0;
   let resolvedLayerCount = 0;
   effectiveLayers.forEach((layer) => {
@@ -110,17 +143,70 @@ export function computeWallProperties(
       return;
     }
     const thickness = layer.thickness_m || material.defaultThickness_m;
-    rTotal += thickness / material.lambda_W_mK;
+    const lam = material.lambda_W_mK;
+    if (!Number.isFinite(lam) || lam <= 0 || !Number.isFinite(thickness) || thickness <= 0) {
+      return;
+    }
+    rLayers += thickness / lam;
     heatCapacity += material.rho_kg_m3 * material.c_J_kgK * thickness;
     resolvedLayerCount += 1;
   });
-  if (rTotal <= 0 || resolvedLayerCount === 0) {
+  if (rLayers <= 0 || resolvedLayerCount === 0 || !Number.isFinite(rLayers)) {
     return null;
   }
+  if (options?.includeSp50AirFilms) {
+    const layerResistances = effectiveLayers
+      .map((layer) => {
+        const material = getMaterial(layer.materialId);
+        if (!material) {
+          return null;
+        }
+        const thickness = layer.thickness_m || material.defaultThickness_m;
+        const lam = material.lambda_W_mK;
+        if (!Number.isFinite(lam) || lam <= 0) {
+          return null;
+        }
+        return thickness / lam;
+      })
+      .filter((value): value is number => value !== null && value > 0);
+    if (!layerResistances.length) {
+      return null;
+    }
+    const rSi = 1 / SP50_WALL_ALPHA_IN;
+    const rSe = 1 / SP50_WALL_ALPHA_OUT;
+    const rComplete = calculateConstructionResistance({
+      internalHeatTransferCoefficient: SP50_WALL_ALPHA_IN,
+      externalHeatTransferCoefficient: SP50_WALL_ALPHA_OUT,
+      layerResistances,
+    });
+    const rLayersOnly = layerResistances.reduce((sum, value) => sum + value, 0);
+    const uLayers = 1 / rLayersOnly;
+    const uTot = 1 / rComplete;
+    return {
+      rValue: rComplete,
+      uValue: uTot,
+      heatCapacity_J_m2K: heatCapacity,
+      rMaterialLayers_m2K_W: rLayersOnly,
+      rSi_m2K_W: rSi,
+      rSe_m2K_W: rSe,
+      rTotal_m2K_W: rComplete,
+      uMaterialLayers_W_m2K: uLayers,
+      uTotal_W_m2K: uTot,
+      rLayersOnly_m2K_W: rLayersOnly,
+      uLayersOnly_W_m2K: uLayers,
+    };
+  }
+  const uMat = 1 / rLayers;
   return {
-    rValue: rTotal,
-    uValue: 1 / rTotal,
+    rValue: rLayers,
+    uValue: uMat,
     heatCapacity_J_m2K: heatCapacity,
+    rMaterialLayers_m2K_W: rLayers,
+    rSi_m2K_W: 0,
+    rSe_m2K_W: 0,
+    rTotal_m2K_W: rLayers,
+    uMaterialLayers_W_m2K: uMat,
+    uTotal_W_m2K: uMat,
   };
 }
 

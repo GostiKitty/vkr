@@ -15,7 +15,7 @@ export default function App() {
     <div className="min-h-screen bg-slate-100 text-slate-900">
       <TopBar currentPath={pathname} />
       <EngineConfigBanner />
-      <main className="mx-auto max-w-6xl pb-12">
+      <main className="mx-auto w-full max-w-[min(100%,92rem)] px-4 pb-12 sm:px-6 xl:px-8">
         <Active />
       </main>
       <NotificationPanel />

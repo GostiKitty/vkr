@@ -16,12 +16,21 @@ export interface ZoneSummaryMetrics {
   zoneId: string;
   energyJ: number;
   discomfortSeconds: number;
+  /** Максимум мощности отопления этой зоны по шагам симуляции, Вт. */
   peakHeatingW: number;
 }
 
 export interface SimulationSummaryMetrics {
+  /**
+   * Максимум по времени **суммы** мощностей отопления по всем зонам в одном шаге, Вт
+   * (одновременная нагрузка на систему отопления).
+   */
   peakHeatingW: number;
   totalEnergyJ: number;
+  /**
+   * Сумма по зонам секунд, в которые температура зоны ниже уставки более чем на 0,05 °C
+   * (не «часы здания», а интеграл по зонам; при N зонах одновременного дискомфорта вклад до N×Δt).
+   */
   discomfortSeconds: number;
   zones: Record<string, ZoneSummaryMetrics>;
 }
