@@ -1,0 +1,215 @@
+import { createId } from "../../shared/utils/id";
+import { polygonArea, validateRoomPolygon } from "../../entities/geometry/geom";
+const MERGE_TOLERANCE = 0.2;
+const MIN_ROOM_AREA = 1;
+const SIGNATURE_PRECISION = 3;
+const clonePolygon = (polygon) => polygon.map((point) => ({ ...point }));
+const signature = (polygon) => polygon
+    .map((point) => `${point.x.toFixed(SIGNATURE_PRECISION)}:${point.y.toFixed(SIGNATURE_PRECISION)}`)
+    .join("|");
+export function detectRoomsFromWalls(model) {
+    const autoRooms = [];
+    const problems = [];
+    const loops = [];
+    const manualRoomMap = new Map();
+    model.rooms.forEach((room) => {
+        const normalized = validateRoomPolygon(room.polygon).normalized ?? room.polygon;
+        manualRoomMap.set(signature(normalized), { id: room.id, levelId: room.levelId });
+    });
+    model.levels.forEach((level) => {
+        const levelWalls = model.walls.filter((wall) => wall.levelId === level.id);
+        if (!levelWalls.length) {
+            return;
+        }
+        const graph = buildGraph(levelWalls);
+        const faces = extractFaces(graph, level.id, problems);
+        let counter = 1;
+        faces.forEach((nodeIndices) => {
+            const loopId = createId("loop");
+            const rawPolygon = nodeIndices.map((index) => graph.nodes[index].point);
+            const polygon = normalizePolygon(rawPolygon);
+            const signedArea = polygonArea(polygon);
+            if (signedArea <= 0) {
+                loops.push({
+                    id: loopId,
+                    levelId: level.id,
+                    polygon: clonePolygon(polygon),
+                    area: 0,
+                    valid: false,
+                    reason: "Контур ориентирован неверно или вырожден",
+                });
+                return;
+            }
+            const area = Math.abs(signedArea);
+            if (area < MIN_ROOM_AREA) {
+                problems.push({
+                    levelId: level.id,
+                    message: `Петля отброшена: площадь ${area.toFixed(2)} м² слишком мала`,
+                    loopId,
+                });
+                loops.push({
+                    id: loopId,
+                    levelId: level.id,
+                    polygon: clonePolygon(polygon),
+                    area,
+                    valid: false,
+                    reason: "Слишком маленькая площадь",
+                });
+                return;
+            }
+            const validation = validateRoomPolygon(polygon);
+            const normalized = validation.normalized ?? polygon;
+            if (!validation.valid) {
+                problems.push({
+                    levelId: level.id,
+                    message: validation.reason ?? "Петля отброшена: некорректный полигон",
+                    loopId,
+                });
+                loops.push({
+                    id: loopId,
+                    levelId: level.id,
+                    polygon: clonePolygon(normalized),
+                    area,
+                    valid: false,
+                    reason: validation.reason ?? "Некорректный полигон",
+                });
+                return;
+            }
+            const loopSignature = signature(normalized);
+            const manualMatch = manualRoomMap.get(loopSignature);
+            if (manualMatch && manualMatch.levelId === level.id) {
+                loops.push({
+                    id: loopId,
+                    levelId: level.id,
+                    polygon: clonePolygon(normalized),
+                    area,
+                    valid: true,
+                    roomId: manualMatch.id,
+                    roomSource: "manual",
+                });
+                return;
+            }
+            const roomId = createId("auto-room");
+            loops.push({
+                id: loopId,
+                levelId: level.id,
+                polygon: clonePolygon(normalized),
+                area,
+                valid: true,
+                roomId,
+                roomSource: "auto",
+            });
+            autoRooms.push({
+                id: roomId,
+                name: `Space ${counter++}`,
+                levelId: level.id,
+                polygon: normalized,
+                source: "auto",
+            });
+        });
+    });
+    return { rooms: autoRooms, problems, loops };
+}
+function buildGraph(walls) {
+    const nodes = [];
+    const outgoing = [];
+    const edges = [];
+    const findOrAddNode = (point) => {
+        const existingIndex = nodes.findIndex((node) => distance(node.point, point) <= MERGE_TOLERANCE);
+        if (existingIndex !== -1) {
+            return existingIndex;
+        }
+        nodes.push({ point });
+        outgoing.push([]);
+        return nodes.length - 1;
+    };
+    walls.forEach((wall) => {
+        const fromIndex = findOrAddNode(wall.a);
+        const toIndex = findOrAddNode(wall.b);
+        if (fromIndex === toIndex) {
+            return;
+        }
+        const forward = {
+            id: createId("edge"),
+            from: fromIndex,
+            to: toIndex,
+            wallId: wall.id,
+            angle: Math.atan2(nodes[toIndex].point.y - nodes[fromIndex].point.y, nodes[toIndex].point.x - nodes[fromIndex].point.x),
+            visited: false,
+        };
+        const backward = {
+            id: createId("edge"),
+            from: toIndex,
+            to: fromIndex,
+            wallId: wall.id,
+            angle: Math.atan2(nodes[fromIndex].point.y - nodes[toIndex].point.y, nodes[fromIndex].point.x - nodes[toIndex].point.x),
+            visited: false,
+        };
+        forward.twin = backward;
+        backward.twin = forward;
+        edges.push(forward, backward);
+        outgoing[fromIndex].push(forward);
+        outgoing[toIndex].push(backward);
+    });
+    outgoing.forEach((list) => list.sort((a, b) => a.angle - b.angle));
+    return { nodes, outgoing, edges };
+}
+function extractFaces(graph, levelId, problems) {
+    const faces = [];
+    graph.edges.forEach((edge) => {
+        if (edge.visited) {
+            return;
+        }
+        const loop = [];
+        let current = edge;
+        const startId = edge.id;
+        let guard = 0;
+        let valid = true;
+        while (current && guard < 1000) {
+            guard += 1;
+            current.visited = true;
+            loop.push(current.from);
+            const next = nextEdge(graph, current);
+            if (!next) {
+                valid = false;
+                problems.push({
+                    levelId,
+                    message: "Петля не замкнута — есть разрыв в стенах",
+                });
+                break;
+            }
+            current = next;
+            if (current.id === startId) {
+                break;
+            }
+        }
+        if (!valid || loop.length < 3 || guard >= 1000) {
+            return;
+        }
+        faces.push(loop);
+    });
+    return faces;
+}
+function nextEdge(graph, edge) {
+    const outgoing = graph.outgoing[edge.to];
+    if (!outgoing.length || !edge.twin) {
+        return undefined;
+    }
+    const reverseIndex = outgoing.findIndex((candidate) => candidate.to === edge.from && candidate.wallId === edge.wallId);
+    if (reverseIndex === -1) {
+        return undefined;
+    }
+    const nextIndex = (reverseIndex - 1 + outgoing.length) % outgoing.length;
+    return outgoing[nextIndex];
+}
+function normalizePolygon(points) {
+    const cleaned = [];
+    points.forEach((point, index) => {
+        const prev = points[(index - 1 + points.length) % points.length];
+        if (distance(point, prev) > 1e-3) {
+            cleaned.push(point);
+        }
+    });
+    return cleaned;
+}
+const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);

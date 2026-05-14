@@ -1,0 +1,70 @@
+# Node / frontend dependencies
+node_modules/
+**/node_modules/
+
+# Python virtual environments
+.venv/
+venv/
+**/.venv/
+**/venv/
+
+# Python cache
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Build outputs
+dist/
+build/
+out/
+.vite/
+**/dist/
+**/build/
+**/out/
+**/.vite/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary debug files
+check_bytes.py
+inspect_capture_block.py
+inspect_lines3.py
+inspect_lines4.py
+inspect_lines5.py
+inspect_segment.py
+
+# IDE
+.vscode/
+.idea/
+
+# Large/local generated files if any
+*.tmp
+*.cache
+# Generated test output
+twin-desktop/apps/desktop/tests-dist/
+
+# Local project data / imported IFC models
+twin-desktop/projects/
+
+# Build/test generated output
+tests-dist/
+**/tests-dist/
+
+# Optional local files
+*.ifc

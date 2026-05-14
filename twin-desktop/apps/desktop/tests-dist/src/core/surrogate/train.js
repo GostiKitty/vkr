@@ -1,0 +1,124 @@
+export function trainLinearSurrogate(config) {
+    if (!config.samples.length) {
+        throw new Error("At least one training sample is required");
+    }
+    const featureNames = extractFeatureNames(config.samples);
+    const { designMatrix, target } = buildDesignMatrix(config.samples, featureNames);
+    const lambda = config.lambda ?? 1e-4;
+    const beta = solveNormalEquation(designMatrix, target, lambda);
+    const intercept = beta[0];
+    const weights = beta.slice(1);
+    const model = {
+        featureNames,
+        intercept,
+        weights,
+        predict: (inputs) => predictValue(inputs, featureNames, intercept, weights),
+    };
+    const predictions = config.samples.map((sample) => model.predict(sample.inputs));
+    const metrics = evaluateMetrics(predictions, target);
+    return { model, metrics };
+}
+export function predictValue(inputs, featureNames, intercept, weights) {
+    let value = intercept;
+    featureNames.forEach((name, index) => {
+        const feature = inputs[name];
+        if (!Number.isFinite(feature)) {
+            throw new Error(`Missing or invalid feature "${name}"`);
+        }
+        value += weights[index] * feature;
+    });
+    return value;
+}
+function extractFeatureNames(samples) {
+    const base = Object.keys(samples[0].inputs).sort();
+    samples.forEach((sample, idx) => {
+        const keys = Object.keys(sample.inputs).sort();
+        if (keys.length !== base.length || !keys.every((key, i) => key === base[i])) {
+            throw new Error(`Sample ${idx} has inconsistent feature keys`);
+        }
+    });
+    return base;
+}
+function buildDesignMatrix(samples, featureNames) {
+    const rows = samples.length;
+    const cols = featureNames.length + 1;
+    const matrix = Array.from({ length: rows }, () => Array(cols).fill(0));
+    const target = samples.map((sample) => sample.output);
+    for (let r = 0; r < rows; r++) {
+        matrix[r][0] = 1;
+        featureNames.forEach((name, c) => {
+            matrix[r][c + 1] = samples[r].inputs[name];
+        });
+    }
+    return { designMatrix: matrix, target };
+}
+function solveNormalEquation(X, y, lambda) {
+    const rows = X.length;
+    const cols = X[0].length;
+    const XtX = Array.from({ length: cols }, () => Array(cols).fill(0));
+    const Xty = Array(cols).fill(0);
+    for (let i = 0; i < cols; i++) {
+        for (let j = 0; j < cols; j++) {
+            let sum = 0;
+            for (let r = 0; r < rows; r++) {
+                sum += X[r][i] * X[r][j];
+            }
+            XtX[i][j] = sum + (i === j && i !== 0 ? lambda : 0);
+        }
+    }
+    for (let i = 0; i < cols; i++) {
+        let sum = 0;
+        for (let r = 0; r < rows; r++) {
+            sum += X[r][i] * y[r];
+        }
+        Xty[i] = sum;
+    }
+    return gaussianSolve(XtX, Xty);
+}
+function gaussianSolve(matrix, vector) {
+    const n = matrix.length;
+    const augmented = matrix.map((row, idx) => [...row, vector[idx]]);
+    for (let i = 0; i < n; i++) {
+        let pivot = augmented[i][i];
+        if (Math.abs(pivot) < 1e-12) {
+            for (let r = i + 1; r < n; r++) {
+                if (Math.abs(augmented[r][i]) > Math.abs(pivot)) {
+                    [augmented[i], augmented[r]] = [augmented[r], augmented[i]];
+                    pivot = augmented[i][i];
+                    break;
+                }
+            }
+        }
+        if (Math.abs(pivot) < 1e-12) {
+            throw new Error("Matrix is singular or ill-conditioned");
+        }
+        for (let j = i; j <= n; j++) {
+            augmented[i][j] /= pivot;
+        }
+        for (let r = 0; r < n; r++) {
+            if (r === i)
+                continue;
+            const factor = augmented[r][i];
+            for (let c = i; c <= n; c++) {
+                augmented[r][c] -= factor * augmented[i][c];
+            }
+        }
+    }
+    return augmented.map((row) => row[n]);
+}
+function evaluateMetrics(predictions, targets) {
+    let sse = 0;
+    let sae = 0;
+    const mean = targets.reduce((sum, value) => sum + value, 0) / targets.length;
+    let sst = 0;
+    for (let i = 0; i < targets.length; i++) {
+        const error = predictions[i] - targets[i];
+        sse += error * error;
+        sae += Math.abs(error);
+        const deviation = targets[i] - mean;
+        sst += deviation * deviation;
+    }
+    const r2 = sst === 0 ? 1 : 1 - sse / sst;
+    const mae = sae / targets.length;
+    return { r2, mae };
+}

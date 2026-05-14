@@ -1,0 +1,19 @@
+{
+  "meta": {
+    "schema_version": "0.1",
+    "source": "ifc",
+    "created_at": "2026-03-02T18:58:58.745267Z",
+    "ifc_filename": "Furniture_Acoustics_Gotessons_Half-a-Hut-with-front-screens.ifc"
+  },
+  "building": {
+    "name": null
+  },
+  "spaces": [],
+  "envelope": [],
+  "systems": {
+    "heating": null,
+    "ventilation": null,
+    "itp": null
+  },
+  "assumptions": {}
+}

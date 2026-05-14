@@ -1,0 +1,28 @@
+{
+  "meta": {
+    "schema_version": "0.1",
+    "source": "ifc",
+    "created_at": "2026-04-05T03:02:06.670047Z",
+    "ifc_filename": "projekt 33.ifc"
+  },
+  "building": {
+    "name": null
+  },
+  "spaces": [
+    {
+      "id": "0Ism0c0HzCfPR7Kbs7C_Ki",
+      "name": "1",
+      "long_name": "Room",
+      "level": null,
+      "area_m2": null,
+      "volume_m3": null
+    }
+  ],
+  "envelope": [],
+  "systems": {
+    "heating": null,
+    "ventilation": null,
+    "itp": null
+  },
+  "assumptions": {}
+}

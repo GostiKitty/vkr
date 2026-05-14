@@ -1,0 +1,29 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "node",
+    "rootDir": ".",
+    "outDir": "./tests-dist",
+    "strict": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "types": ["node"],
+    "jsx": "react-jsx"
+  },
+  "include": [
+    "tests/**/*.ts",
+    "src/core/ai/**/*.ts",
+    "src/core/networks/**/*.ts",
+    "src/core/thermal/**/*.ts",
+    "src/core/graph/**/*.ts",
+    "src/norms/**/*.ts",
+    "src/entities/geometry/**/*.ts",
+    "src/entities/material/**/*.ts",
+    "src/entities/networks/**/*.ts",
+    "src/features/build/view3d/equipmentMeshes.ts",
+    "src/types/**/*.d.ts"
+  ],
+  "exclude": ["src/core/thermal/thermalModel.ts"]
+}
