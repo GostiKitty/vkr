@@ -129,7 +129,8 @@ test("getRoomPolygonFor3D keeps geometry polygon even when thermal room polygon 
     roomTemperaturesC: Object.fromEntries(sampleBuildingSP50.rooms.map((room) => [room.id, 20])),
   });
   const room = sampleBuildingSP50.rooms[0];
-  const polygon = getRoomPolygonFor3D(room, field);
+  void field;
+  const polygon = getRoomPolygonFor3D(room);
   if (polygon.length !== room.polygon.length) {
     throw new Error("Recovered room polygon should stay on geometry room polygon.");
   }

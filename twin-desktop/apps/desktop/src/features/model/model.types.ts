@@ -1,7 +1,7 @@
 import type { ImportResp } from "../../shared/api/types";
 import type { ImportRequestDiagnostics } from "./model.api";
 
-export interface ModelImportResponse extends ImportResp {}
+export type ModelImportResponse = ImportResp;
 
 export type ImportAttemptStatus = "pending" | "success" | "error";
 

@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import type { SimulationFrame, ThermalGraph } from "../../entities/twin/types";
 import { useTwinStore } from "../../entities/twin/twin.store";
+import { EngineeringCallout, EngineeringMetricTile, EngineeringSectionHeader, TemperatureScaleLegend } from "../../shared/ui";
 import { Tabs } from "../../shared/ui";
 import SpaceDetails from "../twin/SpaceDetails";
 import SpaceList from "../twin/SpaceList";
@@ -17,10 +18,22 @@ interface ResultsPanelProps {
 }
 
 const tabItems = [
-  { id: "overview", label: "Обзор" },
-  { id: "simulation", label: "Расчёт" },
-  { id: "view3d", label: "3D-вид" },
-] as const;
+  {
+    id: "overview" as const,
+    label: "Помещения",
+    hint: "Список зон и карточка выбранного помещения",
+  },
+  {
+    id: "simulation" as const,
+    label: "Расчёт",
+    hint: "Зональная RC-модель и ключевые KPI по конструктору",
+  },
+  {
+    id: "view3d" as const,
+    label: "3D и карта",
+    hint: "Объёмная модель и условная тепловая окраска по зональным температурам (не CFD)",
+  },
+];
 
 export function ResultsPanel({ projectId }: ResultsPanelProps) {
   const frames = useTwinStore((state) => state.simulationFrames);
@@ -36,6 +49,18 @@ export function ResultsPanel({ projectId }: ResultsPanelProps) {
 
   const currentFrame = frames[timeIndex] ?? null;
   const timeLabel = currentFrame ? formatTime(currentFrame.time) : "—";
+
+  const frameTempRange = useMemo(() => {
+    const t = currentFrame?.temperatures;
+    if (!t) {
+      return { min: null as number | null, max: null as number | null };
+    }
+    const vals = Object.values(t).filter((v): v is number => Number.isFinite(v));
+    if (!vals.length) {
+      return { min: null, max: null };
+    }
+    return { min: Math.min(...vals), max: Math.max(...vals) };
+  }, [currentFrame]);
 
   useEffect(() => {
     if (!playing || frames.length < 2) {
@@ -73,28 +98,68 @@ export function ResultsPanel({ projectId }: ResultsPanelProps) {
         <SpaceDetails />
       </div>
     ),
-    simulation: <SimulationPanel projectId={projectId} projectKind={projectKind} />,
+    simulation: (
+      <SimulationPanel
+        projectId={projectId}
+        projectKind={projectKind}
+        onShowOnModel={() => setActiveTab("view3d")}
+        onGenerateReport={() =>
+          document.getElementById("report-generator-anchor")?.scrollIntoView({ behavior: "smooth", block: "start" })
+        }
+      />
+    ),
     view3d: (
       <div className="space-y-4">
-        <SpaceViewer3D heatmap caption="Температурная карта" height={380} />
+        <SpaceViewer3D heatmap caption="Температурная визуализация по зонам" height={420} showLegend showFitControl />
         <GraphPanel graph={thermalGraph} frame={currentFrame} selectedId={selectedSpaceId} onSelect={selectSpace} />
       </div>
     ),
   };
 
+  const simulationTabDisabled = projectKind === "engine" && !projectId;
+
   return (
     <div className="flex min-h-0 flex-col gap-6">
-      <div className="shrink-0 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <p className="text-xs uppercase tracking-wide text-slate-500">Просмотр результатов</p>
-            <h3 className="text-xl font-semibold text-slate-900">Температура во времени</h3>
-            <p className="text-sm text-slate-500">Используйте таймлайн, чтобы просматривать распределение температур по шагам расчёта.</p>
-          </div>
-          <div className="flex flex-col gap-3 lg:min-w-[320px]">
-            <div className="flex items-center justify-between text-sm font-medium text-slate-600">
-              <span>Время</span>
-              <span>{timeLabel}</span>
+      <div className="ui-panel shrink-0 p-5 ring-1 ring-[color:var(--accent-muted)]/30 sm:p-6">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+          <EngineeringSectionHeader
+            kicker="Результаты"
+            title="Обзор после расчёта"
+            subtitle="Сдвигайте момент времени, чтобы увидеть, как меняются зональные температуры. Вкладки ниже разделяют помещения, численный расчёт и 3D с тепловой картой."
+          />
+          {frames.length > 0 ? (
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <EngineeringMetricTile
+                label="Кадры по времени"
+                value={frames.length}
+                hint="Дискретные шаги после зонального расчёта"
+                tone="neutral"
+              />
+              <EngineeringMetricTile
+                label="Текущий кадр"
+                value={timeIndex + 1}
+                unit={` / ${frames.length}`}
+                hint="Позиция на временной оси"
+                tone="neutral"
+              />
+              <EngineeringMetricTile
+                label="Мин. T по зонам (кадр)"
+                value={frameTempRange.min == null ? "—" : formatTemperature(frameTempRange.min)}
+                hint="Минимум по всем зонам в выбранный момент"
+                tone="neutral"
+              />
+              <EngineeringMetricTile
+                label="Макс. T по зонам (кадр)"
+                value={frameTempRange.max == null ? "—" : formatTemperature(frameTempRange.max)}
+                hint="Максимум по всем зонам в выбранный момент"
+                tone="neutral"
+              />
+            </div>
+          ) : null}
+          <div className="mt-5 flex w-full flex-col gap-3 xl:max-w-md">
+            <div className="flex items-center justify-between text-sm font-medium text-[color:var(--text-muted)]">
+              <span>Момент времени</span>
+              <span className="tabular-nums text-[color:var(--text-base)]">{timeLabel}</span>
             </div>
             <input
               type="range"
@@ -102,43 +167,73 @@ export function ResultsPanel({ projectId }: ResultsPanelProps) {
               max={Math.max(frames.length - 1, 0)}
               value={timeIndex}
               onChange={handleSliderChange}
-              className="w-full accent-slate-900"
+              className="w-full accent-[color:var(--accent-base)]"
+              disabled={!frames.length}
             />
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 onClick={handlePlayToggle}
                 disabled={!frames.length}
-                className={`rounded-full px-4 py-2 text-sm font-semibold text-white transition ${
-                  playing ? "bg-rose-500 hover:bg-rose-600" : "bg-slate-900 hover:bg-slate-800"
-                }`}
+                className={
+                  !frames.length
+                    ? "cursor-not-allowed rounded-full px-4 py-2 text-sm font-semibold opacity-45 ui-btn-secondary"
+                    : playing
+                      ? "ui-btn-secondary rounded-full px-4 py-2 text-sm"
+                      : "ui-btn-primary rounded-full px-4 py-2 text-sm"
+                }
               >
-                {playing ? "Пауза" : "Пуск"}
+                {playing ? "Пауза" : "Пуск по шагам"}
               </button>
-              <span className="text-xs uppercase tracking-wide text-slate-500">
-                {frames.length ? `${frames.length} шагов` : "Нет данных"}
+              <span className="text-xs text-[color:var(--text-soft)]">
+                {frames.length ? `${frames.length} шагов` : "Сначала выполните расчёт на шаге «Расчёт» студии"}
               </span>
+              <button
+                type="button"
+                onClick={() => setActiveTab("view3d")}
+                className="ui-btn-secondary ml-auto px-3 py-1.5 text-xs"
+              >
+                Показать на модели
+              </button>
             </div>
+            {frameTempRange.min != null && frameTempRange.max != null && (
+              <p className="text-xs text-[color:var(--text-muted)]">
+                В выбранный момент по зонам:{" "}
+                <span className="font-semibold tabular-nums text-[color:var(--text-base)]">
+                  {formatTemperature(frameTempRange.min)} … {formatTemperature(frameTempRange.max)}
+                </span>
+              </p>
+            )}
           </div>
         </div>
       </div>
 
       <div className="shrink-0">
         <Tabs<WorkspaceTab>
-        tabs={tabItems.map((item) => ({
-          ...item,
-          disabled: item.id === "simulation" && !projectId,
-        }))}
-        value={activeTab}
-        onChange={setActiveTab}
+          tabs={tabItems.map((item) => ({
+            ...item,
+            disabled: item.id === "simulation" ? simulationTabDisabled : false,
+          }))}
+          value={activeTab}
+          onChange={setActiveTab}
         />
+        <p className="mt-2 text-xs text-[color:var(--text-soft)]">
+          Подсказка: наведите на вкладку — краткое описание. Сценарии «худший / медиана / лучший» для нестационарного анализа настраиваются в конструкторе (ВКР).
+        </p>
       </div>
 
-      <div className="min-h-0 rounded-3xl border border-slate-200 bg-white/80 p-4 shadow-sm transition-all duration-300">
+      <EngineeringCallout variant="info" title="Температурная карта и 3D">
+        <p>
+          Температурная карта построена по зональной модели и не является CFD. Окраска отражает усреднённые по объёму зоны
+          температуры RC-модели. Колёсико мыши — масштаб, перетаскивание — обзор.
+        </p>
+      </EngineeringCallout>
+
+      <div className="ui-panel min-h-0 p-4 sm:p-5 xl:p-6">
         {tabContent[activeTab]}
       </div>
 
-      <div className="shrink-0">
+      <div id="report-generator-anchor" className="shrink-0 scroll-mt-28">
         <ReportGenerator />
       </div>
     </div>
@@ -158,8 +253,8 @@ function GraphPanel({
 }) {
   if (!graph || !graph.nodes.length) {
     return (
-      <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-4 text-sm text-slate-500">
-        Тепловой граф появится после загрузки модели и запуска расчёта.
+      <div className="rounded-2xl border border-dashed border-[color:var(--border-base)] bg-[color:var(--surface-muted)] p-4 text-sm text-[color:var(--text-muted)]">
+        Тепловой граф появится после загрузки модели и появления кадров симуляции в студии.
       </div>
     );
   }
@@ -182,8 +277,11 @@ function GraphPanel({
   positions.set("outdoor", { x: width / 2, y: 40 });
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-      <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">Тепловой граф</h3>
+    <div className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-elevated)] p-4 shadow-sm">
+      <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+        <h3 className="text-sm font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">Тепловой граф зон</h3>
+        <TemperatureScaleLegend caption="Те же 15…30 °C, что и для цвета узлов (при отсутствии данных — серая заливка)." />
+      </div>
       <div className="w-full overflow-x-auto">
         <svg width={width} height={height} className="max-w-full">
           {edges.map((edge) => {
@@ -199,9 +297,9 @@ function GraphPanel({
                 y1={from.y}
                 x2={to.x}
                 y2={to.y}
-                stroke="#cbd5f5"
+                stroke="var(--chart-edge)"
                 strokeWidth={Math.max(1, edge.conductance * 4)}
-                strokeOpacity={0.8}
+                strokeOpacity={0.85}
               />
             );
           })}
@@ -224,14 +322,14 @@ function GraphPanel({
                   cy={pos.y}
                   r={isSelected ? 18 : 14}
                   fill={color}
-                  stroke={node.type === "space" ? "#0f172a" : "#64748b"}
+                  stroke={node.type === "space" ? "var(--text-base)" : "var(--text-soft)"}
                   strokeWidth={node.type === "space" ? 2 : 1}
                   opacity={node.type === "space" ? 0.95 : 0.7}
                 />
-                <text x={pos.x} y={pos.y + 30} textAnchor="middle" className="text-xs font-medium fill-slate-600">
+                <text x={pos.x} y={pos.y + 30} textAnchor="middle" className="text-xs font-medium fill-[color:var(--text-muted)]">
                   {node.label}
                 </text>
-                <text x={pos.x} y={pos.y + 44} textAnchor="middle" className="text-[10px] fill-slate-400">
+                <text x={pos.x} y={pos.y + 44} textAnchor="middle" className="text-[10px] fill-[color:var(--text-soft)]">
                   {formatTemperature(temp)}
                 </text>
               </g>

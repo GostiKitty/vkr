@@ -23,66 +23,69 @@ export function DebugConsole() {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-end bg-black/30" onClick={close}>
+    <div
+      className="ui-backdrop-fade fixed inset-0 z-50 flex items-start justify-end bg-black/40 backdrop-blur-[2px]"
+      onClick={close}
+      role="presentation"
+    >
       <div
-        className="h-full w-full max-w-3xl bg-slate-900 text-slate-50 shadow-xl"
+        className="ui-drawer-panel flex h-full w-full max-w-3xl flex-col border-l border-[color:var(--border-strong)] bg-[color:var(--surface-subtle)] text-[color:var(--text-base)] shadow-[var(--shadow-overlay)]"
         onClick={(event) => event.stopPropagation()}
       >
-        <header className="flex items-center justify-between border-b border-slate-700 px-6 py-4">
+        <header className="flex shrink-0 items-center justify-between border-b border-[color:var(--border-base)] px-6 py-4">
           <div>
-            <h2 className="text-lg font-semibold">Консоль отладки</h2>
-            <p className="text-sm text-slate-300">Последние HTTP-запросы приложения</p>
-            <p className="mt-1 text-xs text-slate-400">
-              Режим: <span className="font-semibold text-slate-100">{formatProjectKind(projectKind)}</span>
+            <h2 className="text-lg font-semibold text-[color:var(--text-base)]">Консоль отладки</h2>
+            <p className="text-sm text-[color:var(--text-muted)]">Последние HTTP-запросы приложения</p>
+            <p className="mt-1 text-xs text-[color:var(--text-soft)]">
+              Режим: <span className="font-semibold text-[color:var(--text-base)]">{formatProjectKind(projectKind)}</span>
               {" · "}
-              Проект: <span className="font-semibold text-slate-100">{projectId ?? "—"}</span>
+              Проект: <span className="font-semibold text-[color:var(--text-base)]">{projectId ?? "—"}</span>
             </p>
           </div>
           <div className="flex gap-2">
             <button
               type="button"
               onClick={clear}
-              className="rounded-lg border border-slate-600 px-3 py-1 text-sm text-slate-200 hover:bg-slate-800"
+              className="ui-btn-secondary rounded-lg px-3 py-1.5 text-sm"
             >
               Очистить
             </button>
-            <button
-              type="button"
-              onClick={close}
-              className="rounded-lg border border-slate-600 px-3 py-1 text-sm text-slate-200 hover:bg-slate-800"
-            >
+            <button type="button" onClick={close} className="ui-btn-secondary rounded-lg px-3 py-1.5 text-sm">
               Закрыть
             </button>
           </div>
         </header>
-        <div className="h-[calc(100%-80px)] overflow-y-auto px-6 py-4 text-sm">
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4 text-sm">
           {displayedLogs.length === 0 ? (
-            <p className="text-slate-400">Запросов пока нет.</p>
+            <p className="text-[color:var(--text-soft)]">Запросов пока нет.</p>
           ) : (
             <ul className="space-y-3">
               {displayedLogs.map((log) => (
-                <li key={log.id} className="rounded-xl border border-slate-700 bg-slate-800 p-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400">
+                <li
+                  key={log.id}
+                  className="ui-hover-lift rounded-xl border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] p-3 transition-colors hover:border-[color:var(--border-base)]"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[color:var(--text-soft)]">
                     <span>{new Date(log.startedAt).toLocaleTimeString()}</span>
                     {log.durationMs !== undefined && <span>{log.durationMs.toFixed(0)} мс</span>}
                   </div>
-                  <div className="mt-1 text-base font-semibold text-slate-100">
-                    <span className="mr-2 rounded-full border border-slate-600 px-2 py-0.5 text-xs uppercase tracking-wide">
+                  <div className="mt-1 text-base font-semibold text-[color:var(--text-base)]">
+                    <span className="mr-2 rounded-full border border-[color:var(--border-base)] bg-[color:var(--surface-elevated)] px-2 py-0.5 text-xs uppercase tracking-wide text-[color:var(--text-muted)]">
                       {log.method}
                     </span>
-                    <span className="break-all text-slate-50/90">{log.url}</span>
+                    <span className="break-all text-[color:var(--text-muted)]">{log.url}</span>
                   </div>
-                  <div className="mt-1 text-sm text-slate-300">
+                  <div className="mt-1 text-sm text-[color:var(--text-muted)]">
                     Статус:{" "}
                     {log.status !== undefined ? (
-                      <span className={log.ok ? "text-emerald-400" : "text-red-400"}>{log.status}</span>
+                      <span className={log.ok ? "text-[color:var(--success-fg)]" : "text-[color:var(--danger-fg)]"}>{log.status}</span>
                     ) : (
                       "—"
                     )}
-                    {log.error && <span className="ml-2 text-red-300">{log.error}</span>}
+                    {log.error && <span className="ml-2 text-[color:var(--danger-fg)]">{log.error}</span>}
                   </div>
                   {log.responseSnippet && (
-                    <pre className="mt-2 max-h-36 overflow-y-auto rounded-lg bg-slate-900/60 p-2 text-xs text-slate-200">
+                    <pre className="mt-2 max-h-36 overflow-y-auto rounded-lg border border-[color:var(--border-soft)] bg-[color:var(--surface-base)] p-2 font-mono text-xs text-[color:var(--text-muted)]">
                       {log.responseSnippet}
                     </pre>
                   )}
@@ -91,7 +94,7 @@ export function DebugConsole() {
             </ul>
           )}
           {logs.length > displayedLogs.length && (
-            <p className="mt-4 text-center text-xs uppercase tracking-wide text-slate-500">
+            <p className="mt-4 text-center text-xs uppercase tracking-wide text-[color:var(--text-soft)]">
               Показаны последние 20 запросов
             </p>
           )}

@@ -155,7 +155,7 @@ type MutableNode = {
   equipmentIds: Set<string>;
 };
 
-const HEATING_SOURCE_TYPES = new Set<Equipment["type"]>(["boiler", "pump"]);
+const HEATING_SOURCE_TYPES = new Set<Equipment["type"]>(["boiler", "pump", "heat_exchanger"]);
 const HEATING_CONSUMER_TYPES = new Set<Equipment["type"]>(["radiator", "fancoil"]);
 
 export function buildHeatingModelSnapshot(model: BuildingModel): HeatingModelSnapshot {

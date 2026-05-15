@@ -439,6 +439,10 @@ function selectPipeConnections(equipment, candidates) {
             ]);
         case "boiler":
         case "pump":
+        case "heat_exchanger":
+        case "elevator":
+        case "dirt_separator":
+        case "expansion_tank":
             return uniqueIds([
                 roleGroups.supply[0]?.id ?? "",
                 roleGroups.return[0]?.id ?? "",

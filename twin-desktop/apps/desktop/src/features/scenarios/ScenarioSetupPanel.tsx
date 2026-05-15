@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { notifyInfo } from "../../entities/notifications/notification.store";
 import { useWorkflowStore } from "../../entities/workflow/workflow.store";
+import { EngineeringCallout, EngineeringSectionHeader } from "../../shared/ui";
 
 const clamp = (value: number, min: number, max: number): number => {
   if (Number.isNaN(value)) {
@@ -76,15 +77,22 @@ export function ScenarioSetupPanel() {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
-      <header>
-        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Сценарий эксплуатации</p>
-        <h3 className="text-2xl font-semibold text-slate-900">Климат, уставки и нагрузки</h3>
-        <p className="text-sm text-slate-500">Укажите условия, по которым будут формироваться погодные профили и графики использования.</p>
-      </header>
+    <form onSubmit={handleSubmit} className="ui-panel space-y-5 p-4 sm:p-6">
+      <EngineeringSectionHeader
+        kicker="Шаг 3 · сценарий"
+        title="Климат, уставки и нагрузки"
+        subtitle="Входы для погодного профиля и RC-модели: уставки отопления, доли занятости, тепловыделения на м² и воздухообмен ACH (кратность воздуха в час)."
+      />
 
-      <section className="space-y-3 rounded-2xl border border-slate-100 bg-slate-50/70 p-4">
-        <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Климат</h4>
+      <EngineeringCallout variant="info" title="Подсказка по ACH">
+        <p>
+          ACH задаёт эквивалентную проводимость инфильтрации в RC (сенсибельный обмен с наружным воздухом). Это упрощение: не
+          разделяет притоки по зонам и не заменяет вентиляционный расчёт.
+        </p>
+      </EngineeringCallout>
+
+      <section className="ui-section space-y-3">
+        <h4 className="text-xs font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">Климат</h4>
         <div className="grid gap-3 sm:grid-cols-3">
           <NumberField label="Базовая температура, °C" value={baseC} onChange={setBaseC} step={0.5} />
           <NumberField label="Амплитуда, °C" value={amplitudeC} min={0} onChange={setAmplitudeC} step={0.5} />
@@ -92,8 +100,8 @@ export function ScenarioSetupPanel() {
         </div>
       </section>
 
-      <section className="space-y-3 rounded-2xl border border-slate-100 bg-slate-50/70 p-4">
-        <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Уставки</h4>
+      <section className="ui-section space-y-3">
+        <h4 className="text-xs font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">Уставки</h4>
         <div className="grid gap-3 sm:grid-cols-2">
           <NumberField label="День, °C" value={day} onChange={setDay} step={0.5} />
           <NumberField label="Ночь, °C" value={night} onChange={setNight} step={0.5} />
@@ -102,8 +110,8 @@ export function ScenarioSetupPanel() {
         </div>
       </section>
 
-      <section className="space-y-3 rounded-2xl border border-slate-100 bg-slate-50/70 p-4">
-        <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Тепловые поступления</h4>
+      <section className="ui-section space-y-3">
+        <h4 className="text-xs font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">Тепловые поступления</h4>
         <div className="grid gap-3 sm:grid-cols-2">
           <NumberField label="День, Вт/м²" value={dayGain} min={0} onChange={setDayGain} step={0.5} />
           <NumberField label="Ночь, Вт/м²" value={nightGain} min={0} onChange={setNightGain} step={0.5} />
@@ -116,14 +124,11 @@ export function ScenarioSetupPanel() {
         <NumberField label="Инфильтрация, ACH" value={infiltration} min={0} step={0.1} onChange={(v) => setInfiltration(Math.max(0, v))} />
       </section>
 
-      <button
-        type="submit"
-        className="w-full rounded-2xl bg-slate-900 px-6 py-3 text-sm font-semibold text-white shadow hover:bg-slate-800"
-      >
+      <button type="submit" className="ui-btn-primary w-full px-6 py-3 text-sm">
         Сохранить сценарий
       </button>
 
-      {justSaved && <p className="text-sm text-emerald-600">Сценарий сохранён.</p>}
+      {justSaved && <p className="text-sm text-[color:var(--success-fg)]">Сценарий сохранён.</p>}
     </form>
   );
 }
@@ -144,7 +149,7 @@ function NumberField({
   max?: number;
 }) {
   return (
-    <label className="text-xs font-semibold text-slate-600">
+    <label className="text-xs font-semibold text-[color:var(--text-muted)]">
       {label}
       <input
         type="number"
@@ -167,7 +172,7 @@ function NumberField({
           }
           onChange(next);
         }}
-        className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900"
+        className="ui-field mt-1 w-full px-3 py-2 text-sm"
       />
     </label>
   );

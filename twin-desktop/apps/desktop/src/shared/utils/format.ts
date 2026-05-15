@@ -11,6 +11,7 @@ export function formatNumber(value: NullableNumber, options?: FormatConfig): str
     return options?.fallback ?? "—";
   }
   const { fallback, ...intlOptions } = options ?? {};
+  void fallback;
   return new Intl.NumberFormat(LOCALE, {
     minimumFractionDigits: 0,
     maximumFractionDigits: 1,

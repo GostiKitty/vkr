@@ -503,7 +503,7 @@ function buildThermalNetworkContext(
                 return (
                   equipment &&
                   equipmentState?.effectiveState === "on" &&
-                  (equipment.type === "boiler" || equipment.type === "pump")
+                  (equipment.type === "boiler" || equipment.type === "pump" || equipment.type === "heat_exchanger")
                 );
               }) ?? false;
             return sum + flowFactor * tempFactor * (hasActiveSource ? 1 : 0.35);
@@ -578,7 +578,13 @@ function buildThermalNetworkContext(
             if (!equipment || !state || state.effectiveState !== "on") {
               return sum;
             }
-            if (equipment.type === "boiler" || equipment.type === "pump" || equipment.type === "radiator" || equipment.type === "fancoil") {
+            if (
+              equipment.type === "boiler" ||
+              equipment.type === "pump" ||
+              equipment.type === "heat_exchanger" ||
+              equipment.type === "radiator" ||
+              equipment.type === "fancoil"
+            ) {
               return sum + 1;
             }
             return sum + 0.25;
@@ -594,7 +600,7 @@ function buildThermalNetworkContext(
         return (
           equipment &&
           equipmentState?.effectiveState === "on" &&
-          (equipment.type === "boiler" || equipment.type === "pump")
+          (equipment.type === "boiler" || equipment.type === "pump" || equipment.type === "heat_exchanger")
         );
       }) ?? false;
     if (supportFactor <= 0 || (pipe.type !== "heating_supply" && pipe.type !== "heating_return")) {
@@ -719,6 +725,14 @@ function resolveEquipmentPassiveEmissionBaseW(item: BuildingModel["equipment"][n
       return nominalPower ? Math.min(Math.max(nominalPower * 0.06, 45), 120) : 90;
     case "boiler":
       return nominalPower ? Math.min(Math.max(nominalPower * 0.015, 120), 260) : 220;
+    case "heat_exchanger":
+      return nominalPower ? Math.min(Math.max(nominalPower * 0.004, 60), 140) : 80;
+    case "elevator":
+      return 24;
+    case "expansion_tank":
+      return 12;
+    case "dirt_separator":
+      return 32;
     case "diffuser":
       return 45;
     case "sensor":

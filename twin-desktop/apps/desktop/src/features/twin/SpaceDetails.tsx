@@ -16,21 +16,21 @@ export function SpaceDetails() {
   const spaceIndex = space ? twin?.spaces?.findIndex((item) => item.id === space.id) ?? 0 : 0;
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-      <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">Детали помещения</h3>
+    <div className="ui-panel ui-hover-lift rounded-2xl p-4">
+      <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">Детали помещения</h3>
 
       {loading ? (
         <div className="space-y-3">
           {Array.from({ length: 5 }).map((_, idx) => (
-            <div key={idx} className="h-10 animate-pulse rounded-xl bg-slate-100" />
+            <div key={idx} className="ui-skeleton h-10 rounded-xl" />
           ))}
         </div>
       ) : !space ? (
-        <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-sm text-slate-500 transition-all duration-300">
+        <div className="animate-ui-pop rounded-xl border border-dashed border-[color:var(--border-base)] bg-[color:var(--surface-muted)] p-6 text-center text-sm text-[color:var(--text-muted)]">
           Выберите помещение, чтобы увидеть детали.
         </div>
       ) : (
-        <dl className="divide-y divide-slate-100 text-sm text-slate-700">
+        <dl className="divide-y divide-[color:var(--border-soft)] text-sm text-[color:var(--text-muted)]">
           <InfoRow label="ID" value={space.id} />
           <InfoRow label="Название" value={getSpaceDisplayName(space, spaceIndex)} />
           <InfoRow label="Полное название" value={space.long_name ?? "—"} />
@@ -46,9 +46,9 @@ export function SpaceDetails() {
 
 function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="flex items-center justify-between gap-6 py-3">
-      <dt className="text-xs uppercase tracking-wide text-slate-500">{label}</dt>
-      <dd className="text-right text-base text-slate-900">{value}</dd>
+    <div className="flex items-center justify-between gap-6 py-3 transition-colors hover:bg-[color:var(--surface-muted)]/60">
+      <dt className="text-xs uppercase tracking-wide text-[color:var(--text-soft)]">{label}</dt>
+      <dd className="text-right text-base font-medium tabular-nums text-[color:var(--text-base)]">{value}</dd>
     </div>
   );
 }

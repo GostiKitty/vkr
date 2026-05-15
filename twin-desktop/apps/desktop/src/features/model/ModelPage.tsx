@@ -19,17 +19,17 @@ const statusTheme: Record<
   { badge: string; text: string; description: string }
 > = {
   pending: {
-    badge: "bg-amber-100 text-amber-800",
+    badge: "bg-[color:var(--warning-bg)] text-[color:var(--warning-fg)] ring-1 ring-[color:var(--warning-border)]",
     text: "В обработке",
     description: "Ожидаем ответ",
   },
   success: {
-    badge: "bg-emerald-100 text-emerald-700",
+    badge: "bg-[color:var(--success-bg)] text-[color:var(--success-fg)] ring-1 ring-[color:var(--success-border)]",
     text: "Готово",
     description: "Проект сохранён",
   },
   error: {
-    badge: "bg-red-100 text-red-700",
+    badge: "bg-[color:var(--danger-bg)] text-[color:var(--danger-fg)] ring-1 ring-[color:var(--danger-border)]",
     text: "Ошибка",
     description: "Подробности в сообщении",
   },
@@ -102,7 +102,7 @@ export function ModelPage() {
 
   const handleImport = useCallback(async () => {
     if (!engineConfigured) {
-      notifyError("Укажите URL двигателя в разделе «Настройки», чтобы импортировать IFC.");
+      notifyError("Укажите URL движка в разделе «Настройки», чтобы импортировать IFC.");
       return;
     }
     if (!file || isLoading) {
@@ -116,7 +116,7 @@ export function ModelPage() {
     if (!engineOnline) {
       const base = engineBase || "http://127.0.0.1:8010";
       notifyError(
-        `Двигатель недоступен. Убедитесь, что сервис по адресу ${base} запущен и эндпоинт /health отвечает.\n` +
+        `Движок недоступен. Убедитесь, что сервис по адресу ${base} запущен и эндпоинт /health отвечает.\n` +
           "1) Запустите backend (uvicorn main:app --reload).\n2) Проверьте URL в разделе «Настройки».\n3) Повторите импорт."
       );
       setUploadingFileName(null);
@@ -159,20 +159,20 @@ export function ModelPage() {
   }, [combinedError, engineConfigured, file]);
 
   return (
-    <section className="space-y-6 rounded-3xl border border-slate-200 bg-white/60 p-6 shadow-sm">
+    <section className="ui-panel space-y-6 p-6 sm:p-7">
       <header className="space-y-2">
-        <p className="text-sm font-semibold uppercase tracking-wide text-slate-500">Импорт IFC</p>
-        <h2 className="text-3xl font-semibold text-slate-900">Подключение цифрового двойника</h2>
-        <p className="text-sm text-slate-500">
-          Загрузите IFC-файл или перетащите его сюда. 
+        <p className="ui-kicker">Импорт IFC</p>
+        <h2 className="text-3xl font-semibold tracking-tight text-[color:var(--text-base)]">Подключение цифрового двойника</h2>
+        <p className="text-sm text-[color:var(--text-muted)]">
+          Загрузите IFC-файл или перетащите его сюда.
         </p>
         {!engineConfigured && (
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[color:var(--danger-border)] bg-[color:var(--danger-bg)] p-4 text-sm text-[color:var(--danger-fg)]">
             <span>Движок не настроен. Укажите URL в разделе «Настройки», чтобы включить импорт IFC.</span>
             <button
               type="button"
               onClick={() => navigate("/settings")}
-              className="rounded-full border border-red-300 px-4 py-1 text-xs font-semibold text-red-700 hover:border-red-400"
+              className="ui-btn-secondary shrink-0 border-[color:var(--danger-border)] px-4 py-1 text-xs"
             >
               Открыть настройки
             </button>
@@ -187,8 +187,8 @@ export function ModelPage() {
           disabled={!debugInfo}
           className={`rounded-full border px-4 py-1.5 text-xs font-semibold transition ${
             debugInfo
-              ? "border-slate-300 bg-white text-slate-600 hover:border-slate-500"
-              : "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400"
+              ? "ui-control text-[color:var(--text-muted)]"
+              : "cursor-not-allowed border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] text-[color:var(--text-soft)]"
           }`}
         >
           Отладка запроса
@@ -196,23 +196,23 @@ export function ModelPage() {
       </div>
 
       <div className="grid gap-5 lg:grid-cols-[1.2fr,0.8fr]">
-        <div className="space-y-4 rounded-3xl border border-slate-100 bg-slate-50/60 p-5 shadow-inner">
-          <label className="flex flex-col gap-2 rounded-2xl border border-dashed border-slate-300 bg-white/80 p-5 text-sm text-slate-600 transition hover:border-slate-400">
-            <span className="text-base font-semibold text-slate-900">Файл IFC</span>
+        <div className="ui-section space-y-4 shadow-inner">
+          <label className="flex flex-col gap-2 rounded-2xl border border-dashed border-[color:var(--border-base)] bg-[color:var(--surface-base)] p-5 text-sm text-[color:var(--text-muted)] transition hover:border-[color:var(--accent-base)]/35">
+            <span className="text-base font-semibold text-[color:var(--text-base)]">Файл IFC</span>
             <input
               ref={fileInputRef}
               type="file"
               accept=".ifc"
               onChange={handleFileChange}
               disabled={isLoading || blocked}
-              className="text-sm text-slate-600 file:mr-3 file:cursor-pointer file:rounded-xl file:border file:border-slate-200 file:bg-white file:px-4 file:py-2 file:text-sm file:font-semibold file:text-slate-700 file:transition file:hover:border-slate-400"
+              className="text-sm text-[color:var(--text-muted)] file:mr-3 file:cursor-pointer file:rounded-xl file:border file:border-[color:var(--border-soft)] file:bg-[color:var(--surface-elevated)] file:px-4 file:py-2 file:text-sm file:font-semibold file:text-[color:var(--text-base)] file:transition file:hover:border-[color:var(--accent-base)]/40"
             />
-            <span className="text-xs text-slate-500">
-              Максимальный размер {MAX_FILE_SIZE_MB} МБ 
+            <span className="text-xs text-[color:var(--text-soft)]">
+              Максимальный размер {MAX_FILE_SIZE_MB} МБ
             </span>
           </label>
 
-          <label className="flex flex-col gap-1 text-sm font-medium text-slate-600">
+          <label className="flex flex-col gap-1 text-sm font-medium text-[color:var(--text-muted)]">
             Название проекта
             <input
               type="text"
@@ -220,21 +220,21 @@ export function ModelPage() {
               placeholder="Например, Бизнес-центр Север"
               onChange={(event) => setProjectName(event.target.value)}
               disabled={isLoading}
-              className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-base text-slate-900 shadow-inner transition focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200 disabled:bg-slate-100"
+              className="ui-field px-4 py-2 text-base shadow-inner disabled:opacity-60"
             />
           </label>
 
-          <div className="rounded-2xl border border-slate-200 bg-white/90 p-4 text-sm text-slate-600">
-            <p className={combinedError ? "text-red-600" : "text-slate-600"}>{helperText}</p>
+          <div className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-elevated)] p-4 text-sm">
+            <p className={combinedError ? "text-[color:var(--danger-fg)]" : "text-[color:var(--text-muted)]"}>{helperText}</p>
             {uploadingFileName && (
-              <p className="mt-1 text-xs text-slate-500">
+              <p className="mt-1 text-xs text-[color:var(--text-soft)]">
                 Отправляю: {uploadingFileName} ({progressPercent}%)
               </p>
             )}
             {(isLoading || progress > 0) && (
-              <div className="mt-3 h-2 rounded-full bg-slate-100">
+              <div className="mt-3 h-2 rounded-full bg-[color:var(--surface-strong)]">
                 <div
-                  className="h-full rounded-full bg-slate-900 transition-all duration-200"
+                  className="h-full rounded-full bg-[color:var(--accent-base)] transition-all duration-200"
                   style={{ width: `${progressPercent}%` }}
                 />
               </div>
@@ -257,11 +257,7 @@ export function ModelPage() {
                 type="button"
                 onClick={handleImport}
                 disabled={disabled}
-                className={`rounded-2xl px-6 py-3 text-base font-semibold ${
-                  disabled
-                    ? "cursor-not-allowed bg-slate-200 text-slate-500"
-                    : "bg-slate-900 text-white shadow-lg shadow-slate-900/20 transition hover:bg-slate-800"
-                }`}
+                className={disabled ? "cursor-not-allowed rounded-2xl px-6 py-3 text-base font-semibold opacity-45 ui-btn-secondary" : "ui-btn-primary rounded-2xl px-6 py-3 text-base"}
               >
                 {isLoading ? "Загружаю…" : "Импортировать IFC"}
               </button>
@@ -277,7 +273,7 @@ export function ModelPage() {
                   fileInputRef.current.value = "";
                 }
               }}
-              className="rounded-2xl border border-slate-300 px-5 py-3 text-base font-semibold text-slate-600 transition hover:border-slate-500 disabled:cursor-not-allowed disabled:opacity-50"
+              className="ui-btn-secondary rounded-2xl px-5 py-3 text-base disabled:cursor-not-allowed disabled:opacity-50"
             >
               Сбросить выбор
             </button>
@@ -285,34 +281,34 @@ export function ModelPage() {
         </div>
 
         <div className="space-y-4">
-          <div className="rounded-3xl border border-slate-100 bg-white/90 p-5 shadow-sm">
-            <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Последний результат</h3>
+          <div className="ui-panel-muted p-5 shadow-sm">
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">Последний результат</h3>
             {result ? (
-              <div className="mt-3 space-y-2 text-base text-slate-700">
+              <div className="mt-3 space-y-2 text-base text-[color:var(--text-muted)]">
                 <p>
-                  <span className="text-slate-500">ID проекта:</span>{" "}
-                  <span className="font-semibold text-slate-900">{result.project_id}</span>
+                  <span className="text-[color:var(--text-soft)]">Идентификатор проекта:</span>{" "}
+                  <span className="font-mono font-semibold text-[color:var(--text-base)]">{result.project_id}</span>
                 </p>
                 <p>
-                  <span className="text-slate-500">Помещений:</span>{" "}
-                  <span className="font-semibold text-slate-900">{result.spaces_count}</span>
+                  <span className="text-[color:var(--text-soft)]">Помещений:</span>{" "}
+                  <span className="font-semibold text-[color:var(--text-base)]">{result.spaces_count}</span>
                 </p>
                 <p>
-                  <span className="text-slate-500">Эндпоинт:</span>{" "}
-                  <span className="font-semibold text-slate-900">{lastEndpoint ?? "—"}</span>
+                  <span className="text-[color:var(--text-soft)]">Эндпоинт:</span>{" "}
+                  <span className="font-mono text-sm font-semibold text-[color:var(--text-base)]">{lastEndpoint ?? "—"}</span>
                 </p>
-                <p className="text-sm text-slate-500">ID автоматически сохранён и доступен в верхней панели.</p>
+                <p className="text-sm text-[color:var(--text-soft)]">Идентификатор сохранён и отображается в верхней панели.</p>
               </div>
             ) : (
-              <p className="mt-3 text-sm text-slate-500">Загрузите IFC, чтобы увидеть сводку по проекту.</p>
+              <p className="mt-3 text-sm text-[color:var(--text-soft)]">Загрузите IFC, чтобы увидеть сводку по проекту.</p>
             )}
           </div>
 
-          <div className="rounded-3xl border border-slate-100 bg-white/90 p-5 shadow-sm">
+          <div className="ui-panel-muted p-5 shadow-sm">
             <div className="flex items-center justify-between">
               <div>
-                <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">История импортов</h3>
-                <p className="text-xs text-slate-400">Последние {HISTORY_LIMIT} попыток</p>
+                <h3 className="text-sm font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">История импортов</h3>
+                <p className="text-xs text-[color:var(--text-soft)]">Последние {HISTORY_LIMIT} попыток</p>
               </div>
               {latestHistory.length > 0 && (
                 <button
@@ -321,36 +317,36 @@ export function ModelPage() {
                     setValidationError(null);
                     clearError();
                   }}
-                  className="text-xs font-semibold text-slate-500 underline hover:text-slate-700"
+                  className="text-xs font-semibold text-[color:var(--accent-base)] underline decoration-[color:var(--accent-muted)] underline-offset-2 hover:opacity-90"
                 >
                   Очистить ошибки
                 </button>
               )}
             </div>
             {latestHistory.length === 0 ? (
-              <p className="mt-3 text-sm text-slate-500">Здесь появятся отметки о загрузках и ошибках.</p>
+              <p className="mt-3 text-sm text-[color:var(--text-soft)]">Здесь появятся отметки о загрузках и ошибках.</p>
             ) : (
               <ul className="mt-4 space-y-3">
                 {latestHistory.map((entry) => {
                   const theme = statusTheme[entry.status];
                   return (
-                    <li key={entry.id} className="rounded-2xl border border-slate-100 bg-slate-50/80 p-3">
+                    <li key={entry.id} className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)] p-3">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div>
-                          <p className="text-sm font-semibold text-slate-900">{entry.fileName}</p>
-                          <p className="text-xs text-slate-500">
+                          <p className="text-sm font-semibold text-[color:var(--text-base)]">{entry.fileName}</p>
+                          <p className="text-xs text-[color:var(--text-soft)]">
                             {new Date(entry.startedAt).toLocaleTimeString()} · {formatBytes(entry.fileSize)}
                           </p>
                         </div>
                         <span className={`rounded-full px-3 py-0.5 text-xs font-semibold ${theme.badge}`}>{theme.text}</span>
                       </div>
-                      <p className="mt-2 text-xs text-slate-500">
+                      <p className="mt-2 text-xs text-[color:var(--text-muted)]">
                         {entry.status === "success" && entry.projectId
                           ? `Проект ${entry.projectId}, помещений: ${entry.spacesCount ?? "—"}`
                           : entry.message ?? theme.description}
                       </p>
-                      <p className="mt-1 text-[11px] text-slate-400">
-                        Эндпоинт: <span className="font-semibold text-slate-600">{entry.endpoint ?? "—"}</span>
+                      <p className="mt-1 text-[11px] text-[color:var(--text-soft)]">
+                        Эндпоинт: <span className="font-mono font-semibold text-[color:var(--text-muted)]">{entry.endpoint ?? "—"}</span>
                       </p>
                     </li>
                   );
@@ -370,52 +366,48 @@ function ModelDebugDrawer({ open, onClose, info }: { open: boolean; onClose: () 
     return null;
   }
   return (
-    <div className="fixed inset-0 z-40 flex items-end bg-black/30" onClick={onClose}>
+    <div className="fixed inset-0 z-40 flex items-end bg-black/40 backdrop-blur-[2px]" onClick={onClose}>
       <div
-        className="max-h-[70%] w-full rounded-t-3xl bg-white shadow-2xl"
+        className="max-h-[70%] w-full rounded-t-3xl border border-[color:var(--border-soft)] bg-[color:var(--surface-elevated)] shadow-2xl"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
+        <div className="flex items-center justify-between border-b border-[color:var(--border-soft)] px-6 py-4">
           <div>
-            <p className="text-sm font-semibold uppercase tracking-wide text-slate-500">Отладка запроса</p>
-            <p className="text-xs text-slate-400">Последняя попытка импорта IFC</p>
+            <p className="ui-kicker">Отладка запроса</p>
+            <p className="text-xs text-[color:var(--text-soft)]">Последняя попытка импорта IFC</p>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-full border border-slate-200 px-4 py-1 text-xs font-semibold text-slate-600 hover:border-slate-400"
-          >
+          <button type="button" onClick={onClose} className="ui-control rounded-full px-4 py-1 text-xs font-semibold">
             Закрыть
           </button>
         </div>
         {info ? (
-          <div className="space-y-3 px-6 py-4 text-sm text-slate-700">
-            <div className="flex flex-wrap items-center gap-4 text-xs text-slate-500">
+          <div className="space-y-3 px-6 py-4 text-sm text-[color:var(--text-muted)]">
+            <div className="flex flex-wrap items-center gap-4 text-xs text-[color:var(--text-soft)]">
               <span>{new Date(info.timestamp).toLocaleString()}</span>
               <span>Статус: {info.status ?? "—"}</span>
             </div>
             <div>
-              <p className="text-xs uppercase tracking-wide text-slate-400">Запрос</p>
-              <p className="font-mono text-sm text-slate-900">
+              <p className="text-xs uppercase tracking-wide text-[color:var(--text-soft)]">Запрос</p>
+              <p className="font-mono text-sm text-[color:var(--text-base)]">
                 {info.method} {info.url}
               </p>
             </div>
             <div>
-              <p className="text-xs uppercase tracking-wide text-slate-400">Заголовки</p>
-              <pre className="mt-1 max-h-32 overflow-auto rounded-xl bg-slate-50 p-3 text-xs text-slate-600">
+              <p className="text-xs uppercase tracking-wide text-[color:var(--text-soft)]">Заголовки</p>
+              <pre className="mt-1 max-h-32 overflow-auto rounded-xl border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] p-3 text-xs">
                 {JSON.stringify(info.headers, null, 2)}
               </pre>
             </div>
             <div>
-              <p className="text-xs uppercase tracking-wide text-slate-400">Ответ</p>
-              <pre className="mt-1 max-h-40 overflow-auto rounded-xl bg-slate-900/90 p-3 text-xs text-slate-100">
+              <p className="text-xs uppercase tracking-wide text-[color:var(--text-soft)]">Ответ</p>
+              <pre className="mt-1 max-h-40 overflow-auto rounded-xl border border-[color:var(--border-base)] bg-[color:var(--surface-subtle)] p-3 font-mono text-xs text-[color:var(--text-base)]">
                 {info.responseSnippet ?? "—"}
               </pre>
             </div>
-            {info.error && <p className="text-xs font-semibold text-rose-600">Ошибка: {info.error}</p>}
+            {info.error && <p className="text-xs font-semibold text-[color:var(--danger-fg)]">Ошибка: {info.error}</p>}
           </div>
         ) : (
-          <p className="px-6 py-4 text-sm text-slate-500">Данные отладчика появятся после первой попытки импорта.</p>
+          <p className="px-6 py-4 text-sm text-[color:var(--text-soft)]">Данные отладчика появятся после первой попытки импорта.</p>
         )}
       </div>
     </div>

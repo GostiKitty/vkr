@@ -30,13 +30,37 @@ import {
   VIDEO_DEMO_PROJECT_NAME,
 } from "../build/demoVideoProject";
 
-const stepMetadata: Record<WorkflowStep, { label: string; description: string }> = {
-  geometry: { label: "Геометрия", description: "Импорт IFC" },
-  envelope: { label: "Ограждения", description: "Стены, материалы и теплотехнические свойства" },
-  scenario: { label: "Сценарий", description: "Климат, уставки и режим эксплуатации" },
-  solve: { label: "Расчёт", description: "Детерминированное моделирование" },
-  uncertainty: { label: "Неопределённости", description: "Вероятностная оценка риска и чувствительность" },
-  results: { label: "Результаты", description: "Графики, тепловая карта и отчёты" },
+const stepMetadata: Record<WorkflowStep, { order: number; label: string; description: string }> = {
+  geometry: {
+    order: 1,
+    label: "Модель",
+    description: "Импорт IFC, список помещений; при необходимости — доработка в конструкторе.",
+  },
+  envelope: {
+    order: 2,
+    label: "Ограждения",
+    description: "Контуры и конструкции: движок, локальная модель, готовность теплового графа.",
+  },
+  scenario: {
+    order: 3,
+    label: "Сценарий",
+    description: "Климат, уставки, внутренние тепловыделения, инфильтрация (ACH) — входы для расчёта.",
+  },
+  solve: {
+    order: 4,
+    label: "Расчёт",
+    description: "Зональная RC-модель: пик, энергия, баланс (не норматив СП 50 и не CFD).",
+  },
+  uncertainty: {
+    order: 5,
+    label: "Риски",
+    description: "Monte Carlo по разбросу входов той же RC-модели; перцентили и показатели риска.",
+  },
+  results: {
+    order: 6,
+    label: "Результаты",
+    description: "Помещения, 3D, температурная карта, граф связей, инженерный отчёт PDF.",
+  },
 };
 
 export function TwinPage() {
@@ -128,7 +152,7 @@ export function TwinPage() {
 
   const helperText = useMemo(() => {
     const currentMeta = stepMetadata[currentStep];
-    const prefix = `${currentMeta.label} · ${currentMeta.description}`;
+    const prefix = `${currentMeta.order}. ${currentMeta.label} — ${currentMeta.description}`;
     if (loading) {
       return `${prefix}. Загружаю данные проекта…`;
     }
@@ -212,27 +236,27 @@ export function TwinPage() {
               <QuickImportButton variant="geometry" />
               <ModelPage />
             </div>
-            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="ui-panel p-4 shadow-sm sm:p-5">
               <div className="mb-3 flex items-center justify-between gap-3">
-                <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Импортированная геометрия</h3>
+                <h3 className="text-sm font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">Импортированная геометрия</h3>
                 <button
                   type="button"
                   onClick={handleOpenInBuild}
                   disabled={!twin}
-                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="ui-btn-secondary px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-45"
                 >
                   Открыть в конструкторе
                 </button>
               </div>
-              <p className="mb-3 text-sm text-slate-500">
-                После открытия в конструкторе модель можно редактировать, дополнять сетями и дорабатывать вручную.
+              <p className="mb-3 text-sm text-[color:var(--text-muted)]">
+                После открытия в конструкторе можно редактировать стены, проёмы и инженерные сети.
               </p>
               {twin ? (
                 <SpaceList />
               ) : (
                 <EmptyState
                   title="Нет геометрии"
-                  message="Импортируйте IFC или экспортируйте модель из Build Mode, чтобы увидеть помещения."
+                  message="Импортируйте IFC или экспортируйте модель из конструктора, чтобы увидеть помещения."
                   icon="П"
                 />
               )}
@@ -268,64 +292,77 @@ export function TwinPage() {
   };
 
   return (
-    <section className="flex flex-col gap-6 p-6">
-      <header className="flex flex-col gap-1">
-
-        <h2 className="text-3xl font-semibold text-slate-900">Управление проектом </h2>
-        <p className="text-sm text-slate-500">{helperText}</p>
+    <section className="mx-auto flex max-w-[min(100%,96rem)] flex-col gap-8 px-1 py-3 sm:px-2">
+      <header className="space-y-3">
+        <p className="ui-kicker">Рабочий процесс</p>
+        <h2 className="ui-heading-hero">Инженерная студия</h2>
+        <p className="max-w-3xl text-sm leading-relaxed text-[color:var(--text-muted)]">{helperText}</p>
+        <ol className="mt-3 flex list-none flex-wrap gap-2 text-[11px] font-medium text-[color:var(--text-soft)]">
+          {workflowOrder.map((step) => {
+            const meta = stepMetadata[step];
+            const active = currentStep === step;
+            return (
+              <li
+                key={step}
+                className={`rounded-full border px-2.5 py-1 transition ${
+                  active
+                    ? "border-[color:var(--accent-base)] bg-[color:var(--accent-soft)] text-[color:var(--text-base)]"
+                    : "border-transparent bg-[color:var(--surface-muted)]"
+                }`}
+              >
+                <span className="tabular-nums text-[color:var(--accent-base)]">{meta.order}</span> {meta.label}
+              </li>
+            );
+          })}
+        </ol>
       </header>
 
       <form
         onSubmit={handleSubmit}
-        className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:flex-row"
+        className="ui-panel flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:p-5"
       >
         <input
           type="text"
           value={projectIdInput}
           onChange={handleInputChange}
-          placeholder="Введите ID проекта"
-          className="flex-1 rounded-xl border border-slate-200 px-4 py-2 text-base text-slate-900 shadow-inner transition focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
+          placeholder="Идентификатор проекта на движке"
+          className="ui-field flex-1 px-4 py-2 text-base shadow-inner"
         />
         <button
           type="submit"
-          className="rounded-xl bg-slate-900 px-6 py-2 text-base font-semibold text-white shadow-sm transition hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-400"
+          className="ui-btn-primary px-6 py-2 text-base"
           disabled={loading}
         >
-          {loading ? "Загружаю…" : "Применить ID"}
+          {loading ? "Загружаю…" : "Применить"}
         </button>
       </form>
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(280px,0.8fr)]">
-        <div className="rounded-3xl border border-sky-200 bg-[linear-gradient(135deg,#eff6ff_0%,#e0f2fe_100%)] p-5 shadow-sm">
+        <div className="ui-panel ui-demo-spotlight p-5">
           <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
             <div className="min-w-0">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">Демо-режим</p>
-              <h3 className="mt-1 text-xl font-semibold text-slate-900">{VIDEO_DEMO_PROJECT_NAME}</h3>
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-                Быстрый демонстрационный запуск: готовая геометрия, отопление, стабильная 2D/3D-модель и температурная
-                визуализация без ручной подготовки сцены.
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--accent-base)]">Демонстрация</p>
+              <h3 className="mt-1 text-xl font-semibold text-[color:var(--text-base)]">{VIDEO_DEMO_PROJECT_NAME}</h3>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-[color:var(--text-muted)]">
+                Двухэтажный дом с кровлей, тепловым пунктом, отоплением, вентиляцией, датчиками и готовыми 2D/3D-сценами для показа всех возможностей.
               </p>
             </div>
-            <button
-              type="button"
-              onClick={handleOpenVideoDemo}
-              className="rounded-2xl bg-sky-700 px-4 py-3 text-sm font-semibold text-white transition hover:bg-sky-600"
-            >
+            <button type="button" onClick={handleOpenVideoDemo} className="ui-btn-primary shrink-0 px-4 py-3 text-sm">
               Открыть демонстрационный дом
             </button>
           </div>
           <div className="mt-4 grid gap-3 sm:grid-cols-3">
             <SummaryCard label="Источник" value="Локальный preset" />
             <SummaryCard label="Сохранение" value="localStorage + проект" />
-            <SummaryCard label="Результат" value="2D, 3D и температура готовы" />
+            <SummaryCard label="Результат" value="2 этажа · сети · 3D" />
           </div>
         </div>
-        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Состояние проекта</p>
-          <h3 className="mt-1 text-lg font-semibold text-slate-900">
+        <div className="ui-panel p-5">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--text-soft)]">Состояние проекта</p>
+          <h3 className="mt-1 text-lg font-semibold text-[color:var(--text-base)]">
             {storedProjectId === VIDEO_DEMO_PROJECT_ID || isVideoDemoProjectModel(buildModel) ? "Демо-дом загружен" : "Обычный проект"}
           </h3>
-          <p className="mt-2 text-sm leading-6 text-slate-600">
+          <p className="mt-2 text-sm leading-6 text-[color:var(--text-muted)]">
             {storedProjectId === VIDEO_DEMO_PROJECT_ID || isVideoDemoProjectModel(buildModel)
               ? "Последний демо-дом хранится в отдельном локальном проекте и восстанавливается после перезагрузки страницы."
               : "Можно загрузить демо-дом без влияния на IFC-проект: он откроется как отдельный локальный пресет."}
@@ -334,7 +371,7 @@ export function TwinPage() {
       </div>
 
       {buildingSummary && (
-        <div className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:grid-cols-3">
+        <div className="ui-panel grid gap-4 p-4 sm:grid-cols-3 sm:p-5">
           <SummaryCard label="Здание" value={buildingSummary.name} />
           <SummaryCard label="Помещений" value={String(buildingSummary.spaces)} />
           <SummaryCard
@@ -344,8 +381,11 @@ export function TwinPage() {
         </div>
       )}
 
-      <div className="rounded-3xl border border-slate-200 bg-slate-50/70 p-4 shadow-inner">
-        <div className="flex flex-wrap gap-3">
+      <div className="ui-panel-muted p-3 sm:p-4">
+        <p className="mb-3 px-1 text-xs font-medium text-[color:var(--text-soft)]">
+          Шаги 1–6: выберите этап или «Назад» / «Далее»
+        </p>
+        <div className="flex flex-wrap gap-2 sm:gap-3">
           {workflowOrder.map((step) => {
             const locked = step !== "geometry" && !canEnterStep(step);
             const isActive = currentStep === step;
@@ -357,29 +397,34 @@ export function TwinPage() {
                 type="button"
                 onClick={() => goToStep(step)}
                 disabled={locked}
-                className={`min-w-[120px] flex-1 rounded-2xl border px-4 py-3 text-left transition sm:flex-none ${
+                className={`min-w-[140px] flex-1 rounded-2xl border px-3 py-3 text-left transition sm:min-w-[158px] sm:flex-none sm:px-4 ${
                   isActive
-                    ? "border-slate-900 bg-slate-900 text-white shadow"
+                    ? "border-[color:var(--accent-base)] bg-[color:var(--accent-soft)] shadow-[var(--accent-glow)] ring-1 ring-[color:var(--accent-muted)]"
                     : locked
-                    ? "border-slate-200 bg-white text-slate-400"
-                    : "border-slate-200 bg-white text-slate-700 hover:border-slate-400"
+                      ? "cursor-not-allowed border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] text-[color:var(--text-soft)]"
+                      : "border-[color:var(--border-soft)] bg-[color:var(--surface-base)] text-[color:var(--text-base)] hover:border-[color:var(--accent-base)]/40"
                 }`}
               >
-                <div className="flex items-center justify-between">
-                  <p className="text-sm font-semibold">{meta.label}</p>
+                <div className="flex items-center justify-between gap-2">
+                  <p className={`text-sm font-semibold ${isActive ? "text-[color:var(--accent-base)]" : ""}`}>
+                    <span className="mr-1.5 tabular-nums text-xs font-bold text-[color:var(--text-soft)]">{meta.order}.</span>
+                    {meta.label}
+                  </p>
                   <StatusBadge status={status} />
                 </div>
-                <p className={`mt-1 text-xs ${isActive ? "text-white/80" : "text-slate-500"}`}>{meta.description}</p>
+                <p className={`mt-1 text-xs leading-snug ${isActive ? "text-[color:var(--text-muted)]" : "text-[color:var(--text-soft)]"}`}>
+                  {meta.description}
+                </p>
               </button>
             );
           })}
         </div>
       </div>
 
-      <div className="space-y-4 rounded-3xl border border-slate-200 bg-slate-50/70 p-4 shadow-inner">
+      <div className="ui-panel space-y-4 p-4 sm:p-6">
         {currentMissing.length > 0 && (
-          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            <p className="font-semibold">Для шага «{stepMetadata[currentStep].label}» нужно:</p>
+          <div className="rounded-2xl border border-[color:var(--warning-border)] bg-[color:var(--warning-bg)] px-4 py-3 text-sm text-[color:var(--warning-fg)]">
+            <p className="font-semibold text-[color:var(--text-base)]">Чеклист для шага «{stepMetadata[currentStep].label}»</p>
             <ul className="mt-2 list-disc space-y-1 pl-5">
               {currentMissing.map((item) => (
                 <li key={item}>{item}</li>
@@ -390,12 +435,12 @@ export function TwinPage() {
 
         {renderStepContent()}
 
-        <div className="flex items-center justify-between pt-2">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[color:var(--border-soft)] pt-4">
           <button
             type="button"
             onClick={() => prevStep && setCurrentStep(prevStep)}
             disabled={!prevStep}
-            className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-600 disabled:opacity-40"
+            className="ui-btn-secondary px-4 py-2 text-sm disabled:opacity-40"
           >
             Назад
           </button>
@@ -404,13 +449,13 @@ export function TwinPage() {
               <Tooltip
                 className="inline-flex"
                 title="Шаг пока недоступен"
-                description="Завершите обязательные требования текущего шага."
+                description="Выполните пункты чеклиста выше."
                 details={nextBlockingReasons}
               >
                 <button
                   type="button"
                   disabled
-                  className="rounded-xl bg-slate-300 px-4 py-2 text-sm font-semibold text-white opacity-60"
+                  className="ui-btn-secondary cursor-not-allowed px-4 py-2 text-sm opacity-45"
                 >
                   Далее
                 </button>
@@ -419,7 +464,7 @@ export function TwinPage() {
               <button
                 type="button"
                 onClick={() => setCurrentStep(nextStep)}
-                className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white"
+                className="ui-btn-primary px-5 py-2 text-sm"
               >
                 Далее
               </button>
@@ -428,9 +473,9 @@ export function TwinPage() {
             <button
               type="button"
               disabled
-              className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white opacity-50"
+              className="ui-btn-secondary cursor-not-allowed px-4 py-2 text-sm opacity-45"
             >
-              Готово
+              Все шаги пройдены
             </button>
           )}
         </div>
@@ -441,19 +486,31 @@ export function TwinPage() {
 
 function StatusBadge({ status }: { status: WorkflowStepStatus }) {
   if (status === "ready") {
-    return <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-700">Готово</span>;
+    return (
+      <span className="rounded-full bg-[color:var(--success-bg)] px-2 py-0.5 text-[11px] font-semibold text-[color:var(--success-fg)] ring-1 ring-[color:var(--success-border)]">
+        Готово
+      </span>
+    );
   }
   if (status === "error") {
-    return <span className="rounded-full bg-rose-100 px-2 py-0.5 text-xs font-semibold text-rose-700">Ошибка</span>;
+    return (
+      <span className="rounded-full bg-[color:var(--danger-bg)] px-2 py-0.5 text-[11px] font-semibold text-[color:var(--danger-fg)] ring-1 ring-[color:var(--danger-border)]">
+        Ошибка
+      </span>
+    );
   }
-  return <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">Ожидает</span>;
+  return (
+    <span className="rounded-full bg-[color:var(--surface-strong)] px-2 py-0.5 text-[11px] font-semibold text-[color:var(--text-muted)]">
+      Ожидает
+    </span>
+  );
 }
 
 function SummaryCard({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div className="rounded-2xl border border-slate-100 bg-slate-50/80 px-4 py-3 text-sm">
-      <p className="text-xs uppercase tracking-wide text-slate-500">{label}</p>
-      <p className="text-lg font-semibold text-slate-900">{value}</p>
+    <div className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] px-4 py-3 text-sm">
+      <p className="text-xs uppercase tracking-wide text-[color:var(--text-soft)]">{label}</p>
+      <p className="text-lg font-semibold text-[color:var(--text-base)]">{value}</p>
     </div>
   );
 }
@@ -473,39 +530,39 @@ function EnvelopeStatusPanel({
 
   return (
     <div className="grid gap-4 lg:grid-cols-2">
-      <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Данные из движка</h3>
+      <div className="ui-panel space-y-3 p-4 sm:p-5">
+        <h3 className="text-sm font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">Данные из движка</h3>
         {twinEnvelopeCount > 0 ? (
-          <p className="text-sm text-slate-600">
+          <p className="text-sm text-[color:var(--text-muted)]">
             Движок передал {twinEnvelopeCount} элементов ограждений. Их можно использовать для дальнейшего анализа
             теплопотерь и сценариев.
           </p>
         ) : (
           <EmptyState
             title="Нет ограждений"
-            message="В импортированном проекте не найдено ограждающих конструкций. При необходимости добавьте их в Build Mode."
+            message="В импортированном проекте не найдено ограждающих конструкций. При необходимости добавьте их в конструкторе."
             icon="Ст"
           />
         )}
       </div>
 
-      <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Локальная модель</h3>
+      <div className="ui-panel space-y-3 p-4 sm:p-5">
+        <h3 className="text-sm font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">Локальная модель</h3>
         {localWalls === 0 ? (
-          <p className="text-sm text-slate-600">
-            Добавьте стены в Build Mode, чтобы рассчитывать ограждения, смежности и теплопередачу.
+          <p className="text-sm text-[color:var(--text-muted)]">
+            Добавьте стены в конструкторе, чтобы рассчитывать ограждения, смежности и теплопередачу.
           </p>
         ) : (
-          <div className="space-y-2 text-sm text-slate-600">
+          <div className="space-y-2 text-sm text-[color:var(--text-muted)]">
             <p>
               Стен с материалами:{" "}
-              <span className="font-semibold text-slate-900">
+              <span className="font-semibold text-[color:var(--text-base)]">
                 {wallsWithAssemblies}/{localWalls} ({completeness}%)
               </span>
             </p>
             <p>
               Тепловой граф:{" "}
-              <span className="font-semibold text-slate-900">{thermalGraphReady ? "готов" : "не готов"}</span>
+              <span className="font-semibold text-[color:var(--text-base)]">{thermalGraphReady ? "готов" : "не готов"}</span>
             </p>
           </div>
         )}

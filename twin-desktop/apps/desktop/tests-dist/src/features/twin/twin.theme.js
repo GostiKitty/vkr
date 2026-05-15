@@ -1,17 +1,29 @@
+import { readResolvedThemeFromDom } from "../../shared/theme/theme";
+const STOPS_LIGHT = [
+    { stop: 0, color: "#1d4ed8" },
+    { stop: 0.18, color: "#0891b2" },
+    { stop: 0.4, color: "#0d9488" },
+    { stop: 0.62, color: "#ca8a04" },
+    { stop: 0.8, color: "#c2410c" },
+    { stop: 1, color: "#b91c1c" },
+];
+/** Тёмная тема: приглушённая шкала без «кислотных» насыщенностей */
+const STOPS_DARK = [
+    { stop: 0, color: "#4d7ccf" },
+    { stop: 0.18, color: "#2a9db0" },
+    { stop: 0.4, color: "#3d8f6f" },
+    { stop: 0.62, color: "#b8922e" },
+    { stop: 0.8, color: "#b45a2c" },
+    { stop: 1, color: "#b54a4a" },
+];
 export function temperatureToColor(temp, min = 15, max = 30) {
     if (temp === null || temp === undefined || Number.isNaN(temp)) {
-        return "#cbd5f5";
+        return readResolvedThemeFromDom() === "dark" ? "#5a6574" : "#8a9a90";
     }
     const span = max - min;
     const ratio = span <= 1e-6 ? 0.5 : clamp((temp - min) / span, 0, 1);
-    return interpolateStops(ratio, [
-        { stop: 0, color: "#1d4ed8" },
-        { stop: 0.18, color: "#06b6d4" },
-        { stop: 0.4, color: "#10b981" },
-        { stop: 0.62, color: "#facc15" },
-        { stop: 0.8, color: "#fb923c" },
-        { stop: 1, color: "#dc2626" },
-    ]);
+    const stops = readResolvedThemeFromDom() === "dark" ? STOPS_DARK : STOPS_LIGHT;
+    return interpolateStops(ratio, stops);
 }
 export function formatTemperature(temp, unit = "°C") {
     if (temp === null || temp === undefined || Number.isNaN(temp)) {
@@ -28,7 +40,7 @@ function interpolateStops(ratio, stops) {
         return stops[0]?.color ?? "#1d4ed8";
     }
     if (nextIndex === -1) {
-        return stops[stops.length - 1]?.color ?? "#dc2626";
+        return stops[stops.length - 1]?.color ?? "#b91c1c";
     }
     const left = stops[nextIndex - 1];
     const right = stops[nextIndex];

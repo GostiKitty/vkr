@@ -1,0 +1,164 @@
+﻿
+C:\Users\Liza\vkr\twin-desktop\apps\desktop\src\features\build\BuildPage.tsx
+   312:6   warning  React Hook useEffect has an unnecessary dependency: 'notifyInfo'. Either exclude it or remove the dependency array. Outer scope values like 'notifyInfo' aren't valid dependencies because mutating them doesn't re-render the component                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       react-hooks/exhaustive-deps
+   327:5   warning  React Hook useMemo has an unnecessary dependency: 'adjacency'. Either exclude it or remove the dependency array                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                react-hooks/exhaustive-deps
+   425:3   warning  The 'syncWallsFromRooms' function makes the dependencies of useCallback Hook (at line 1181) change on every render. To fix this, wrap the definition of 'syncWallsFromRooms' in its own useCallback() Hook                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     react-hooks/exhaustive-deps
+   436:3   warning  The 'handleRemoveRoom' function makes the dependencies of useCallback Hook (at line 493) change on every render. Move it inside the useCallback callback. Alternatively, wrap the definition of 'handleRemoveRoom' in its own useCallback() Hook                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               react-hooks/exhaustive-deps
+   757:7   warning  React Hook useCallback has a missing dependency: 'setSelection'. Either include it or remove the dependency array                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              react-hooks/exhaustive-deps
+  1044:6   warning  React Hook useCallback has an unnecessary dependency: 'notifyError'. Either exclude it or remove the dependency array. Outer scope values like 'notifyError' aren't valid dependencies because mutating them doesn't re-render the component                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   react-hooks/exhaustive-deps
+  1058:6   warning  React Hook useCallback has an unnecessary dependency: 'notifyError'. Either exclude it or remove the dependency array. Outer scope values like 'notifyError' aren't valid dependencies because mutating them doesn't re-render the component                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   react-hooks/exhaustive-deps
+  1087:5   warning  React Hook useCallback has an unnecessary dependency: 'notifyInfo'. Either exclude it or remove the dependency array. Outer scope values like 'notifyInfo' aren't valid dependencies because mutating them doesn't re-render the component                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     react-hooks/exhaustive-deps
+  1113:6   warning  React Hook useCallback has unnecessary dependencies: 'notifyError' and 'notifyInfo'. Either exclude them or remove the dependency array. Outer scope values like 'notifyError' aren't valid dependencies because mutating them doesn't re-render the component                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 react-hooks/exhaustive-deps
+  1131:5   warning  React Hook useCallback has unnecessary dependencies: 'notifyError' and 'notifyInfo'. Either exclude them or remove the dependency array. Outer scope values like 'notifyError' aren't valid dependencies because mutating them doesn't re-render the component                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 react-hooks/exhaustive-deps
+  1497:9   error    'has3DNetworks' is assigned a value but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             @typescript-eslint/no-unused-vars
+  1498:9   error    'has3DEquipment' is assigned a value but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            @typescript-eslint/no-unused-vars
+  1499:9   error    'engineeringOverviewSummary' is assigned a value but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                @typescript-eslint/no-unused-vars
+  1559:27  error    Error: Cannot access refs during render
+
+React refs are values that are not needed for rendering. Refs should only be accessed outside of render, such as in event handlers or effects. Accessing a ref value (the `current` property) during render can cause your component not to update as expected (https://react.dev/reference/react/useRef).
+
+C:\Users\Liza\vkr\twin-desktop\apps\desktop\src\features\build\BuildPage.tsx:1559:27
+  1557 |       return null;
+  1558 |     }
+> 1559 |     const viewportWidth = view3dViewportRef.current?.clientWidth ?? 960;
+       |                           ^^^^^^^^^^^^^^^^^^^^^^^^^ Cannot access ref value during render
+  1560 |     const viewportHeight = view3dViewportRef.current?.clientHeight ?? 720;
+  1561 |     const tooltipWidth = 280;
+  1562 |     const estimatedTooltipHeight = threeDHoverInfo.details?.length ? 190 : 110;                                                                                  react-hooks/refs
+  1559:27  error    Error: Cannot access refs during render
+
+React refs are values that are not needed for rendering. Refs should only be accessed outside of render, such as in event handlers or effects. Accessing a ref value (the `current` property) during render can cause your component not to update as expected (https://react.dev/reference/react/useRef).
+
+C:\Users\Liza\vkr\twin-desktop\apps\desktop\src\features\build\BuildPage.tsx:1559:27
+  1557 |       return null;
+  1558 |     }
+> 1559 |     const viewportWidth = view3dViewportRef.current?.clientWidth ?? 960;
+       |                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ Cannot access ref value during render
+  1560 |     const viewportHeight = view3dViewportRef.current?.clientHeight ?? 720;
+  1561 |     const tooltipWidth = 280;
+  1562 |     const estimatedTooltipHeight = threeDHoverInfo.details?.length ? 190 : 110;                                                                     react-hooks/refs
+  1560:28  error    Error: Cannot access refs during render
+
+React refs are values that are not needed for rendering. Refs should only be accessed outside of render, such as in event handlers or effects. Accessing a ref value (the `current` property) during render can cause your component not to update as expected (https://react.dev/reference/react/useRef).
+
+C:\Users\Liza\vkr\twin-desktop\apps\desktop\src\features\build\BuildPage.tsx:1560:28
+  1558 |     }
+  1559 |     const viewportWidth = view3dViewportRef.current?.clientWidth ?? 960;
+> 1560 |     const viewportHeight = view3dViewportRef.current?.clientHeight ?? 720;
+       |                            ^^^^^^^^^^^^^^^^^^^^^^^^^ Cannot access ref value during render
+  1561 |     const tooltipWidth = 280;
+  1562 |     const estimatedTooltipHeight = threeDHoverInfo.details?.length ? 190 : 110;
+  1563 |     return {                                                                                       react-hooks/refs
+  1560:28  error    Error: Cannot access refs during render
+
+React refs are values that are not needed for rendering. Refs should only be accessed outside of render, such as in event handlers or effects. Accessing a ref value (the `current` property) during render can cause your component not to update as expected (https://react.dev/reference/react/useRef).
+
+C:\Users\Liza\vkr\twin-desktop\apps\desktop\src\features\build\BuildPage.tsx:1560:28
+  1558 |     }
+  1559 |     const viewportWidth = view3dViewportRef.current?.clientWidth ?? 960;
+> 1560 |     const viewportHeight = view3dViewportRef.current?.clientHeight ?? 720;
+       |                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ Cannot access ref value during render
+  1561 |     const tooltipWidth = 280;
+  1562 |     const estimatedTooltipHeight = threeDHoverInfo.details?.length ? 190 : 110;
+  1563 |     return {                                                                         react-hooks/refs
+  1564:65  error    Error: Cannot access refs during render
+
+React refs are values that are not needed for rendering. Refs should only be accessed outside of render, such as in event handlers or effects. Accessing a ref value (the `current` property) during render can cause your component not to update as expected (https://react.dev/reference/react/useRef).
+
+C:\Users\Liza\vkr\twin-desktop\apps\desktop\src\features\build\BuildPage.tsx:1564:65
+  1562 |     const estimatedTooltipHeight = threeDHoverInfo.details?.length ? 190 : 110;
+  1563 |     return {
+> 1564 |       left: Math.max(16, Math.min(threeDHoverInfo.screenX + 12, viewportWidth - tooltipWidth - 16)),
+       |                                                                 ^^^^^^^^^^^^^ Cannot access ref value during render
+  1565 |       top: Math.max(16, Math.min(threeDHoverInfo.screenY - 12, viewportHeight - estimatedTooltipHeight - 16)),
+  1566 |     };
+  1567 |   }, [threeDHoverInfo]);  react-hooks/refs
+  1565:64  error    Error: Cannot access refs during render
+
+React refs are values that are not needed for rendering. Refs should only be accessed outside of render, such as in event handlers or effects. Accessing a ref value (the `current` property) during render can cause your component not to update as expected (https://react.dev/reference/react/useRef).
+
+C:\Users\Liza\vkr\twin-desktop\apps\desktop\src\features\build\BuildPage.tsx:1565:64
+  1563 |     return {
+  1564 |       left: Math.max(16, Math.min(threeDHoverInfo.screenX + 12, viewportWidth - tooltipWidth - 16)),
+> 1565 |       top: Math.max(16, Math.min(threeDHoverInfo.screenY - 12, viewportHeight - estimatedTooltipHeight - 16)),
+       |                                                                ^^^^^^^^^^^^^^ Cannot access ref value during render
+  1566 |     };
+  1567 |   }, [threeDHoverInfo]);
+  1568 |                                                                                  react-hooks/refs
+
+C:\Users\Liza\vkr\twin-desktop\apps\desktop\src\features\build\components\Canvas2D.tsx
+   443:5   error    Error: Cannot access refs during render
+
+React refs are values that are not needed for rendering. Refs should only be accessed outside of render, such as in event handlers or effects. Accessing a ref value (the `current` property) during render can cause your component not to update as expected (https://react.dev/reference/react/useRef).
+
+C:\Users\Liza\vkr\twin-desktop\apps\desktop\src\features\build\components\Canvas2D.tsx:443:5
+  441 |     const [view, setView] = useState({ origin: { x: -10, y: -10 }, zoom: 60 });
+  442 |     const viewRef = useRef(view);
+> 443 |     viewRef.current = view;
+      |     ^^^^^^^^^^^^^^^ Cannot update ref during render
+  444 |     const [spacePressed, setSpacePressed] = useState(false);
+  445 |     const [isPanning, setIsPanning] = useState(false);
+  446 |     const panStartRef = useRef<{ x: number; y: number; origin: Vec2 }>({ x: 0, y: 0, origin: { x: 0, y: 0 } });  react-hooks/refs
+  1026:8   warning  React Hook useEffect has a missing dependency: 'onToolChange'. Either include it or remove the dependency array. If 'onToolChange' changes too often, find the parent component that defines it and wrap that definition in useCallback                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          react-hooks/exhaustive-deps
+  1121:7   warning  React Hook useImperativeHandle has a missing dependency: 'showSmartOverlay'. Either include it or remove the dependency array                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    react-hooks/exhaustive-deps
+  1158:5   error    Error: Cannot access refs during render
+
+React refs are values that are not needed for rendering. Refs should only be accessed outside of render, such as in event handlers or effects. Accessing a ref value (the `current` property) during render can cause your component not to update as expected (https://react.dev/reference/react/useRef).
+
+C:\Users\Liza\vkr\twin-desktop\apps\desktop\src\features\build\components\Canvas2D.tsx:1158:5
+  1156 |
+  1157 |     const screenToWorldRef = useRef(screenToWorld);
+> 1158 |     screenToWorldRef.current = screenToWorld;
+       |     ^^^^^^^^^^^^^^^^^^^^^^^^ Cannot update ref during render
+  1159 |
+  1160 |     useEffect(() => {
+  1161 |       const el = containerRef.current;                                                                                                                                                                                                    react-hooks/refs
+  1898:5   error    Error: Cannot access refs during render
+
+React refs are values that are not needed for rendering. Refs should only be accessed outside of render, such as in event handlers or effects. Accessing a ref value (the `current` property) during render can cause your component not to update as expected (https://react.dev/reference/react/useRef).
+
+C:\Users\Liza\vkr\twin-desktop\apps\desktop\src\features\build\components\Canvas2D.tsx:1898:5
+  1896 |     }
+  1897 |
+> 1898 |     finalizeLinearDraftRef.current = finalizeActiveLinearDraft;
+       |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ Cannot update ref during render
+  1899 |
+  1900 |     const placeEquipment = (point: Vec2) => {
+  1901 |       if (!activeLevelId) {                                                                                                                                                                                                             react-hooks/refs
+  1998:11  warning  The 'findClosestWall' function makes the dependencies of useCallback Hook (at line 2129) change on every render. To fix this, wrap the definition of 'findClosestWall' in its own useCallback() Hook                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             react-hooks/exhaustive-deps
+
+C:\Users\Liza\vkr\twin-desktop\apps\desktop\src\features\build\components\ThermalSimulationPanel.tsx
+  382:6  warning  React Hook useMemo has a missing dependency: 'model'. Either include it or remove the dependency array                                                                                                                             react-hooks/exhaustive-deps
+  408:6  warning  React Hook useCallback has a missing dependency: 'onResult'. Either include it or remove the dependency array. If 'onResult' changes too often, find the parent component that defines it and wrap that definition in useCallback  react-hooks/exhaustive-deps
+
+C:\Users\Liza\vkr\twin-desktop\apps\desktop\src\features\build\view3d\Build3DCanonicalPreview.tsx
+   766:8  warning  React Hook useEffect has a missing dependency: 'scheduleInitialFit'. Either include it or remove the dependency array                             react-hooks/exhaustive-deps
+  1066:8  warning  React Hook useEffect has a missing dependency: 'scheduleInitialFit'. Either include it or remove the dependency array                             react-hooks/exhaustive-deps
+  1086:7  warning  React Hook useImperativeHandle has missing dependencies: 'applyCameraFrame' and 'fitToModel'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Users\Liza\vkr\twin-desktop\apps\desktop\src\features\build\view3d\Build3DRecoveredPreview.tsx
+  465:8  warning  React Hook useEffect has a missing dependency: 'scheduleInitialFit'. Either include it or remove the dependency array         react-hooks/exhaustive-deps
+  681:8  warning  React Hook useEffect has a missing dependency: 'scheduleInitialFit'. Either include it or remove the dependency array         react-hooks/exhaustive-deps
+  700:7  warning  React Hook useImperativeHandle has a missing dependency: 'applyCameraMode'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Users\Liza\vkr\twin-desktop\apps\desktop\src\features\build\view3d\Build3DSimplePreview.tsx
+  318:8  warning  React Hook useEffect has a missing dependency: 'scheduleInitialFit'. Either include it or remove the dependency array         react-hooks/exhaustive-deps
+  499:8  warning  React Hook useEffect has a missing dependency: 'scheduleInitialFit'. Either include it or remove the dependency array         react-hooks/exhaustive-deps
+  513:7  warning  React Hook useImperativeHandle has a missing dependency: 'applyCameraMode'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Users\Liza\vkr\twin-desktop\apps\desktop\src\features\build\view3d\Build3DStablePreview.tsx
+  451:8  warning  React Hook useEffect has a missing dependency: 'scheduleInitialFit'. Either include it or remove the dependency array    react-hooks/exhaustive-deps
+  654:8  warning  React Hook useEffect has a missing dependency: 'scheduleInitialFit'. Either include it or remove the dependency array    react-hooks/exhaustive-deps
+  682:7  warning  React Hook useImperativeHandle has a missing dependency: 'fitToShell'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Users\Liza\vkr\twin-desktop\apps\desktop\src\features\model\ModelPage.tsx
+  142:6  warning  React Hook useCallback has an unnecessary dependency: 'navigate'. Either exclude it or remove the dependency array. Outer scope values like 'navigate' aren't valid dependencies because mutating them doesn't re-render the component  react-hooks/exhaustive-deps
+
+C:\Users\Liza\vkr\twin-desktop\apps\desktop\src\features\twin\SpaceViewer3D.tsx
+  239:17  warning  The ref value 'meshesRef.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'meshesRef.current' to a variable inside the effect, and use that variable in the cleanup function  react-hooks/exhaustive-deps
+
+C:\Users\Liza\vkr\twin-desktop\apps\desktop\src\shared\utils\format.ts
+  13:21  error  '_fallbackFromOptions' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+тЬЦ 42 problems (13 errors, 29 warnings)
+

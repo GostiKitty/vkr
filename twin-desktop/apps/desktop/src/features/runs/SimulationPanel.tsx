@@ -4,19 +4,36 @@ import { useBuildStore } from "../build/build.store";
 import { buildAdjacencyGraph } from "../../core/graph/adjacency";
 import { runThermalSimulation, type ThermalSimulationResult } from "../../core/thermal/solver";
 import type { EngineeringMetricCard } from "../../core/thermal/thermalDiagnostics";
-import { DEFAULT_THERMAL_OPTIONS } from "../build/components/ThermalSimulationPanel";
+import { buildThermalSimulationInsightLines } from "../../core/thermal/thermalResultsInterpretation";
+import { DEFAULT_THERMAL_OPTIONS } from "../build/thermal/defaultThermalOptions";
 import { formatEnergy, formatNumber } from "../../shared/utils/format";
 import type { ProjectKind } from "../../entities/project/project.store";
 import type { RunResult, RunResultMetric } from "../../shared/api/types";
 import { runEngineSimulation } from "./runs.api";
+import {
+  EngineeringCallout,
+  EngineeringMetricTile,
+  EngineeringSectionHeader,
+  type MetricStatusTone,
+} from "../../shared/ui/EngineeringUi";
 
 interface SimulationPanelProps {
   projectId: string | null;
   projectKind: ProjectKind;
   onSolveComplete?: (result: ThermalSimulationResult) => void;
+  /** Кнопка перехода к 3D (например, из вкладки «Результаты»). */
+  onShowOnModel?: () => void;
+  /** Прокрутка или фокус на блоке отчёта. */
+  onGenerateReport?: () => void;
 }
 
-export function SimulationPanel({ projectId, projectKind, onSolveComplete }: SimulationPanelProps) {
+export function SimulationPanel({
+  projectId,
+  projectKind,
+  onSolveComplete,
+  onShowOnModel,
+  onGenerateReport,
+}: SimulationPanelProps) {
   const buildModel = useBuildStore((state) => state.model);
   const isLocalProject = projectKind === "local";
 
@@ -40,6 +57,24 @@ export function SimulationPanel({ projectId, projectKind, onSolveComplete }: Sim
   }, [result]);
 
   const engineMetrics = useMemo(() => extractEngineMetrics(engineResult), [engineResult]);
+
+  const roomTempRange = useMemo(() => (result ? roomTemperatureRangeAcrossTimeline(result) : { min: null, max: null }), [result]);
+
+  const insightLines = useMemo(
+    () => (result ? buildThermalSimulationInsightLines(result, { duration: DEFAULT_THERMAL_OPTIONS.duration }) : []),
+    [result]
+  );
+
+  const balanceTone: MetricStatusTone = useMemo(() => {
+    const s = result?.diagnostics?.building.balanceStatus;
+    if (s === "risk") {
+      return "risk";
+    }
+    if (s === "attention") {
+      return "attention";
+    }
+    return "ok";
+  }, [result?.diagnostics?.building.balanceStatus]);
 
   const handleRunLocal = () => {
     if (!isLocalProject || running) {
@@ -92,158 +127,277 @@ export function SimulationPanel({ projectId, projectKind, onSolveComplete }: Sim
   const localDisabled = !isLocalProject || !buildModel.rooms.length || running;
   const engineActionDisabled = projectKind !== "engine" || !projectId || engineRunning;
   const isBusy = running || engineRunning;
+  const b = result?.diagnostics?.building;
 
   return (
-    <div className="space-y-4">
-      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="mb-2 flex flex-col gap-1">
-          <h3 className="text-lg font-semibold text-slate-900">Локальный расчёт</h3>
-          <p className="text-sm text-slate-500">Используются параметры текущей модели и встроенный локальный решатель.</p>
+    <div className="space-y-5">
+      <div className="ui-panel p-5 sm:p-6">
+        <EngineeringSectionHeader
+          kicker="Шаг расчёта"
+          title="Локальный тепловой расчёт"
+          subtitle="Зональная RC-модель по текущей геометрии из конструктора. Параметры сценария (климат, уставки, ACH) задаются на шаге «Сценарий» в студии; здесь используется встроенный пресет решателя для быстрого прогона."
+        />
+        <div className="mt-5 flex flex-wrap gap-3">
+          <button
+            type="button"
+            onClick={handleRunLocal}
+            disabled={localDisabled}
+            className={`rounded-xl px-5 py-3 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-[color:var(--accent-base)]/30 sm:min-w-[220px] ${
+              localDisabled
+                ? "cursor-not-allowed border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] text-[color:var(--text-soft)]"
+                : "ui-btn-primary sm:min-w-[220px]"
+            }`}
+          >
+            {running ? "Выполняется расчёт…" : "Запустить расчёт"}
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={handleRunLocal}
-          disabled={localDisabled}
-          className={`w-full rounded-xl px-4 py-3 text-base font-semibold transition focus:outline-none focus:ring-2 focus:ring-slate-400 sm:w-auto ${
-            localDisabled
-              ? "cursor-not-allowed bg-slate-200 text-slate-500"
-              : "bg-slate-900 text-white hover:bg-slate-800"
-          }`}
-        >
-          {running ? "Считаю…" : "Запустить расчёт (локально)"}
-        </button>
 
         {!isLocalProject && (
-          <p className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm text-slate-600">
-            Проект привязан к движку. При необходимости можно запустить серверный расчёт отдельной кнопкой ниже.
-          </p>
+          <EngineeringCallout variant="info" title="Проект на движке" className="mt-4">
+            <p>
+              Сейчас выбран серверный режим. Локальный RC-прогон ниже не блокирует движок; при необходимости используйте
+              блок «Расчёт на движке».
+            </p>
+          </EngineeringCallout>
         )}
         {isLocalProject && !buildModel.rooms.length && (
-          <p className="mt-3 text-xs text-amber-600">
-            Добавьте помещения и стены в режиме конструирования, чтобы расчёт учитывал геометрию.
-          </p>
+          <EngineeringCallout variant="attention" title="Модель не готова" className="mt-4">
+            <p>Добавьте помещения и стены в режиме конструирования — без зон расчёт не запустится.</p>
+          </EngineeringCallout>
         )}
 
         {simError && (
-          <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" role="alert">
-            {simError}
-          </div>
+          <EngineeringCallout variant="risk" title="Не удалось выполнить расчёт" className="mt-4">
+            <p>{simError}</p>
+          </EngineeringCallout>
         )}
 
         {showSuccess && !simError && (
-          <div className="mt-3 inline-flex items-center gap-3 rounded-full bg-emerald-100/80 px-4 py-2 text-sm font-medium text-emerald-700 shadow-inner transition-all duration-300">
-            <span className="inline-flex h-6 w-6 animate-pulse items-center justify-center rounded-full bg-emerald-500 text-white">
-              ✓
-            </span>
-            Расчёт завершён
-          </div>
+          <EngineeringCallout variant="success" title="Расчётная тепловая модель обновлена" className="mt-4">
+            <p>
+              Зональный расчёт выполнен по текущей геометрии. Можно открыть результаты, 3D и температурную карту — она
+              построена по зональной модели и не является CFD.
+            </p>
+          </EngineeringCallout>
         )}
       </div>
 
       {projectKind === "engine" && (
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="mb-2 flex flex-col gap-1">
-            <h3 className="text-lg font-semibold text-slate-900">Расчёт на движке</h3>
-            <p className="text-sm text-slate-500">Будет отправлен запрос POST /run с текущим project_id.</p>
-          </div>
+        <div className="ui-panel p-5 sm:p-6">
+          <EngineeringSectionHeader
+            kicker="Сервер"
+            title="Расчёт на движке"
+            subtitle="Запрос к API движка с текущим идентификатором проекта. Набор метрик зависит от версии сервера."
+          />
           <button
             type="button"
             onClick={handleRunEngine}
             disabled={engineActionDisabled}
-            className={`w-full rounded-xl px-4 py-3 text-base font-semibold transition focus:outline-none focus:ring-2 focus:ring-slate-400 sm:w-auto ${
+            className={`mt-4 rounded-xl px-5 py-3 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-[color:var(--accent-base)]/30 sm:min-w-[220px] ${
               engineActionDisabled
-                ? "cursor-not-allowed bg-slate-200 text-slate-500"
-                : "bg-indigo-600 text-white hover:bg-indigo-500"
+                ? "cursor-not-allowed border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] text-[color:var(--text-soft)]"
+                : "ui-btn-primary sm:min-w-[220px]"
             }`}
           >
-            {engineRunning ? "Отправляю запрос…" : "Запустить расчёт (движок)"}
+            {engineRunning ? "Отправка запроса…" : "Запросить расчёт на движке"}
           </button>
           {!projectId && (
-            <p className="mt-3 text-xs text-amber-600">Сначала импортируйте IFC и получите project_id.</p>
+            <EngineeringCallout variant="attention" title="Нет идентификатора проекта" className="mt-4">
+              <p>Сначала загрузите проект в студии и получите идентификатор на движке.</p>
+            </EngineeringCallout>
           )}
           {engineError && (
-            <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" role="alert">
-              {engineError}
-            </div>
+            <EngineeringCallout variant="risk" title="Ответ движка" className="mt-4">
+              <p>{engineError}</p>
+            </EngineeringCallout>
           )}
           {engineResult && (
-            <div className="mt-4 space-y-1 text-sm text-slate-600">
-              <p className="text-xs uppercase tracking-wide text-slate-500">Последний ответ</p>
+            <div className="mt-4 space-y-1 rounded-xl border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] p-4 text-sm text-[color:var(--text-muted)]">
+              <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">Последний ответ</p>
               <p>
-                ID запуска: <span className="font-semibold text-slate-900">{engineResult.id}</span>
+                ID запуска: <span className="font-semibold text-[color:var(--text-base)]">{engineResult.id}</span>
               </p>
               <p>
-                Статус: <span className="font-semibold text-slate-900">{translateStatus(engineResult.status)}</span>
+                Статус: <span className="font-semibold text-[color:var(--text-base)]">{translateStatus(engineResult.status)}</span>
               </p>
               <p>
-                Время: <span className="font-semibold text-slate-900">{formatTimestamp(engineResult.started_at)}</span>
+                Время: <span className="font-semibold text-[color:var(--text-base)]">{formatTimestamp(engineResult.started_at)}</span>
               </p>
             </div>
           )}
         </div>
       )}
 
-      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <h4 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">Результаты</h4>
+      <div className="ui-panel p-5 sm:p-6">
+        <EngineeringSectionHeader
+          kicker="Выходные данные"
+          title="Сводка по расчёту"
+          subtitle="Ключевые величины за выбранный период сценария. Удельные показатели отнесены к суммарной площади пола зон модели (не к «отапливаемой площади» СП)."
+        />
         {isBusy ? (
-          <div className="space-y-2">
-            {Array.from({ length: 3 }).map((_, idx) => (
-              <div key={idx} className="h-12 animate-pulse rounded-xl bg-slate-100" />
+          <div className="mt-4 space-y-2">
+            {Array.from({ length: 4 }).map((_, idx) => (
+              <div key={idx} className="h-14 ui-skeleton rounded-xl" />
             ))}
           </div>
         ) : !result && !engineResult ? (
-          <p className="text-sm text-slate-500">Запустите расчёт, чтобы увидеть результаты.</p>
+          <p className="mt-4 text-sm text-[color:var(--text-muted)]">Запустите локальный или серверный расчёт — здесь появятся числа и инженерные выводы.</p>
         ) : (
-          <div className="space-y-4">
+          <div className="mt-4 space-y-5">
             {result && (
               <>
-                <div className="grid gap-4 sm:grid-cols-3">
-                  <MetricCard label="Потребление энергии" value={metrics.energyDemand} unit="kWh" />
-                  <MetricCard label="Пиковая нагрузка" value={metrics.heatingLoad} unit="kW" />
-                  <MetricCard label="Охлаждение" value={metrics.coolingLoad} unit="kW" />
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  <EngineeringMetricTile
+                    label="Пиковая мощность отопления"
+                    value={metrics.heatingLoad == null ? "—" : formatNumber(metrics.heatingLoad, { maximumFractionDigits: 3 })}
+                    unit="кВт"
+                    hint="Максимум по времени суммы мощностей по зонам — одновременная нагрузка на «систему» в модели."
+                    tone="neutral"
+                  />
+                  <EngineeringMetricTile
+                    label="Тепловая энергия за период"
+                    value={metrics.energyDemand == null ? "—" : formatEnergy(metrics.energyDemand)}
+                    unit="кВт·ч"
+                    hint="Интеграл суммарной мощности отопления за длительность сценария (24 ч в пресете)."
+                    tone="neutral"
+                  />
+                  <EngineeringMetricTile
+                    label="Удельная пиковая нагрузка"
+                    value={b == null ? "—" : formatNumber(b.specificPeakLoad_W_m2, { maximumFractionDigits: 1 })}
+                    unit="Вт/м²"
+                    hint="Пик / площадь пола зон RC-модели."
+                    tone={balanceTone}
+                  />
+                  <EngineeringMetricTile
+                    label="Удельная энергия за период"
+                    value={b == null ? "—" : formatNumber(b.specificEnergyKWh_m2, { maximumFractionDigits: 2 })}
+                    unit="кВт·ч/м²"
+                    hint="Энергия отопления за период на м² пола зон."
+                    tone="neutral"
+                  />
+                  <EngineeringMetricTile
+                    label="Мин. температура зон (по таймлайну)"
+                    value={roomTempRange.min == null ? "—" : formatNumber(roomTempRange.min, { maximumFractionDigits: 1 })}
+                    unit="°C"
+                    hint="Минимум по всем зонам и всем шагам после расчёта — ориентир, не норматив комфорта."
+                    tone="neutral"
+                  />
+                  <EngineeringMetricTile
+                    label="Часы дискомфорта (сумма по зонам)"
+                    value={result.summary.discomfortHours == null ? "—" : formatNumber(result.summary.discomfortHours, { maximumFractionDigits: 1 })}
+                    unit="ч"
+                    hint="Время ниже уставки более чем на 0,05 °C; при нескольких зонах может превышать длительность периода."
+                    tone={result.summary.discomfortHours > 24 ? "attention" : "ok"}
+                  />
                 </div>
+
+                {b && (
+                  <EngineeringCallout variant="assumption" title="Доли теплопотерь в диагностическом срезе (пик Σ Q̇_ot)">
+                    <p className="mb-2 text-[color:var(--text-muted)]">
+                      Непрозрачная часть {b.lossSharePercent.opaque.toFixed(0)}% · окна {b.lossSharePercent.window.toFixed(0)}% · двери{" "}
+                      {b.lossSharePercent.door.toFixed(0)}% · инфильтрация {b.lossSharePercent.infiltration.toFixed(0)}%. Учитывается только
+                      отвод при <em>T</em>
+                      <sub>внутри</sub> &gt; <em>T</em>
+                      <sub>наруж</sub>.
+                    </p>
+                    <p className="text-xs text-[color:var(--text-soft)]">{b.referenceNote}</p>
+                  </EngineeringCallout>
+                )}
+
+                <div className="grid gap-4 lg:grid-cols-2">
+                  <EngineeringCallout variant="assumption" title="Допущения расчёта">
+                    <ul>
+                      <li>Отопление моделируется как источник до уставки без учёта гидравлики и реальной регулировки.</li>
+                      <li>Инфильтрация — сенсибельная модель по ACH (см. формулу проводимости в карточках ниже).</li>
+                      <li>Блок не заменяет нормативную проверку СП 50 и не является CFD.</li>
+                    </ul>
+                  </EngineeringCallout>
+                  <EngineeringCallout variant="info" title="Ограничения метода">
+                    <ul>
+                      <li>Зональная температура — усреднение по объёму зоны.</li>
+                      <li>Остаток баланса в срезе проверяет согласованность с дискретным уравнением RC, а не «правильность здания» в нормах.</li>
+                    </ul>
+                  </EngineeringCallout>
+                </div>
+
+                {result.modelWarnings && result.modelWarnings.length > 0 && (
+                  <EngineeringCallout variant="attention" title="Предупреждения модели — что стоит проверить">
+                    <ul>
+                      {result.modelWarnings.map((w) => (
+                        <li key={w}>{w}</li>
+                      ))}
+                    </ul>
+                  </EngineeringCallout>
+                )}
+
+                {insightLines.length > 0 && (
+                  <EngineeringCallout variant="info" title="Инженерный вывод (кратко)">
+                    <ul>
+                      {insightLines.map((line) => (
+                        <li key={line.slice(0, 80)}>{line}</li>
+                      ))}
+                    </ul>
+                  </EngineeringCallout>
+                )}
+
                 {result.diagnostics && (
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50/90 p-4 text-sm text-slate-700">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Методика RC (динамика)</p>
-                    <p className="mt-2 leading-relaxed text-slate-700">{result.diagnostics.engineering.calculationLevelRu}</p>
-                    <p className="mt-1 font-mono text-xs text-slate-600">{result.diagnostics.engineering.discreteBalanceEquation}</p>
-                    <p className="mt-1 text-xs text-slate-600">{result.diagnostics.engineering.infiltrationConductanceFormula}</p>
-                    <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Показатели с единицами и формулами</p>
+                  <div className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] p-4 text-sm text-[color:var(--text-base)]">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">Методика RC и контрольные карточки</p>
+                    <p className="mt-2 leading-relaxed text-[color:var(--text-muted)]">{result.diagnostics.engineering.calculationLevelRu}</p>
+                    <p className="mt-2 font-mono text-[11px] leading-snug text-[color:var(--text-muted)]">{result.diagnostics.engineering.discreteBalanceEquation}</p>
+                    <p className="mt-1 text-xs text-[color:var(--text-muted)]">{result.diagnostics.engineering.infiltrationConductanceFormula}</p>
+                    <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">Показатели: формула и смысл</p>
                     <ul className="mt-2 space-y-3">
                       {result.diagnostics.metricCards.map((card) => (
-                        <li key={card.title} className="rounded-xl border border-slate-200 bg-white p-3">
+                        <li key={card.title} className="rounded-xl border border-[color:var(--border-soft)] bg-[color:var(--surface-elevated)] p-3 shadow-sm">
                           <div className="flex flex-wrap items-baseline justify-between gap-2">
-                            <span className="font-medium text-slate-900">{card.title}</span>
-                            <span className="text-slate-900">
-                              {card.valueText} <span className="text-slate-500">{card.unit}</span>{" "}
-                              <DiagnosticsStatusBadge status={card.status} />
+                            <span className="font-medium text-[color:var(--text-base)]">{card.title}</span>
+                            <span className="tabular-nums text-[color:var(--text-base)]">
+                              {card.valueText} <span className="text-[color:var(--text-muted)]">{card.unit}</span> <DiagnosticsStatusBadge status={card.status} />
                             </span>
                           </div>
-                          <p className="mt-1 text-xs text-slate-500">Формула: {card.formula}</p>
-                          <p className="mt-1 text-xs text-slate-600">{card.engineeringSenseRu}</p>
-                          <p className="mt-1 text-xs text-amber-900/80">Допущения: {card.assumptionsRu}</p>
+                          <p className="mt-1 text-xs text-[color:var(--text-soft)]">Формула: {card.formula}</p>
+                          <p className="mt-1 text-xs text-[color:var(--text-muted)]">{card.engineeringSenseRu}</p>
+                          <p className="mt-1 text-xs text-[color:var(--text-muted)]">Допущения: {card.assumptionsRu}</p>
                         </li>
                       ))}
                     </ul>
-                    <p className="mt-3 text-xs text-slate-500">{result.diagnostics.engineering.notSp50NormativeCheckRu}</p>
+                    <p className="mt-3 text-xs text-[color:var(--text-soft)]">{result.diagnostics.engineering.notSp50NormativeCheckRu}</p>
+                    <p className="mt-1 text-xs text-[color:var(--text-soft)]">{result.diagnostics.engineering.notMonteCarloRu}</p>
+                    <p className="mt-1 text-xs text-[color:var(--text-soft)]">{result.diagnostics.engineering.notCfdFieldRu}</p>
                   </div>
                 )}
+
+                {result && (onShowOnModel || onGenerateReport) ? (
+                  <div className="mt-5 flex flex-wrap gap-2 border-t border-[color:var(--border-soft)] pt-4">
+                    {onShowOnModel ? (
+                      <button type="button" className="ui-btn-secondary text-sm" onClick={onShowOnModel}>
+                        Показать на модели
+                      </button>
+                    ) : null}
+                    {onGenerateReport ? (
+                      <button type="button" className="ui-btn-primary text-sm" onClick={onGenerateReport}>
+                        Сформировать отчёт
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
               </>
             )}
             {engineResult && (
-              <div className="rounded-2xl border border-slate-100 bg-slate-50/80 p-4">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Ответ движка</p>
+              <div className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">Ответ движка</p>
                 {engineMetrics.length ? (
-                  <ul className="mt-2 space-y-1 text-sm text-slate-700">
+                  <ul className="mt-2 space-y-1.5 text-sm text-[color:var(--text-muted)]">
                     {engineMetrics.map((metric) => (
-                      <li key={metric.key} className="flex items-center justify-between gap-4">
+                      <li key={metric.key} className="flex items-center justify-between gap-4 border-b border-[color:var(--border-soft)] py-1 last:border-0">
                         <span>{metric.label ?? metric.key}</span>
-                        <span className="font-semibold text-slate-900">{formatEngineValue(metric)}</span>
+                        <span className="font-semibold tabular-nums text-[color:var(--text-base)]">{formatEngineValue(metric)}</span>
                       </li>
                     ))}
                   </ul>
                 ) : (
-                  <p className="mt-2 text-sm text-slate-500">Метрики не переданы.</p>
+                  <p className="mt-2 text-sm text-[color:var(--text-soft)]">Метрики в ответе не переданы.</p>
                 )}
               </div>
             )}
@@ -256,28 +410,35 @@ export function SimulationPanel({ projectId, projectKind, onSolveComplete }: Sim
 
 function DiagnosticsStatusBadge({ status }: { status: EngineeringMetricCard["status"] }) {
   const map = {
-    ok: { label: "норма", className: "bg-emerald-100 text-emerald-800" },
-    attention: { label: "внимание", className: "bg-amber-100 text-amber-900" },
-    risk: { label: "риск", className: "bg-red-100 text-red-800" },
+    ok: { label: "норма", className: "bg-[color:var(--success-bg)] text-[color:var(--success-fg)] ring-1 ring-[color:var(--success-border)]" },
+    attention: {
+      label: "внимание",
+      className: "bg-[color:var(--warning-bg)] text-[color:var(--warning-fg)] ring-1 ring-[color:var(--warning-border)]",
+    },
+    risk: { label: "риск", className: "bg-[color:var(--danger-bg)] text-[color:var(--danger-fg)] ring-1 ring-[color:var(--danger-border)]" },
   } as const;
   const entry = map[status];
-  return <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${entry.className}`}>{entry.label}</span>;
+  return <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${entry.className}`}>{entry.label}</span>;
 }
 
-function MetricCard({ label, value, unit }: { label: string; value: number | null; unit: string }) {
-  return (
-    <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4 text-center shadow-inner">
-      <p className="text-xs uppercase tracking-wide text-slate-500">{label}</p>
-      <p className="mt-2 text-2xl font-semibold text-slate-900">
-        {value == null ? "—" : unit === "kWh" ? formatEnergy(value) : formatWithUnit(value, unit)}
-      </p>
-    </div>
-  );
-}
-
-function formatWithUnit(value: number, unit: string): string {
-  const formatted = formatNumber(value, { maximumFractionDigits: 1 });
-  return formatted === "—" ? formatted : `${formatted} ${unit}`;
+function roomTemperatureRangeAcrossTimeline(result: ThermalSimulationResult): { min: number | null; max: number | null } {
+  let minV = Infinity;
+  let maxV = -Infinity;
+  for (const frame of result.timeline) {
+    if (!frame.rooms) {
+      continue;
+    }
+    for (const r of Object.values(frame.rooms)) {
+      if (Number.isFinite(r.temperatureC)) {
+        minV = Math.min(minV, r.temperatureC);
+        maxV = Math.max(maxV, r.temperatureC);
+      }
+    }
+  }
+  if (!Number.isFinite(minV)) {
+    return { min: null, max: null };
+  }
+  return { min: minV, max: maxV };
 }
 
 function extractEngineMetrics(result: RunResult | null): RunResultMetric[] {

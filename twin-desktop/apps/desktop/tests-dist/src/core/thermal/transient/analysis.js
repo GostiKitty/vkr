@@ -71,8 +71,8 @@ export function buildTransientLayersFromConstruction(input) {
         const lambda_W_mK = lambdaCandidate;
         const densityCandidate = material.rho_kg_m3;
         const heatCapacityCandidate = material.c_J_kgK;
-        let density_kg_m3 = Number.isFinite(densityCandidate) && densityCandidate !== undefined && densityCandidate > 0 ? densityCandidate : 1000;
-        let heatCapacity_J_kgK = Number.isFinite(heatCapacityCandidate) && heatCapacityCandidate !== undefined && heatCapacityCandidate > 0 ? heatCapacityCandidate : 840;
+        const density_kg_m3 = Number.isFinite(densityCandidate) && densityCandidate !== undefined && densityCandidate > 0 ? densityCandidate : 1000;
+        const heatCapacity_J_kgK = Number.isFinite(heatCapacityCandidate) && heatCapacityCandidate !== undefined && heatCapacityCandidate > 0 ? heatCapacityCandidate : 840;
         if (!(Number.isFinite(densityCandidate) && densityCandidate !== undefined && densityCandidate > 0)) {
             warnings.push(`Для материала ${materialName} отсутствовала плотность. Использован fallback 1000 кг/м3.`);
         }

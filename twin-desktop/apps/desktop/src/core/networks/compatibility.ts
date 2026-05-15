@@ -19,6 +19,10 @@ const PIPE_RULES: Record<EquipmentType, PipeSystemType[]> = {
   ahu: [],
   pump: ["heating_supply", "heating_return", "dhw", "chw"],
   boiler: ["heating_supply", "heating_return"],
+  heat_exchanger: ["heating_supply", "heating_return", "dhw"],
+  elevator: ["heating_supply"],
+  expansion_tank: ["heating_return"],
+  dirt_separator: ["heating_supply", "heating_return"],
   diffuser: [],
   sensor: [],
 };
@@ -29,6 +33,10 @@ const DUCT_RULES: Record<EquipmentType, boolean> = {
   ahu: true,
   pump: false,
   boiler: false,
+  heat_exchanger: false,
+  elevator: false,
+  expansion_tank: false,
+  dirt_separator: false,
   diffuser: true,
   sensor: false,
 };

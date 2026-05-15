@@ -1,8 +1,10 @@
 import { pointToSegmentDistance, polygonContainsPoint } from "../../entities/geometry/geom";
-import { buildGeometryRenderModel } from "../geometry/bimPipeline";
+import { buildGeometryRenderModel, dedupeRoomVolumesForModel } from "../geometry/bimPipeline";
 import { getDefaultSurfaceResistanceProfile } from "../../norms/sp50_2024/heatTransferCoefficients";
 import { buildThermalPhysicsModel, } from "./physics";
 const DEFAULT_EXTERNAL_DECAY_M = 1.65;
+/** Методика уровня «визуализация»: не подменяет RC и не является CFD. */
+export const THERMAL_FIELD_VISUALIZATION_SCOPE_RU = "Поле температуры в плане строится как сглаженная скалярная функция от зональных температур помещений, локальных источников (оборудование, освещение, трубы, соляр) и граничных условий у наружных стен; это инженерная иллюстрация, а не решение уравнения теплопроводности в объёме (не CFD).";
 const MIN_ROOM_SAMPLE_STEP_M = 0.18;
 const MAX_ROOM_SAMPLE_STEP_M = 0.48;
 const MAX_ROOM_SAMPLES = 160;
@@ -13,14 +15,25 @@ const MAX_SOURCE_GAIN_C = 8.6;
 const MAX_WALL_COOLING_C = 5.2;
 const MIN_WALL_INTERACTION_M = 0.35;
 const DEFAULT_SURFACE_RESISTANCE = getDefaultSurfaceResistanceProfile();
+/** Согласовано с типовыми α стены из СП 50 (см. `getDefaultSurfaceResistanceProfile` / `computeWallProperties` с плёнками). */
 const INTERNAL_SURFACE_RESISTANCE = DEFAULT_SURFACE_RESISTANCE.internal_m2K_W;
 const EXTERNAL_SURFACE_RESISTANCE = DEFAULT_SURFACE_RESISTANCE.external_m2K_W;
 const INTERNAL_COUPLING_SURFACE_RESISTANCE = 0.17;
 const roomSampleCache = new Map();
-export function createThermalFieldModel(model, options, renderGeometry = buildGeometryRenderModel(model), physics = buildThermalPhysicsModel(model, {
-    ...options,
-    fixedRoomTemperaturesC: options.roomTemperaturesC,
-}, renderGeometry)) {
+export function createThermalFieldModel(model, options, renderGeometryArg, physicsArg) {
+    const baseRender = renderGeometryArg ?? buildGeometryRenderModel(model);
+    const renderGeometry = physicsArg === undefined
+        ? { ...baseRender, roomVolumes: dedupeRoomVolumesForModel(baseRender.roomVolumes, model.rooms, null) }
+        : baseRender;
+    const physicsBuilt = physicsArg ??
+        buildThermalPhysicsModel(model, {
+            ...options,
+            fixedRoomTemperaturesC: options.roomTemperaturesC,
+        }, renderGeometry);
+    const physics = {
+        ...physicsBuilt,
+        warnings: physicsBuilt.warnings ?? [],
+    };
     const detailScale = clamp(options.detailScale ?? 1, MIN_DETAIL_SCALE, MAX_DETAIL_SCALE);
     const rooms = renderGeometry.roomVolumes.map((room) => createThermalRoom(room, physics.roomBalances.get(room.roomId), detailScale));
     const roomMap = new Map(rooms.map((room) => [room.roomId, room]));
@@ -42,6 +55,7 @@ export function createThermalFieldModel(model, options, renderGeometry = buildGe
         boundaryByWallId,
         minTemperatureC: options.outdoorTemperatureC,
         maxTemperatureC: Math.max(options.outdoorTemperatureC, ...rooms.map((room) => room.baseTemperatureC)),
+        visualizationScopeRu: THERMAL_FIELD_VISUALIZATION_SCOPE_RU,
     };
     rooms.forEach((room) => {
         const points = room.samplePoints.length ? room.samplePoints : [room.centroid];
@@ -264,6 +278,10 @@ function buildHeatSources(model, rooms, physics) {
             case "ahu":
             case "pump":
             case "boiler":
+            case "heat_exchanger":
+            case "elevator":
+            case "expansion_tank":
+            case "dirt_separator":
             case "diffuser":
             case "sensor": {
                 const nominal = typeof item.params.nominalPowerW === "number" && item.params.nominalPowerW > 0
@@ -272,11 +290,19 @@ function buildHeatSources(model, rooms, physics) {
                         ? 90
                         : item.type === "boiler"
                             ? 220
-                            : item.type === "ahu"
-                                ? 280
-                                : item.type === "diffuser"
-                                    ? 45
-                                    : 8;
+                            : item.type === "heat_exchanger"
+                                ? 120
+                                : item.type === "elevator"
+                                    ? 24
+                                    : item.type === "expansion_tank"
+                                        ? 12
+                                        : item.type === "dirt_separator"
+                                            ? 32
+                                            : item.type === "ahu"
+                                                ? 280
+                                                : item.type === "diffuser"
+                                                    ? 45
+                                                    : 8;
                 powerW = nominal;
                 amplitudeC = clamp(powerW / Math.max(520, roomArea * 82), 0.05, item.type === "boiler" ? 1.8 : 1.25);
                 decayM = clamp(Math.sqrt(roomArea) * 0.18, 0.45, 1.8);

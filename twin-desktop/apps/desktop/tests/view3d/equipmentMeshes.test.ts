@@ -33,7 +33,19 @@ const baseSensor: SensorDevice = {
 };
 
 test("createEquipmentVisual returns Group for all supported types", () => {
-  const types: Equipment["type"][] = ["radiator", "boiler", "pump", "ahu", "diffuser", "fancoil", "sensor"];
+  const types: Equipment["type"][] = [
+    "radiator",
+    "boiler",
+    "pump",
+    "heat_exchanger",
+    "elevator",
+    "expansion_tank",
+    "dirt_separator",
+    "ahu",
+    "diffuser",
+    "fancoil",
+    "sensor",
+  ];
   types.forEach((type) => {
     const visual = createEquipmentVisual(baseEquipment(type), { selected: false, levelHeight: 3 });
     if (!(visual instanceof THREE.Group) || visual.children.length === 0) {
@@ -53,7 +65,7 @@ test("unknown equipment type falls back to generic 3D visual", () => {
 });
 
 test("simplified equipment mode keeps supported equipment lightweight", () => {
-  const types: Equipment["type"][] = ["radiator", "boiler", "pump"];
+  const types: Equipment["type"][] = ["radiator", "boiler", "pump", "heat_exchanger", "elevator"];
   types.forEach((type) => {
     const visual = createEquipmentVisual(baseEquipment(type), { selected: false, levelHeight: 3, simplified: true });
     if (!(visual instanceof THREE.Group) || visual.children.length === 0) {

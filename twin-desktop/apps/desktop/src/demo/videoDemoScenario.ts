@@ -121,11 +121,11 @@ export const videoDemoScenario: VideoDemoScenario = {
   id: "video-demo",
   name: "Демонстрационный дом",
   description:
-    "Автоматически открывает подготовленный пример и последовательно показывает геометрию, инженерные сети, проверку по СП, нестационарный расчет, вероятностную оценку риска и экономику энергосбережения.",
+    "Двухэтажный демонстрационный дом с кровлей, тепловым пунктом, отоплением, вентиляцией, датчиками и полным инженерным циклом расчёта.",
   model: buildVideoDemoModel(),
   thermalResult: buildVideoDemoThermalResult(videoDemoHouse),
   transientScenarioId: "heating_shutdown_6h",
-  transientTargetId: "roof:video-roof-1",
+  transientTargetId: "roof:video-roof-main",
   transientNodesPerLayer: 4,
   transientTimeStep_s: 10,
   transientDuration_s: 6 * 3600,

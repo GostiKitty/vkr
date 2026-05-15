@@ -102,6 +102,53 @@ export function extrudeRoomVolume(room, polygon, insetDistanceM, source) {
         areaM2: Math.abs(polygonArea(normalized)),
     };
 }
+function buildPolygonSignatureForVolumeDedupe(points) {
+    return points.map((point) => `${point.x.toFixed(3)}:${point.y.toFixed(3)}`).join("|");
+}
+/**
+ * Сводит дубликаты объёмов с одинаковым контуром к одному `roomId` из модели (как в `buildCanonical3DModel`).
+ * Без этого `ThermalFieldModel` и 3D-геометрия расходятся по ключам, и температурное поле «пропадает».
+ */
+export function dedupeRoomVolumesForModel(roomVolumes, modelRooms, activeLevelId) {
+    const grouped = new Map();
+    roomVolumes
+        .filter((room) => !activeLevelId || room.levelId === activeLevelId)
+        .forEach((room) => {
+        const key = `${room.levelId}:${buildPolygonSignatureForVolumeDedupe(room.polygon)}`;
+        const list = grouped.get(key) ?? [];
+        list.push(room);
+        grouped.set(key, list);
+    });
+    const roomsById = new Map(modelRooms.map((room) => [room.id, room]));
+    const usedRoomIds = new Set();
+    return [...grouped.values()].map((variants) => {
+        const manualVariant = variants.find((variant) => roomsById.has(variant.roomId) && !usedRoomIds.has(variant.roomId));
+        if (manualVariant) {
+            usedRoomIds.add(manualVariant.roomId);
+            return manualVariant;
+        }
+        const fallback = variants[0];
+        const center = polygonCentroid(fallback.polygon);
+        const area = Math.abs(polygonArea(fallback.polygon));
+        const matchedRoom = modelRooms
+            .filter((room) => room.levelId === fallback.levelId && !usedRoomIds.has(room.id))
+            .map((room) => {
+            const roomCenter = polygonCentroid(room.polygon);
+            const roomArea = Math.abs(polygonArea(room.polygon));
+            const score = Math.hypot(roomCenter.x - center.x, roomCenter.y - center.y) * 4 + Math.abs(roomArea - area);
+            return { room, score };
+        })
+            .sort((left, right) => left.score - right.score)[0]?.room;
+        if (matchedRoom) {
+            usedRoomIds.add(matchedRoom.id);
+            return {
+                ...fallback,
+                roomId: matchedRoom.id,
+            };
+        }
+        return fallback;
+    });
+}
 export function cutOpeningInWall(wall, openings) {
     const wallLength = Math.hypot(wall.b.x - wall.a.x, wall.b.y - wall.a.y);
     return openings

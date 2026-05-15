@@ -19,5 +19,22 @@ export default defineConfig([
       ecmaVersion: 2020,
       globals: globals.browser,
     },
+    rules: {
+      // Syncing local form state from props / external defaults is common in this app;
+      // the rule rejects legitimate "reset when X changes" patterns.
+      'react-hooks/set-state-in-effect': 'off',
+    },
+  },
+  {
+    files: [
+      '**/ThermalSimulationPanel.tsx',
+      '**/Build3DStablePreview.tsx',
+      '**/Build3DRecoveredPreview.tsx',
+      '**/ModelPage.tsx',
+      '**/ThemeProvider.tsx',
+    ],
+    rules: {
+      'react-refresh/only-export-components': 'off',
+    },
   },
 ])

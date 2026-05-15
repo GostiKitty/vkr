@@ -57,7 +57,7 @@ export function QuickImportButton({ variant }: QuickImportButtonProps) {
       if (!engineOnline) {
         const base = normalizedBase || "http://127.0.0.1:8010";
         notifyError(
-          `Двигатель недоступен. Убедитесь, что сервис по адресу ${base} запущен и эндпоинт /health отвечает.\n` +
+          `Движок недоступен. Убедитесь, что сервис по адресу ${base} запущен и эндпоинт /health отвечает.\n` +
             "1) Запустите backend (uvicorn main:app --reload).\n2) Проверьте URL в разделе «Настройки».\n3) Повторите импорт."
         );
         return;
@@ -79,11 +79,11 @@ export function QuickImportButton({ variant }: QuickImportButtonProps) {
   const buttonClass =
     variant === "topbar"
       ? `rounded-full border px-4 py-1.5 text-sm font-semibold transition ${
-          isLoading ? "border-slate-200 bg-slate-100 text-slate-400" : "border-slate-300 bg-white text-slate-700 hover:border-slate-500"
+          isLoading
+            ? "cursor-wait border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] text-[color:var(--text-soft)]"
+            : "ui-control border-[color:var(--border-base)] bg-[color:var(--surface-base)] text-[color:var(--text-muted)]"
         }`
-      : `rounded-2xl px-5 py-2 text-sm font-semibold transition ${
-          isLoading ? "bg-slate-200 text-slate-500" : "bg-slate-900 text-white shadow hover:bg-slate-800"
-        }`;
+      : `${isLoading ? "cursor-wait opacity-60 ui-btn-secondary" : "ui-btn-primary"} rounded-2xl px-5 py-2 text-sm`;
 
   return (
     <div className={variant === "topbar" ? "inline-flex" : "flex justify-end"}>

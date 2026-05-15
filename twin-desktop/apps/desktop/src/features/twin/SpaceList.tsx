@@ -28,11 +28,11 @@ export function SpaceList() {
   const handleSortToggle = () => setSortDir((prev) => (prev === "asc" ? "desc" : "asc"));
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+    <div className="ui-panel p-4">
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Помещения</h3>
-          <p className="text-xs text-slate-400">{loading ? "Загружаю…" : `${filteredSpaces.length} найдено`}</p>
+          <h3 className="text-sm font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">Помещения</h3>
+          <p className="text-xs text-[color:var(--text-soft)]">{loading ? "Загружаю…" : `${filteredSpaces.length} найдено`}</p>
         </div>
         <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
           <input
@@ -40,13 +40,9 @@ export function SpaceList() {
             placeholder="Найти помещение"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 shadow-inner transition focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
+            className="ui-field w-full px-3 py-2 text-sm shadow-inner"
           />
-          <button
-            type="button"
-            onClick={handleSortToggle}
-            className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 transition hover:border-slate-400 hover:bg-slate-50"
-          >
+          <button type="button" onClick={handleSortToggle} className="ui-control px-3 py-2 text-sm font-medium">
             Площадь {sortDir === "asc" ? "↑" : "↓"}
           </button>
         </div>
@@ -55,11 +51,11 @@ export function SpaceList() {
       {loading ? (
         <div className="space-y-3">
           {skeletonItems.map((_, idx) => (
-            <div key={idx} className="h-14 animate-pulse rounded-xl bg-slate-100" />
+            <div key={idx} className="h-14 animate-pulse rounded-xl bg-[color:var(--surface-strong)]" />
           ))}
         </div>
       ) : filteredSpaces.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-sm text-slate-500 transition-all duration-300">
+        <div className="rounded-xl border border-dashed border-[color:var(--border-base)] bg-[color:var(--surface-muted)] p-6 text-center text-sm text-[color:var(--text-muted)] transition-all duration-300">
           Нет помещений, подходящих под запрос.
         </div>
       ) : (
@@ -76,27 +72,27 @@ export function SpaceList() {
                 onClick={() => selectSpace(space.id)}
                 className={`group w-full rounded-2xl border px-4 py-3 text-left transition-all duration-200 ${
                   isSelected
-                    ? "border-slate-900 bg-slate-900/5 text-slate-900 shadow"
-                    : "border-slate-200 bg-white text-slate-700 hover:border-slate-400 hover:bg-slate-50"
+                    ? "border-[color:var(--accent-base)] bg-[color:var(--accent-soft)] text-[color:var(--text-base)] shadow-[var(--accent-glow)]"
+                    : "border-[color:var(--border-soft)] bg-[color:var(--surface-base)] text-[color:var(--text-muted)] hover:border-[color:var(--accent-base)]/35 hover:bg-[color:var(--surface-muted)]"
                 }`}
               >
-                <div className="flex items-center justify-between text-sm font-semibold">
+                <div className="flex items-center justify-between text-sm font-semibold text-[color:var(--text-base)]">
                   <span className="truncate">{displayName}</span>
-                  <span className="text-xs text-slate-500">{formatArea(space.area_m2)}</span>
+                  <span className="text-xs text-[color:var(--text-soft)]">{formatArea(space.area_m2)}</span>
                 </div>
-                <div className="mt-1 flex items-center justify-between text-xs text-slate-500">
+                <div className="mt-1 flex items-center justify-between text-xs text-[color:var(--text-soft)]">
                   <span className="truncate">{space.level ?? "—"}</span>
                   <span>{formatVolume(space.volume_m3)}</span>
                 </div>
                 <div className="mt-2 flex items-center justify-between text-xs">
                   <span className="inline-flex items-center gap-2">
-                    <span className="text-slate-500">Температура</span>
+                    <span className="text-[color:var(--text-soft)]">Температура</span>
                     <span
-                      className="h-3 w-10 rounded-full"
-                      style={{ background: badgeColor, boxShadow: "0 0 0 1px rgba(15,23,42,0.08)" }}
+                      className="h-3 w-10 rounded-full ring-1 ring-[color:var(--border-base)]"
+                      style={{ background: badgeColor }}
                     />
                   </span>
-                  <span className="text-sm font-semibold text-slate-700">{formatTemperature(temperature)}</span>
+                  <span className="text-sm font-semibold tabular-nums text-[color:var(--text-base)]">{formatTemperature(temperature)}</span>
                 </div>
               </button>
             );

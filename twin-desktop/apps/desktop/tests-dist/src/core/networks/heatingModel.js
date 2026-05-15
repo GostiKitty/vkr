@@ -1,7 +1,7 @@
 import { isHeatingPipeType, normalizeFlowDirection, resolvePipeFlowRole, } from "../../entities/networks/types";
 import { polylineLength } from "./utils";
 const NODE_SNAP_TOLERANCE_M = 0.08;
-const HEATING_SOURCE_TYPES = new Set(["boiler", "pump"]);
+const HEATING_SOURCE_TYPES = new Set(["boiler", "pump", "heat_exchanger"]);
 const HEATING_CONSUMER_TYPES = new Set(["radiator", "fancoil"]);
 export function buildHeatingModelSnapshot(model) {
     const heatingPipes = model.pipes.filter((pipe) => isHeatingPipeType(pipe.type));

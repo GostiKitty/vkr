@@ -5,10 +5,22 @@ import { buildAdjacencyGraph } from "../../src/core/graph/adjacency.js";
 import { createThermalFieldModel } from "../../src/core/thermal/field.js";
 import { runEngineeringThermalAnalysis } from "../../src/core/thermal/engineering/analysis.js";
 import { buildDemoSp50RunResult } from "../../src/demo/sampleBuildingSP50.js";
+import type { EquipmentType } from "../../src/entities/networks/types.js";
 import { buildVideoDemoHouseModel, buildVideoDemoThermalResult, VIDEO_DEMO_ROOM_TEMPERATURES, videoDemoHouse } from "../../src/demo/videoDemoHouse.js";
 import { runVideoDemoScenario, videoDemoScenario } from "../../src/demo/videoDemoScenario.js";
 import { buildCanonical3DModel } from "../../src/features/build/view3d/buildCanonical3DModel.js";
 import { test } from "../testHarness.js";
+
+function polygonsMatch(left: Array<{ x: number; y: number }>, right: Array<{ x: number; y: number }>, tolerance = 1e-6) {
+  if (left.length !== right.length) {
+    return false;
+  }
+  return left.every((point) =>
+    right.some(
+      (candidate) => Math.abs(point.x - candidate.x) <= tolerance && Math.abs(point.y - candidate.y) <= tolerance
+    )
+  );
+}
 
 function assertFiniteDeep(value: unknown, path = "root") {
   if (typeof value === "number") {
@@ -29,21 +41,45 @@ function assertFiniteDeep(value: unknown, path = "root") {
 }
 
 test("videoDemoHouse contains complete geometry, networks and temperature data", () => {
-  if (videoDemoHouse.levels.length !== 1) {
-    throw new Error("Video demo house should stay one-storey.");
+  if (videoDemoHouse.levels.length !== 2) {
+    throw new Error("Video demo house should be a two-storey building.");
   }
-  if (videoDemoHouse.rooms.length < 4 || videoDemoHouse.walls.length < 12) {
-    throw new Error("Video demo house should include a complete shell with four rooms.");
+  if (videoDemoHouse.rooms.length < 8 || videoDemoHouse.walls.length < 24) {
+    throw new Error("Video demo house should include a complete shell with eight rooms.");
   }
   if (!videoDemoHouse.windows.length || !videoDemoHouse.doors.length) {
     throw new Error("Video demo house should include windows and doors.");
   }
+  const roof = videoDemoHouse.roofs?.[0];
   if (!(videoDemoHouse.roofs?.length ?? 0) || !(videoDemoHouse.floorSlabs?.length ?? 0)) {
-    throw new Error("Video demo house should include roof and floor slab.");
+    throw new Error("Video demo house should include roof and floor slabs.");
+  }
+  if (roof?.kind !== "pitched") {
+    throw new Error("Video demo house should include a pitched roof.");
   }
   if (!videoDemoHouse.pipes.length || !videoDemoHouse.equipment.length || !videoDemoHouse.sensors.length) {
-    throw new Error("Video demo house should include simple heating network, equipment and a sensor.");
+    throw new Error("Video demo house should include heating network, equipment and sensors.");
   }
+  if (!videoDemoHouse.ducts.length) {
+    throw new Error("Video demo house should include ventilation ducts.");
+  }
+  const equipmentTypes = new Set(videoDemoHouse.equipment.map((item) => item.type));
+  const requiredEquipment: EquipmentType[] = [
+    "heat_exchanger",
+    "pump",
+    "elevator",
+    "expansion_tank",
+    "dirt_separator",
+    "radiator",
+    "ahu",
+    "diffuser",
+    "fancoil",
+  ];
+  requiredEquipment.forEach((type) => {
+    if (!equipmentTypes.has(type)) {
+      throw new Error(`Video demo house should include equipment type "${type}".`);
+    }
+  });
   if (Object.keys(VIDEO_DEMO_ROOM_TEMPERATURES).length !== videoDemoHouse.rooms.length) {
     throw new Error("Every video demo room should have room-based temperature data.");
   }
@@ -62,35 +98,52 @@ test("videoDemoHouse room polygons stay aligned in canonical 3D", () => {
       Object.entries(firstFrame.rooms).map(([roomId, payload]) => [roomId, payload.temperatureC])
     ),
   });
-  const canonical = buildCanonical3DModel(videoDemoHouse, videoDemoHouse.levels[0]?.id ?? null, { thermalField });
   const renderGeometry = buildGeometryRenderModel(videoDemoHouse);
   const renderRoomsById = new Map(
     renderGeometry.roomVolumes
       .filter((entry) => entry.roomId.startsWith("video-room-"))
       .map((entry) => [entry.roomId, entry])
   );
-  if (canonical.rooms.length !== videoDemoHouse.rooms.length) {
-    throw new Error("Canonical 3D should expose one room floor per demo room.");
-  }
-  canonical.rooms.forEach((room) => {
-    const source = renderRoomsById.get(room.id);
-    if (!source) {
-      throw new Error(`Render geometry room ${room.id} should exist for the video demo.`);
+  videoDemoHouse.levels.forEach((level) => {
+    const canonical = buildCanonical3DModel(videoDemoHouse, level.id, { thermalField });
+    const roomsOnLevel = videoDemoHouse.rooms.filter((room) => room.levelId === level.id);
+    if (canonical.rooms.length !== roomsOnLevel.length) {
+      throw new Error(`Canonical 3D should expose one room floor per room on ${level.name}.`);
     }
-    if (source.polygon.length !== room.boundary.length) {
-      throw new Error(`Canonical room floor ${room.id} should keep the renderGeometry polygon.`);
-    }
-    if (
-      source.polygon.some((point, index) => {
-        const current = room.boundary[index];
-        return Math.abs(point.x - current.x) > 1e-6 || Math.abs(point.y - current.y) > 1e-6;
-      })
-    ) {
-      throw new Error(`Canonical room floor ${room.id} should stay aligned with renderGeometry.`);
-    }
-    if (!Number.isFinite(room.temperature_C)) {
-      throw new Error(`Room ${room.id} should receive room-based temperature coloring data.`);
-    }
+    canonical.rooms.forEach((room) => {
+      const source = renderRoomsById.get(room.id);
+      if (!source) {
+        throw new Error(`Render geometry room ${room.id} should exist for the video demo.`);
+      }
+      if (source.polygon.length !== room.boundary.length) {
+        throw new Error(`Canonical room floor ${room.id} should keep the renderGeometry polygon.`);
+      }
+      if (!polygonsMatch(source.polygon, room.boundary)) {
+        throw new Error(`Canonical room floor ${room.id} should stay aligned with renderGeometry.`);
+      }
+      const modelRoom = videoDemoHouse.rooms.find((entry) => entry.id === room.id);
+      if (!modelRoom) {
+        throw new Error(`Canonical room ${room.id} should map to a model room.`);
+      }
+      const modelArea = Math.abs(
+        modelRoom.polygon.reduce((sum, point, index) => {
+          const next = modelRoom.polygon[(index + 1) % modelRoom.polygon.length]!;
+          return sum + point.x * next.y - next.x * point.y;
+        }, 0) * 0.5
+      );
+      const renderArea = Math.abs(
+        source.polygon.reduce((sum, point, index) => {
+          const next = source.polygon[(index + 1) % source.polygon.length]!;
+          return sum + point.x * next.y - next.x * point.y;
+        }, 0) * 0.5
+      );
+      if (renderArea <= 0 || modelArea <= 0 || renderArea / modelArea < 0.7 || renderArea / modelArea > 1.05) {
+        throw new Error(`Canonical room floor ${room.id} should stay inside the model room footprint.`);
+      }
+      if (!Number.isFinite(room.temperature_C)) {
+        throw new Error(`Room ${room.id} should receive room-based temperature coloring data.`);
+      }
+    });
   });
 });
 
@@ -106,7 +159,7 @@ test("video demo thermal result keeps canonical geometry and now supports dedica
   if (!source.includes("temperature:room:")) {
     throw new Error("Canonical 3D should create dedicated temperature overlay meshes for room floors.");
   }
-  const baseline = buildCanonical3DModel(videoDemoHouse, videoDemoHouse.levels[0]?.id ?? null, { thermalField: null });
+  const baseline = buildCanonical3DModel(videoDemoHouse, null, { thermalField: null });
   const firstFrame = thermalResult.timeline[0];
   const thermalField = createThermalFieldModel(videoDemoHouse, {
     outdoorTemperatureC: firstFrame.outdoorTemperatureC,
@@ -115,7 +168,7 @@ test("video demo thermal result keeps canonical geometry and now supports dedica
       Object.entries(firstFrame.rooms).map(([roomId, payload]) => [roomId, payload.temperatureC])
     ),
   });
-  const colored = buildCanonical3DModel(videoDemoHouse, videoDemoHouse.levels[0]?.id ?? null, { thermalField });
+  const colored = buildCanonical3DModel(videoDemoHouse, null, { thermalField });
   baseline.rooms.forEach((room, index) => {
     const coloredRoom = colored.rooms[index];
     if (!coloredRoom) {

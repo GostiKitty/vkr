@@ -4,6 +4,7 @@ export function formatNumber(value, options) {
         return options?.fallback ?? "—";
     }
     const { fallback, ...intlOptions } = options ?? {};
+    void fallback;
     return new Intl.NumberFormat(LOCALE, {
         minimumFractionDigits: 0,
         maximumFractionDigits: 1,

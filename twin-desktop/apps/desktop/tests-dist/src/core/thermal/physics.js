@@ -1,14 +1,12 @@
 import { polygonArea, polygonContainsPoint, segmentLength } from "../../entities/geometry/geom";
-import { computeWallProperties } from "../../entities/material/types";
+import { DEFAULT_WALL_ASSEMBLY_ID } from "../../entities/material/types";
+import { computeWallFacadeConductances } from "./wallFacadeThermal";
 import { buildSmartModelSnapshot } from "../networks/intelligence";
 import { buildAdjacencyGraph } from "../graph/adjacency";
 import { buildGeometryRenderModel, } from "../geometry/bimPipeline";
 const AIR_DENSITY_KG_M3 = 1.204;
 const AIR_CP_J_KG_K = 1005;
 const DEFAULT_SETPOINT_C = 21;
-const DEFAULT_WALL_U_W_M2K = 1.4;
-const DEFAULT_WINDOW_U_W_M2K = 2.35;
-const DEFAULT_DOOR_U_W_M2K = 1.8;
 const DEFAULT_INFILTRATION_ACH = 0.45;
 const DEFAULT_VENTILATION_ACH = 0.18;
 const DEFAULT_LIGHTING_W_M2 = 2.6;
@@ -23,7 +21,7 @@ export function buildThermalPhysicsModel(model, options, renderGeometry = buildG
     const networkContext = buildThermalNetworkContext(model, options);
     const levelMap = new Map(model.levels.map((level) => [level.id, level]));
     const orientationByWallId = new Map(adjacency.external.map((edge) => [edge.wallId, edge.orientation]));
-    const surfaces = buildSurfaceEstimates(renderGeometry, options, orientationByWallId);
+    const { surfaces, warnings: surfaceWarnings } = buildSurfaceEstimates(renderGeometry, options, orientationByWallId);
     const roomSurfaces = new Map();
     surfaces.forEach((surface) => {
         if (surface.positiveRoomId) {
@@ -46,6 +44,7 @@ export function buildThermalPhysicsModel(model, options, renderGeometry = buildG
         surfaces,
         roomSurfaces,
         adjacency,
+        warnings: surfaceWarnings,
     };
 }
 function createRoomSeed(model, room, surfaces, levelMap, options, networkContext) {
@@ -117,7 +116,8 @@ function createRoomSeed(model, room, surfaces, levelMap, options, networkContext
     };
 }
 function buildSurfaceEstimates(renderGeometry, options, orientationByWallId) {
-    return renderGeometry.walls.map(({ wall, openings }) => {
+    const warnings = [];
+    const surfaces = renderGeometry.walls.map(({ wall, openings }) => {
         const direction = normalize({ x: wall.b.x - wall.a.x, y: wall.b.y - wall.a.y });
         const normal = { x: -direction.y, y: direction.x };
         const midpoint = { x: (wall.a.x + wall.b.x) / 2, y: (wall.a.y + wall.b.y) / 2 };
@@ -130,30 +130,21 @@ function buildSurfaceEstimates(renderGeometry, options, orientationByWallId) {
             x: midpoint.x - normal.x * probeDistance,
             y: midpoint.y - normal.y * probeDistance,
         });
-        const wallAreaM2 = Math.max(0.25, segmentLength(wall.a, wall.b) * Math.max(0.2, wall.height_m));
-        const windowAreaM2 = openings
-            .filter((opening) => opening.type === "window")
-            .reduce((sum, opening) => sum + opening.widthM * opening.heightM, 0);
-        const doorAreaM2 = openings
-            .filter((opening) => opening.type === "door")
-            .reduce((sum, opening) => sum + opening.widthM * opening.heightM, 0);
-        const openingAreaM2 = windowAreaM2 + doorAreaM2;
-        const opaqueAreaM2 = Math.max(0.05, wallAreaM2 - openingAreaM2);
-        const wallProps = computeWallProperties(wall.layers, wall.wallAssemblyId);
-        const wallU = wallProps?.uValue ?? DEFAULT_WALL_U_W_M2K;
-        const weightedU = (opaqueAreaM2 * wallU + windowAreaM2 * DEFAULT_WINDOW_U_W_M2K + doorAreaM2 * DEFAULT_DOOR_U_W_M2K) /
-            Math.max(0.1, wallAreaM2);
-        const effectiveR = 1 / Math.max(0.12, weightedU);
         const bridgeFactor = computeBridgeFactor(wall, openings, positiveRoom !== null && negativeRoom !== null);
         const windFactor = clamp(options.windFactor ?? DEFAULT_WIND_FACTOR, 0.4, 2.4);
-        const conductance_W_K = weightedU * wallAreaM2 * (positiveRoom && negativeRoom ? 1 : windFactor * bridgeFactor);
+        const conductanceMultiplier = positiveRoom && negativeRoom ? 1 : windFactor * bridgeFactor;
+        const facade = computeWallFacadeConductances(wall, openings, wall.wallAssemblyId ?? DEFAULT_WALL_ASSEMBLY_ID, conductanceMultiplier);
+        warnings.push(...facade.warnings);
+        const { wallAreaM2, opaqueAreaM2, windowAreaM2, doorAreaM2, weightedU_W_m2K: weightedU } = facade;
+        const effectiveR = 1 / Math.max(0.12, weightedU);
+        const conductance_W_K = facade.conductanceTotal_W_K;
         const orientation = positiveRoom && negativeRoom ? null : orientationByWallId.get(wall.id) ?? estimateOrientation(wall);
         const solarGainW = computeSolarGainW(windowAreaM2, orientation, options);
         return {
             wallId: wall.id,
             levelId: wall.levelId,
             wall,
-            kind: positiveRoom && negativeRoom ? "internal" : "external",
+            kind: (positiveRoom && negativeRoom ? "internal" : "external"),
             positiveRoomId: positiveRoom?.roomId ?? null,
             negativeRoomId: negativeRoom?.roomId ?? null,
             orientation,
@@ -162,13 +153,14 @@ function buildSurfaceEstimates(renderGeometry, options, orientationByWallId) {
             windowAreaM2,
             doorAreaM2,
             effectiveU_W_m2K: weightedU * bridgeFactor,
-            effectiveR_m2K_W: effectiveR / bridgeFactor,
+            effectiveR_m2K_W: effectiveR / Math.max(1e-6, bridgeFactor),
             conductance_W_K,
             bridgeFactor,
             solarGainW,
             openingPerimeterM: openings.reduce((sum, opening) => sum + opening.widthM * 2 + opening.heightM * 2, 0),
         };
     });
+    return { surfaces, warnings };
 }
 function solveRoomBalances(roomSeeds, couplingLinks, options) {
     const fixed = options.fixedRoomTemperaturesC ?? {};
@@ -332,7 +324,7 @@ function buildThermalNetworkContext(model, options) {
                     const equipmentState = equipmentStateById.get(equipmentId);
                     return (equipment &&
                         equipmentState?.effectiveState === "on" &&
-                        (equipment.type === "boiler" || equipment.type === "pump"));
+                        (equipment.type === "boiler" || equipment.type === "pump" || equipment.type === "heat_exchanger"));
                 }) ?? false;
                 return sum + flowFactor * tempFactor * (hasActiveSource ? 1 : 0.35);
             }, 0) / connectedPipeIds.length, 0, 1.4)
@@ -388,7 +380,11 @@ function buildThermalNetworkContext(model, options) {
                 if (!equipment || !state || state.effectiveState !== "on") {
                     return sum;
                 }
-                if (equipment.type === "boiler" || equipment.type === "pump" || equipment.type === "radiator" || equipment.type === "fancoil") {
+                if (equipment.type === "boiler" ||
+                    equipment.type === "pump" ||
+                    equipment.type === "heat_exchanger" ||
+                    equipment.type === "radiator" ||
+                    equipment.type === "fancoil") {
                     return sum + 1;
                 }
                 return sum + 0.25;
@@ -399,7 +395,7 @@ function buildThermalNetworkContext(model, options) {
             const equipmentState = equipmentStateById.get(equipmentId);
             return (equipment &&
                 equipmentState?.effectiveState === "on" &&
-                (equipment.type === "boiler" || equipment.type === "pump"));
+                (equipment.type === "boiler" || equipment.type === "pump" || equipment.type === "heat_exchanger"));
         }) ?? false;
         if (supportFactor <= 0 || (pipe.type !== "heating_supply" && pipe.type !== "heating_return")) {
             return;
@@ -500,6 +496,14 @@ function resolveEquipmentPassiveEmissionBaseW(item) {
             return nominalPower ? Math.min(Math.max(nominalPower * 0.06, 45), 120) : 90;
         case "boiler":
             return nominalPower ? Math.min(Math.max(nominalPower * 0.015, 120), 260) : 220;
+        case "heat_exchanger":
+            return nominalPower ? Math.min(Math.max(nominalPower * 0.004, 60), 140) : 80;
+        case "elevator":
+            return 24;
+        case "expansion_tank":
+            return 12;
+        case "dirt_separator":
+            return 32;
         case "diffuser":
             return 45;
         case "sensor":

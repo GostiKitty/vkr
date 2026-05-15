@@ -21,6 +21,10 @@ export type EquipmentType =
   | "ahu"
   | "pump"
   | "boiler"
+  | "heat_exchanger"
+  | "elevator"
+  | "expansion_tank"
+  | "dirt_separator"
   | "diffuser"
   | "sensor";
 export type EquipmentState = "on" | "off" | "alarm";
@@ -335,6 +339,10 @@ export const EQUIPMENT_TYPE_LABELS: Record<EquipmentType, string> = {
   ahu: "Вентустановка",
   pump: "Насос",
   boiler: "Котёл",
+  heat_exchanger: "Водоподогреватель",
+  elevator: "Элеватор",
+  expansion_tank: "Расширительный бак",
+  dirt_separator: "Грязевик",
   diffuser: "Диффузор",
   sensor: "Датчик",
 };

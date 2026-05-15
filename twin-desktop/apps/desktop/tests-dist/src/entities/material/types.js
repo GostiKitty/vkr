@@ -1,4 +1,8 @@
+import { calculateConstructionResistance } from "../../core/thermal/sp50/calculations";
 import { getMaterialThermalProperties } from "../../norms/sp50_2024/materialThermalProperties";
+import { EXTERNAL_HEAT_TRANSFER_COEFFICIENTS, INTERNAL_HEAT_TRANSFER_COEFFICIENTS } from "../../norms/sp50_2024/heatTransferCoefficients";
+const SP50_WALL_ALPHA_IN = INTERNAL_HEAT_TRANSFER_COEFFICIENTS.wall;
+const SP50_WALL_ALPHA_OUT = EXTERNAL_HEAT_TRANSFER_COEFFICIENTS.wall;
 function buildMaterialEntry(id, defaultThickness_m, fallbackName = id) {
     const properties = getMaterialThermalProperties({ materialId: id, operationCondition: "A" });
     return {
@@ -59,13 +63,13 @@ export const WALL_ASSEMBLIES = {
 export const DEFAULT_WALL_ASSEMBLY_ID = "masonry";
 export const getMaterial = (id) => MATERIAL_LIBRARY[id];
 export const getWallAssembly = (id) => WALL_ASSEMBLIES[id];
-export function computeWallProperties(layers, fallbackAssemblyId) {
+export function computeWallProperties(layers, fallbackAssemblyId, options) {
     const assembly = fallbackAssemblyId ? getWallAssembly(fallbackAssemblyId) : undefined;
     const effectiveLayers = layers?.length ? layers : assembly?.layers;
     if (!effectiveLayers || !effectiveLayers.length) {
         return null;
     }
-    let rTotal = 0;
+    let rLayers = 0;
     let heatCapacity = 0;
     let resolvedLayerCount = 0;
     effectiveLayers.forEach((layer) => {
@@ -74,17 +78,70 @@ export function computeWallProperties(layers, fallbackAssemblyId) {
             return;
         }
         const thickness = layer.thickness_m || material.defaultThickness_m;
-        rTotal += thickness / material.lambda_W_mK;
+        const lam = material.lambda_W_mK;
+        if (!Number.isFinite(lam) || lam <= 0 || !Number.isFinite(thickness) || thickness <= 0) {
+            return;
+        }
+        rLayers += thickness / lam;
         heatCapacity += material.rho_kg_m3 * material.c_J_kgK * thickness;
         resolvedLayerCount += 1;
     });
-    if (rTotal <= 0 || resolvedLayerCount === 0) {
+    if (rLayers <= 0 || resolvedLayerCount === 0 || !Number.isFinite(rLayers)) {
         return null;
     }
+    if (options?.includeSp50AirFilms) {
+        const layerResistances = effectiveLayers
+            .map((layer) => {
+            const material = getMaterial(layer.materialId);
+            if (!material) {
+                return null;
+            }
+            const thickness = layer.thickness_m || material.defaultThickness_m;
+            const lam = material.lambda_W_mK;
+            if (!Number.isFinite(lam) || lam <= 0) {
+                return null;
+            }
+            return thickness / lam;
+        })
+            .filter((value) => value !== null && value > 0);
+        if (!layerResistances.length) {
+            return null;
+        }
+        const rSi = 1 / SP50_WALL_ALPHA_IN;
+        const rSe = 1 / SP50_WALL_ALPHA_OUT;
+        const rComplete = calculateConstructionResistance({
+            internalHeatTransferCoefficient: SP50_WALL_ALPHA_IN,
+            externalHeatTransferCoefficient: SP50_WALL_ALPHA_OUT,
+            layerResistances,
+        });
+        const rLayersOnly = layerResistances.reduce((sum, value) => sum + value, 0);
+        const uLayers = 1 / rLayersOnly;
+        const uTot = 1 / rComplete;
+        return {
+            rValue: rComplete,
+            uValue: uTot,
+            heatCapacity_J_m2K: heatCapacity,
+            rMaterialLayers_m2K_W: rLayersOnly,
+            rSi_m2K_W: rSi,
+            rSe_m2K_W: rSe,
+            rTotal_m2K_W: rComplete,
+            uMaterialLayers_W_m2K: uLayers,
+            uTotal_W_m2K: uTot,
+            rLayersOnly_m2K_W: rLayersOnly,
+            uLayersOnly_W_m2K: uLayers,
+        };
+    }
+    const uMat = 1 / rLayers;
     return {
-        rValue: rTotal,
-        uValue: 1 / rTotal,
+        rValue: rLayers,
+        uValue: uMat,
         heatCapacity_J_m2K: heatCapacity,
+        rMaterialLayers_m2K_W: rLayers,
+        rSi_m2K_W: 0,
+        rSe_m2K_W: 0,
+        rTotal_m2K_W: rLayers,
+        uMaterialLayers_W_m2K: uMat,
+        uTotal_W_m2K: uMat,
     };
 }
 export function ensureWallLayers(wallLayers, assemblyId) {

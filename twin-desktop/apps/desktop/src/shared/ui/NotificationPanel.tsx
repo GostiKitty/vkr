@@ -25,17 +25,18 @@ export function NotificationPanel() {
       {items.map((item) => (
         <div
           key={item.id}
-          className={`pointer-events-auto flex w-full max-w-md items-center justify-between rounded-2xl border px-4 py-3 text-sm shadow-lg ${
+          className={`pointer-events-auto flex w-full max-w-md items-center justify-between rounded-2xl border px-4 py-3 text-sm shadow-[var(--shadow-overlay)] backdrop-blur-md animate-notify-in ${
             item.type === "error"
-              ? "border-red-200 bg-red-50 text-red-700"
-              : "border-emerald-200 bg-emerald-50 text-emerald-700"
+              ? "border-[color:var(--danger-border)] bg-[color:var(--danger-bg)] text-[color:var(--danger-fg)]"
+              : "border-[color:var(--success-border)] bg-[color:var(--success-bg)] text-[color:var(--success-fg)]"
           }`}
         >
-          <span>{item.message}</span>
+          <span className="pr-2 leading-snug">{item.message}</span>
           <button
             type="button"
-            className="text-xs font-semibold text-slate-500 transition hover:text-slate-900"
+            className="shrink-0 rounded-lg px-2 py-1 text-xs font-semibold text-[color:var(--text-muted)] transition hover:bg-black/5 hover:text-[color:var(--text-base)]"
             onClick={() => remove(item.id)}
+            aria-label="Закрыть"
           >
             ×
           </button>

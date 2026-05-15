@@ -17,23 +17,33 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { useTwinStore } from "../../entities/twin/twin.store";
 import { formatArea, formatVolume } from "../../shared/utils/format";
 import { formatTemperature, temperatureToColor } from "./twin.theme";
+import { TemperatureScaleLegend } from "../../shared/ui";
+import { useTheme } from "../../shared/theme";
 
 interface SpaceViewer3DProps {
   heatmap?: boolean;
   height?: number;
   caption?: string;
+  /** Показать шкалу цвета (имеет смысл при тепловой окраске). */
+  showLegend?: boolean;
+  /** Кнопка «Подогнать вид» под сценой. */
+  showFitControl?: boolean;
 }
 
 export function SpaceViewer3D({
   heatmap = false,
   height = 360,
   caption = "3D вид",
+  showLegend = false,
+  showFitControl = true,
 }: SpaceViewer3DProps) {
+  const { resolved: theme } = useTheme();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const rendererRef = useRef<WebGLRenderer | null>(null);
   const cameraRef = useRef<PerspectiveCamera | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
   const groupRef = useRef<Group | null>(null);
+  const sceneRef = useRef<Scene | null>(null);
   const meshesRef = useRef<Map<string, Mesh>>(new Map());
   const pointer = useRef(new Vector2());
   const raycaster = useRef(new Raycaster());
@@ -63,21 +73,22 @@ export function SpaceViewer3D({
       displayed[id] = eased;
 
       const thermalColor = temperatureToColor(eased);
-      const visualColor = heatmap ? thermalColor : mixColor("#94a3b8", thermalColor, 0.55);
+      const mixBase = theme === "dark" ? "#5a6574" : "#94a3b8";
+      const visualColor = heatmap ? thermalColor : mixColor(mixBase, thermalColor, 0.55);
       const material = mesh.material as MeshStandardMaterial;
       material.color.set(visualColor);
       material.opacity = 0.94;
       material.transparent = true;
 
       if (selectedId === id) {
-        material.emissive.set("#f97316");
-        material.emissiveIntensity = 0.45;
+        material.emissive.set(theme === "dark" ? "#9cb87a" : "#c2410c");
+        material.emissiveIntensity = theme === "dark" ? 0.28 : 0.4;
       } else {
         material.emissive.set(visualColor);
         material.emissiveIntensity = 0.08;
       }
     });
-  }, [heatmap]);
+  }, [heatmap, theme]);
 
   const fitCameraToSpaces = useCallback(() => {
     const camera = cameraRef.current;
@@ -152,7 +163,8 @@ export function SpaceViewer3D({
     }
 
     const scene = new Scene();
-    scene.background = new Color(0xf8fafc);
+    sceneRef.current = scene;
+    applyViewerBackground(scene);
 
     const camera = new PerspectiveCamera(45, Math.max(container.clientWidth, 1) / Math.max(container.clientHeight, 1), 0.1, 500);
     camera.position.set(12, 12, 12);
@@ -212,6 +224,7 @@ export function SpaceViewer3D({
     rebuildMeshes();
 
     return () => {
+      sceneRef.current = null;
       renderer.domElement.removeEventListener("pointerdown", handlePointer);
       window.removeEventListener("resize", handleResize);
       cancelAnimationFrame(animationFrameRef.current);
@@ -230,6 +243,14 @@ export function SpaceViewer3D({
       container.removeChild(renderer.domElement);
     };
   }, [rebuildMeshes, selectSpace, updateMeshVisuals]);
+
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) {
+      return;
+    }
+    applyViewerBackground(scene);
+  }, [theme]);
 
   useEffect(() => {
     rebuildMeshes();
@@ -258,8 +279,8 @@ export function SpaceViewer3D({
     }
     const temperature = frames[timeIndex]?.temperatures[selectedInstance.id];
     return (
-      <div className="rounded-2xl border border-white/70 bg-white/85 px-4 py-3 text-xs font-medium text-slate-700 shadow-lg backdrop-blur">
-        <p className="text-sm font-semibold text-slate-900">{selectedInstance.name}</p>
+      <div className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-overlay)] px-4 py-3 text-xs font-medium text-[color:var(--text-muted)] shadow-lg backdrop-blur">
+        <p className="text-sm font-semibold text-[color:var(--text-base)]">{selectedInstance.name}</p>
         <p>Площадь: {formatArea(selectedInstance.area)}</p>
         <p>Объём: {formatVolume(selectedInstance.volume)}</p>
         <p>Температура: {formatTemperature(temperature)}</p>
@@ -268,26 +289,51 @@ export function SpaceViewer3D({
   }, [frames, selectedInstance, timeIndex]);
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">{caption}</h3>
-        <p className="text-[11px] font-medium text-slate-400">Колесо мыши: масштаб, перетаскивание: орбита</p>
+    <div className="ui-panel p-4 sm:p-5">
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">{caption}</h3>
+          <p className="mt-1 max-w-xl text-xs leading-relaxed text-[color:var(--text-muted)]">
+            Колёсико мыши — масштаб; перетаскивание — обзор. Клик по объёму выбирает зону в списке свойств.
+          </p>
+        </div>
+        {heatmap && showLegend ? (
+          <TemperatureScaleLegend caption="Температурная карта построена по зональной модели и не является CFD." />
+        ) : null}
       </div>
       <div
-        className="relative w-full overflow-hidden rounded-2xl border border-slate-100 bg-slate-900/10"
+        className="ui-workspace-canvas relative w-full overflow-hidden shadow-inner"
         style={{ minHeight: height }}
       >
         <div ref={containerRef} className="absolute inset-0" />
         {!spaceInstances.length && (
-          <div className="absolute inset-0 flex items-center justify-center text-sm text-slate-500">
-            Импортируйте модель или экспортируйте Build Mode, чтобы увидеть геометрию помещений.
+          <div className="absolute inset-0 flex items-center justify-center px-6 text-center text-sm text-[color:var(--text-muted)]">
+            Импортируйте модель или откройте проект из конструктора, чтобы увидеть объёмы помещений.
           </div>
         )}
-        {selectedInstance && <div className="absolute left-4 top-4 transition-all duration-300">{stats}</div>}
+        {selectedInstance && <div className="absolute left-4 top-4 z-10 max-w-[min(100%,280px)] transition-all duration-300">{stats}</div>}
+        {heatmap && (
+          <div className="pointer-events-none absolute bottom-3 left-3 z-10 max-w-sm rounded-lg border border-[color:var(--border-soft)] bg-[color:var(--surface-overlay)] px-2.5 py-1.5 text-[10px] leading-snug text-[color:var(--text-muted)] shadow-sm backdrop-blur">
+            Визуализация по зональным температурам, не CFD. Цвет — ориентир в диапазоне 15…30 °C.
+          </div>
+        )}
+        {showFitControl && spaceInstances.length > 0 && (
+          <button
+            type="button"
+            onClick={() => fitCameraToSpaces()}
+            className="ui-btn-secondary absolute bottom-3 right-3 z-10 px-3 py-1.5 text-xs backdrop-blur"
+          >
+            Подогнать вид
+          </button>
+        )}
         {frames.length > 1 && (
-          <div className="absolute inset-x-4 bottom-4 rounded-2xl border border-white/60 bg-white/85 p-3 text-xs shadow-lg backdrop-blur">
-            <div className="mb-1 flex items-center justify-between text-[11px] font-semibold text-slate-500">
-              <span>Время</span>
+          <div
+            className={`absolute inset-x-4 z-10 rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-overlay)] p-3 text-xs shadow-lg backdrop-blur ${
+              showFitControl && spaceInstances.length > 0 ? "bottom-14" : "bottom-4"
+            }`}
+          >
+            <div className="mb-1 flex items-center justify-between text-[11px] font-semibold text-[color:var(--text-soft)]">
+              <span>Момент времени</span>
               <span>{formatTimeLabel(frames[timeIndex]?.time ?? 0)}</span>
             </div>
             <input
@@ -296,13 +342,22 @@ export function SpaceViewer3D({
               max={frames.length - 1}
               value={timeIndex}
               onChange={(event) => setTimeIndex(Number(event.target.value))}
-              className="w-full accent-slate-900"
+              className="w-full accent-[color:var(--accent-base)]"
             />
           </div>
         )}
       </div>
     </div>
   );
+}
+
+function applyViewerBackground(scene: Scene) {
+  const raw =
+    typeof document !== "undefined"
+      ? getComputedStyle(document.documentElement).getPropertyValue("--viewer3d-bg").trim()
+      : "";
+  const hex = raw.startsWith("#") ? raw : "#f4f7f5";
+  scene.background = new Color(hex);
 }
 
 function mixColor(base: string, blend: string, ratio: number): string {

@@ -426,6 +426,10 @@ function buildHeatSources(
       case "ahu":
       case "pump":
       case "boiler":
+      case "heat_exchanger":
+      case "elevator":
+      case "expansion_tank":
+      case "dirt_separator":
       case "diffuser":
       case "sensor": {
         const nominal =
@@ -435,11 +439,19 @@ function buildHeatSources(
               ? 90
               : item.type === "boiler"
                 ? 220
-                : item.type === "ahu"
-                  ? 280
-                  : item.type === "diffuser"
-                    ? 45
-                    : 8;
+                : item.type === "heat_exchanger"
+                  ? 120
+                  : item.type === "elevator"
+                    ? 24
+                    : item.type === "expansion_tank"
+                      ? 12
+                      : item.type === "dirt_separator"
+                        ? 32
+                        : item.type === "ahu"
+                          ? 280
+                          : item.type === "diffuser"
+                            ? 45
+                            : 8;
         powerW = nominal;
         amplitudeC = clamp(powerW / Math.max(520, roomArea * 82), 0.05, item.type === "boiler" ? 1.8 : 1.25);
         decayM = clamp(Math.sqrt(roomArea) * 0.18, 0.45, 1.8);

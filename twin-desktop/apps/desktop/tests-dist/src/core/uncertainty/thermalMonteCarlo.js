@@ -30,14 +30,11 @@ export const THERMAL_UNCERTAINTY_DEFINITIONS = [
         distribution: { kind: "normal", mean: 0, stdDev: 0.8 },
     },
 ];
-const DEFAULT_SEED = 42;
+const MONTE_CARLO_THERMAL_SCOPE_RU = "Анализ неопределённости: многократный запуск той же зональной RC-модели с вариацией входных параметров (климат, ACH, внутренние тепловыделения, уставки). Результат — распределение показателей RC, а не нормативное заключение по СП 50 и не полевое CFD.";
 const DEFAULT_BINS = 24;
 const DEFAULT_VAR_LEVEL = 0.95;
-export function runThermalMonteCarlo(options) {
-    if (options.runs <= 0) {
-        throw new Error("Количество прогонов Monte Carlo должно быть больше нуля");
-    }
-    const adjacency = options.adjacency ?? buildAdjacencyGraph(options.model);
+const DEFAULT_SEED = 42;
+function collectThermalMonteCarloSamplesSync(options, adjacency) {
     const rng = new Mulberry32(options.seed ?? DEFAULT_SEED);
     const varLevel = clamp(options.varLevel ?? DEFAULT_VAR_LEVEL, 0.5, 0.999);
     const definitions = THERMAL_UNCERTAINTY_DEFINITIONS;
@@ -61,17 +58,73 @@ export function runThermalMonteCarlo(options) {
         }
         options.onProgress?.(run + 1, options.runs);
     }
-    const dailyEnergies = totalEnergiesKWh.map((value) => value / durationDays);
+    return { samples, peakLoadsKW, totalEnergiesKWh, exceedCount, durationDays, varLevel };
+}
+async function collectThermalMonteCarloSamplesAsync(options, adjacency, yieldEvery) {
+    const rng = new Mulberry32(options.seed ?? DEFAULT_SEED);
+    const varLevel = clamp(options.varLevel ?? DEFAULT_VAR_LEVEL, 0.5, 0.999);
+    const definitions = THERMAL_UNCERTAINTY_DEFINITIONS;
+    const correlator = buildCorrelator(definitions.length, options.correlationMatrix);
+    const samples = [];
+    const peakLoadsKW = [];
+    const totalEnergiesKWh = [];
+    const durationDays = options.baseOptions.duration === "7d" ? 7 : 1;
+    let exceedCount = 0;
+    for (let run = 0; run < options.runs; run++) {
+        const uniforms = correlator(rng);
+        const sample = sampleUncertainty(definitions, uniforms);
+        samples.push(sample);
+        const simOptions = applySampleToOptions(options.baseOptions, sample);
+        const result = runThermalSimulation(options.model, simOptions, adjacency);
+        const metrics = extractMetrics(result, durationDays);
+        peakLoadsKW.push(metrics.peakLoadKW);
+        totalEnergiesKWh.push(metrics.totalEnergyKWh);
+        if (options.heatingThresholdKW !== undefined && metrics.peakLoadKW > options.heatingThresholdKW) {
+            exceedCount += 1;
+        }
+        options.onProgress?.(run + 1, options.runs);
+        if (yieldEvery > 0 && (run + 1) % yieldEvery === 0 && run + 1 < options.runs) {
+            await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+    }
+    return { samples, peakLoadsKW, totalEnergiesKWh, exceedCount, durationDays, varLevel };
+}
+function finalizeThermalMonteCarloResult(collected, options) {
+    const seedUsed = options.seed ?? DEFAULT_SEED;
+    /** Среднесуточная энергия за смоделированный период; «год» = 365× это значение (упрощение для сравнения прогонов). */
+    const dailyEnergies = collected.totalEnergiesKWh.map((value) => value / collected.durationDays);
     const annualEnergies = dailyEnergies.map((value) => value * 365);
     return {
         runs: options.runs,
-        samples,
-        peakLoad: summarizeDistribution(peakLoadsKW, DEFAULT_BINS, varLevel),
-        dailyEnergy: summarizeDistribution(dailyEnergies, DEFAULT_BINS, varLevel),
-        annualEnergy: summarizeDistribution(annualEnergies, DEFAULT_BINS, varLevel),
-        exceedanceProbability: options.heatingThresholdKW === undefined ? undefined : exceedCount / options.runs,
-        varLevel,
+        seed: seedUsed,
+        engineeringScopeRu: MONTE_CARLO_THERMAL_SCOPE_RU,
+        samples: collected.samples,
+        peakLoad: summarizeDistribution(collected.peakLoadsKW, DEFAULT_BINS, collected.varLevel),
+        dailyEnergy: summarizeDistribution(dailyEnergies, DEFAULT_BINS, collected.varLevel),
+        annualEnergy: summarizeDistribution(annualEnergies, DEFAULT_BINS, collected.varLevel),
+        exceedanceProbability: options.heatingThresholdKW === undefined ? undefined : collected.exceedCount / options.runs,
+        varLevel: collected.varLevel,
     };
+}
+export const THERMAL_MONTE_CARLO_MAX_RUNS = 800;
+export function runThermalMonteCarlo(options) {
+    if (options.runs <= 0) {
+        throw new Error("Количество прогонов Monte Carlo должно быть больше нуля");
+    }
+    const runs = Math.min(options.runs, THERMAL_MONTE_CARLO_MAX_RUNS);
+    const adjacency = options.adjacency ?? buildAdjacencyGraph(options.model);
+    const collected = collectThermalMonteCarloSamplesSync({ ...options, runs }, adjacency);
+    return finalizeThermalMonteCarloResult(collected, { ...options, runs });
+}
+export async function runThermalMonteCarloAsync(options) {
+    if (options.runs <= 0) {
+        throw new Error("Количество прогонов Monte Carlo должно быть больше нуля");
+    }
+    const runs = Math.min(options.runs, THERMAL_MONTE_CARLO_MAX_RUNS);
+    const adjacency = options.adjacency ?? buildAdjacencyGraph(options.model);
+    const yieldEvery = Math.max(1, options.yieldEvery ?? 25);
+    const collected = await collectThermalMonteCarloSamplesAsync({ ...options, runs }, adjacency, yieldEvery);
+    return finalizeThermalMonteCarloResult(collected, { ...options, runs });
 }
 function extractMetrics(result, durationDays) {
     return {
@@ -94,8 +147,8 @@ function applySampleToOptions(baseOptions, sample) {
         ...baseOptions,
         outdoor: {
             ...baseOptions.outdoor,
+            // Смещение климата один раз (раньше bias дублировался в seasonalOffsetC и завышал разброс).
             baseC: baseOptions.outdoor.baseC + sample.outdoorBiasC,
-            seasonalOffsetC: (baseOptions.outdoor.seasonalOffsetC ?? 0) + sample.outdoorBiasC,
         },
         setpoints: {
             ...baseOptions.setpoints,
@@ -303,9 +356,9 @@ function betacf(x, a, b) {
     const MAX_ITER = 200;
     const EPS = 3e-7;
     const FPMIN = 1e-30;
-    let qab = a + b;
-    let qap = a + 1;
-    let qam = a - 1;
+    const qab = a + b;
+    const qap = a + 1;
+    const qam = a - 1;
     let c = 1;
     let d = 1 - (qab * x) / qap;
     if (Math.abs(d) < FPMIN) {
@@ -348,6 +401,7 @@ function logBeta(a, b) {
     return logGamma(a) + logGamma(b) - logGamma(a + b);
 }
 function logGamma(z) {
+    /* eslint-disable no-loss-of-precision -- published gamma/log-gamma coefficients and √(2π) tail constant */
     const cof = [
         76.18009172947146,
         -86.50532032941677,
@@ -356,7 +410,7 @@ function logGamma(z) {
         0.001208650973866179,
         -0.000005395239384953,
     ];
-    let x = z;
+    const x = z;
     let y = z;
     let tmp = x + 5.5;
     tmp -= (x + 0.5) * Math.log(tmp);
@@ -365,7 +419,9 @@ function logGamma(z) {
         y += 1;
         ser += cof[j] / y;
     }
-    return -tmp + Math.log(2.5066282746310005 * ser / x);
+    const out = -tmp + Math.log(2.5066282746310005 * ser / x);
+    /* eslint-enable no-loss-of-precision */
+    return out;
 }
 function buildCorrelator(dim, correlationMatrix) {
     if (!correlationMatrix) {
@@ -454,7 +510,6 @@ function inverseStandardNormal(p) {
     const plow = 0.02425;
     const phigh = 1 - plow;
     let q;
-    let r;
     if (p < plow) {
         q = Math.sqrt(-2 * Math.log(p));
         return ((((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) /
@@ -465,10 +520,10 @@ function inverseStandardNormal(p) {
         return (-(((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) /
             ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1));
     }
-    q = p - 0.5;
-    r = q * q;
-    return ((((((a[0] * r + a[1]) * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * q /
-        (((((b[0] * r + b[1]) * r + b[2]) * r + b[3]) * r + b[4]) * r + 1));
+    const qMid = p - 0.5;
+    const rMid = qMid * qMid;
+    return ((((((a[0] * rMid + a[1]) * rMid + a[2]) * rMid + a[3]) * rMid + a[4]) * rMid + a[5]) * qMid /
+        (((((b[0] * rMid + b[1]) * rMid + b[2]) * rMid + b[3]) * rMid + b[4]) * rMid + 1));
 }
 function erf(x) {
     const sign = x < 0 ? -1 : 1;

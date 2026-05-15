@@ -3,7 +3,10 @@ export function summarizeEquipmentImpact(equipment) {
     equipment.forEach((item) => {
         const roomId = item.roomId ?? "unassigned";
         const current = map.get(roomId) ?? { roomId, heatEmissionW: 0, supplyAir_m3_s: 0 };
-        if (item.type === "radiator" || item.type === "fancoil" || item.type === "boiler") {
+        if (item.type === "radiator" ||
+            item.type === "fancoil" ||
+            item.type === "boiler" ||
+            item.type === "heat_exchanger") {
             current.heatEmissionW += item.params.nominalPowerW ?? 0;
         }
         if (item.type === "ahu" || item.type === "diffuser" || item.type === "fancoil") {

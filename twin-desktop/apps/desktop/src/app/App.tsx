@@ -12,10 +12,10 @@ export default function App() {
   const Active = route.component;
 
   return (
-    <div className="min-h-screen bg-slate-100 text-slate-900">
+    <div className="min-h-screen bg-[color:var(--app-bg)] text-[color:var(--text-base)]">
       <TopBar currentPath={pathname} />
       <EngineConfigBanner />
-      <main className="mx-auto w-full max-w-[min(100%,92rem)] px-4 pb-12 sm:px-6 xl:px-8">
+      <main className="ui-page-enter mx-auto w-full max-w-[min(100%,96rem)] px-4 pb-20 pt-3 sm:px-6 xl:px-8">
         <Active />
       </main>
       <NotificationPanel />

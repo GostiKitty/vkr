@@ -23,70 +23,72 @@ export function FormulaDrawer() {
   }
 
   return (
-    <aside className="fixed inset-y-0 right-0 z-40 w-full max-w-md border-l border-slate-200 bg-white/95 shadow-2xl">
-      <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
+    <aside className="ui-drawer-panel fixed inset-y-0 right-0 z-40 w-full max-w-md border-l border-[color:var(--border-soft)] bg-[color:var(--surface-elevated)]/96 shadow-[var(--shadow-overlay)] backdrop-blur-xl">
+      <div className="flex items-center justify-between border-b border-[color:var(--border-soft)] px-5 py-3">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Формулы</p>
-          <p className="text-base font-semibold text-slate-900">Прозрачность расчета</p>
+          <p className="ui-kicker">Формулы</p>
+          <p className="text-base font-semibold text-[color:var(--text-base)]">Прозрачность расчёта</p>
         </div>
         <div className="flex gap-2">
           <button
             type="button"
             onClick={togglePin}
-            className={`rounded-full border px-3 py-1 text-xs font-semibold ${
-              pinned ? "border-emerald-500 text-emerald-600" : "border-slate-300 text-slate-600"
+            className={`rounded-full px-3 py-1 text-xs font-semibold transition ${
+              pinned
+                ? "border border-[color:var(--success-border)] bg-[color:var(--success-bg)] text-[color:var(--success-fg)]"
+                : "ui-btn-secondary"
             }`}
           >
             {pinned ? "Закреплено" : "Закрепить"}
           </button>
-          <button
-            type="button"
-            onClick={close}
-            className="rounded-full border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-600 hover:border-slate-500"
-          >
+          <button type="button" onClick={close} className="ui-btn-secondary rounded-full px-3 py-1 text-xs font-semibold">
             Закрыть
           </button>
         </div>
       </div>
       <div ref={containerRef} className="h-[calc(100%-60px)] space-y-4 overflow-y-auto px-5 py-4">
         {formulas.length === 0 ? (
-          <p className="text-sm text-slate-500">Выберите действие с подсказкой «Формулы», чтобы открыть связанную методику.</p>
+          <p className="text-sm text-[color:var(--text-muted)]">
+            Выберите действие с подсказкой «Формулы», чтобы открыть связанную методику.
+          </p>
         ) : (
           formulas.map((formula) => (
             <article
               key={formula.id}
               data-formula-id={formula.id}
-              className={`space-y-3 rounded-2xl border ${
-                activeFormulaId === formula.id ? "border-slate-400" : "border-slate-200"
-              } bg-white/90 p-4`}
+              className={`ui-hover-lift space-y-3 rounded-2xl border bg-[color:var(--surface-base)] p-4 shadow-sm ${
+                activeFormulaId === formula.id
+                  ? "border-[color:var(--accent-muted)] ring-1 ring-[color:var(--accent-muted)]"
+                  : "border-[color:var(--border-soft)]"
+              }`}
             >
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{formula.id}</p>
-                  <h3 className="text-base font-semibold text-slate-900">{formula.title}</h3>
+                  <p className="ui-kicker">{formula.id}</p>
+                  <h3 className="text-base font-semibold text-[color:var(--text-base)]">{formula.title}</h3>
                 </div>
                 <button
                   type="button"
                   onClick={() => focus(formula.id)}
-                  className="text-xs font-semibold text-slate-500 underline hover:text-slate-800"
+                  className="text-xs font-semibold text-[color:var(--accent-base)] underline decoration-[color:var(--accent-muted)] underline-offset-2 transition hover:text-[color:var(--text-base)]"
                 >
                   В фокус
                 </button>
               </div>
 
-              <p className="text-sm text-slate-600">{formula.description}</p>
-              <p className="text-xs text-slate-500">
-                <span className="font-semibold text-slate-700">Метод:</span> {formula.methodName}
+              <p className="text-sm text-[color:var(--text-muted)]">{formula.description}</p>
+              <p className="text-xs text-[color:var(--text-soft)]">
+                <span className="font-semibold text-[color:var(--text-base)]">Метод:</span> {formula.methodName}
               </p>
 
-              <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white px-3 py-2">
+              <div className="overflow-x-auto rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] px-3 py-2">
                 <BlockMath math={formula.latex} />
               </div>
 
-              <div className="overflow-x-auto rounded-2xl border border-slate-100 bg-slate-50/70">
-                <table className="w-full text-left text-sm text-slate-600">
+              <div className="overflow-x-auto rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)]">
+                <table className="w-full text-left text-sm text-[color:var(--text-muted)]">
                   <thead>
-                    <tr className="text-xs uppercase tracking-wide text-slate-500">
+                    <tr className="text-xs uppercase tracking-wide text-[color:var(--text-soft)]">
                       <th className="px-3 py-2 font-semibold">Переменная</th>
                       <th className="px-3 py-2 font-semibold">Описание</th>
                       <th className="px-3 py-2 font-semibold">Ед.</th>
@@ -94,8 +96,8 @@ export function FormulaDrawer() {
                   </thead>
                   <tbody>
                     {formula.variables.map((variable) => (
-                      <tr key={variable.key} className="border-t border-slate-100">
-                        <td className="px-3 py-2 font-semibold text-slate-900">
+                      <tr key={variable.key} className="border-t border-[color:var(--border-soft)]">
+                        <td className="px-3 py-2 font-semibold text-[color:var(--text-base)]">
                           {variable.symbolLatex ? <InlineMath math={variable.symbolLatex} /> : variable.key}
                         </td>
                         <td className="px-3 py-2">{variable.label}</td>
@@ -106,21 +108,23 @@ export function FormulaDrawer() {
                 </table>
               </div>
 
-              <div className="rounded-2xl border border-slate-100 bg-slate-50/70 px-3 py-3 text-sm text-slate-700">
+              <div className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] px-3 py-3 text-sm text-[color:var(--text-muted)]">
                 <div>
-                  <span className="font-semibold text-slate-900">Физический смысл:</span> {formula.physicalMeaning}
+                  <span className="font-semibold text-[color:var(--text-base)]">Физический смысл:</span>{" "}
+                  {formula.physicalMeaning}
                 </div>
                 <div className="mt-2">
-                  <span className="font-semibold text-slate-900">Что означает результат:</span> {formula.resultMeaning}
+                  <span className="font-semibold text-[color:var(--text-base)]">Что означает результат:</span>{" "}
+                  {formula.resultMeaning}
                 </div>
                 <div className="mt-2">
-                  <span className="font-semibold text-slate-900">Применимость:</span> {formula.applicability}
+                  <span className="font-semibold text-[color:var(--text-base)]">Применимость:</span> {formula.applicability}
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-slate-100 bg-slate-50/70 px-3 py-3">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Допущения</p>
-                <ul className="mt-2 space-y-1 text-sm text-slate-700">
+              <div className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] px-3 py-3">
+                <p className="ui-kicker">Допущения</p>
+                <ul className="mt-2 space-y-1 text-sm text-[color:var(--text-muted)]">
                   {formula.assumptions.map((assumption) => (
                     <li key={`${formula.id}-${assumption}`}>{assumption}</li>
                   ))}

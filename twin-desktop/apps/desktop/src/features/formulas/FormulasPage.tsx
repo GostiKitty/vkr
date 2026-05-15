@@ -28,7 +28,7 @@ interface ResolvedVariableValue {
 }
 
 const moduleDescriptions: Record<string, string> = {
-  Geometry: "Формулы расчёта площади, периметра и объёма используются в Build Mode и Twin конвертации.",
+  Geometry: "Формулы площади, периметра и объёма используются в конструкторе и при конвертации в студию.",
   Envelope: "Классические уравнения теплопередачи для стен, окон и инфильтрации.",
   Thermal: "Сердце RC-модели, определяющей динамику температур и нагрузок.",
   Uncertainty: "Математический аппарат Монте-Карло и статистических оценок.",
@@ -65,13 +65,12 @@ export default function FormulasPage() {
   );
 
   return (
-    <section className="space-y-6 p-6">
+    <section className="mx-auto max-w-[min(100%,96rem)] space-y-6 p-4 sm:p-6">
       <header className="space-y-2">
-        <p className="text-sm font-semibold uppercase tracking-wide text-slate-500">Теория</p>
-        <h1 className="text-3xl font-semibold text-slate-900">Формулы и допущения</h1>
-        <p className="text-sm text-slate-600">
-          Цифровой двойник прозрачен: каждая ключевая метрика в Studio опирается на реальную формулу с физическим смыслом,
-          областью применимости, единицами и допущениями.
+        <p className="ui-kicker">Теория</p>
+        <h1 className="text-3xl font-semibold text-[color:var(--text-base)]">Формулы и допущения</h1>
+        <p className="text-sm text-[color:var(--text-muted)]">
+          Цифровой двойник прозрачен: ключевые метрики студии опираются на формулу с физическим смыслом, областью применимости, единицами и допущениями.
         </p>
       </header>
 
@@ -97,10 +96,10 @@ const FormulaGroup = ({
     return null;
   }
   return (
-    <section className="space-y-3 rounded-3xl border border-slate-200 bg-white/80 p-5 shadow-sm" id={`module-${module}`}>
+    <section className="ui-panel space-y-3 p-5 sm:p-6" id={`module-${module}`}>
       <div className="flex flex-col gap-1">
-        <h2 className="text-2xl font-semibold text-slate-900">{module}</h2>
-        <p className="text-sm text-slate-500">{moduleDescriptions[module] ?? ""}</p>
+        <h2 className="text-2xl font-semibold text-[color:var(--text-base)]">{module}</h2>
+        <p className="text-sm text-[color:var(--text-soft)]">{moduleDescriptions[module] ?? ""}</p>
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
         {formulas.map((formula) => (
@@ -130,39 +129,39 @@ const FormulaCard = ({ formula, context }: { formula: Formula; context: FormulaV
   };
 
   return (
-    <article id={`formula-${formula.id}`} className="flex flex-col gap-3 rounded-2xl border border-slate-100 bg-slate-50/80 p-4">
+    <article id={`formula-${formula.id}`} className="flex flex-col gap-3 rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] p-4">
       <div>
-        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{formula.id}</p>
-        <h3 className="text-lg font-semibold text-slate-900">{formula.title}</h3>
-        <p className="text-sm text-slate-600">{formula.description}</p>
-        <p className="mt-1 text-xs text-slate-500">
-          <span className="font-semibold text-slate-700">Метод:</span> {formula.methodName}
+        <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">{formula.id}</p>
+        <h3 className="text-lg font-semibold text-[color:var(--text-base)]">{formula.title}</h3>
+        <p className="text-sm text-[color:var(--text-muted)]">{formula.description}</p>
+        <p className="mt-1 text-xs text-[color:var(--text-soft)]">
+          <span className="font-semibold text-[color:var(--text-muted)]">Метод:</span> {formula.methodName}
         </p>
       </div>
-      <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white px-4 py-3">
+      <div className="overflow-x-auto rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-elevated)] px-4 py-3">
         <BlockMath math={formula.latex} />
       </div>
       <div className="flex flex-wrap gap-2">
         <button
           type="button"
           onClick={() => copy("latex")}
-          className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-slate-400"
+          className="ui-control rounded-full px-3 py-1 text-xs font-semibold hover:border-[color:var(--accent-base)]/35"
         >
           {copied === "latex" ? "Скопировано" : "Скопировать LaTeX"}
         </button>
         <button
           type="button"
           onClick={() => copy("text")}
-          className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-slate-400"
+          className="ui-control rounded-full px-3 py-1 text-xs font-semibold hover:border-[color:var(--accent-base)]/35"
         >
           {copied === "text" ? "Готово" : "Скопировать текст"}
         </button>
       </div>
 
-      <div className="overflow-x-auto rounded-2xl border border-slate-100 bg-white/60">
-        <table className="w-full text-sm text-slate-600">
+      <div className="overflow-x-auto rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)]">
+        <table className="w-full text-sm text-[color:var(--text-muted)]">
           <thead>
-            <tr className="text-xs uppercase tracking-wide text-slate-500">
+            <tr className="text-xs uppercase tracking-wide text-[color:var(--text-soft)]">
               <th className="px-3 py-2 text-left font-semibold">Переменная</th>
               <th className="px-3 py-2 text-left font-semibold">Описание</th>
               <th className="px-3 py-2 text-left font-semibold">Значение</th>
@@ -172,59 +171,59 @@ const FormulaCard = ({ formula, context }: { formula: Formula; context: FormulaV
           </thead>
           <tbody>
             {resolvedVariables.map(({ variable, data }) => (
-              <tr key={`${formula.id}-${variable.key}`} className="border-t border-slate-100">
-                <td className="px-3 py-2 font-semibold text-slate-900">
+              <tr key={`${formula.id}-${variable.key}`} className="border-t border-[color:var(--border-soft)]">
+                <td className="px-3 py-2 font-semibold text-[color:var(--text-base)]">
                   {variable.symbolLatex ? <InlineMath math={variable.symbolLatex} /> : variable.key}
                 </td>
                 <td className="px-3 py-2">{variable.label}</td>
                 <td className="px-3 py-2">
                   {data.value}
-                  {data.reason && <p className="text-xs text-slate-500">{data.reason}</p>}
+                  {data.reason && <p className="text-xs text-[color:var(--text-soft)]">{data.reason}</p>}
                 </td>
                 <td className="px-3 py-2">{variable.unit ?? "—"}</td>
-                <td className="px-3 py-2 text-xs text-slate-500">{variable.source ?? "—"}</td>
+                <td className="px-3 py-2 text-xs text-[color:var(--text-soft)]">{variable.source ?? "—"}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
 
-      <div className="rounded-2xl border border-slate-100 bg-white/70 px-3 py-2">
-        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Подставленные значения</p>
-        <ul className="mt-2 space-y-1 text-sm text-slate-700">
+      <div className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)] px-3 py-2">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">Подставленные значения</p>
+        <ul className="mt-2 space-y-1 text-sm text-[color:var(--text-muted)]">
           {resolvedVariables.map(({ variable, data }) => (
             <li key={`resolved-${formula.id}-${variable.key}`} className="flex flex-col gap-0.5">
               <div className="flex items-center justify-between gap-4">
-                <span className="font-medium text-slate-900">
+                <span className="font-medium text-[color:var(--text-base)]">
                   {variable.symbolLatex ? <InlineMath math={variable.symbolLatex} /> : variable.key}
                 </span>
                 <span>{data.value}</span>
               </div>
-              {data.reason && <span className="text-xs text-slate-500">{data.reason}</span>}
+              {data.reason && <span className="text-xs text-[color:var(--text-soft)]">{data.reason}</span>}
             </li>
           ))}
         </ul>
       </div>
 
       <div className="grid gap-3 lg:grid-cols-2">
-        <div className="rounded-2xl border border-slate-100 bg-white/70 px-3 py-3">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Физический смысл</p>
-          <p className="mt-2 text-sm text-slate-700">{formula.physicalMeaning}</p>
+        <div className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)] px-3 py-3">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">Физический смысл</p>
+          <p className="mt-2 text-sm text-[color:var(--text-muted)]">{formula.physicalMeaning}</p>
         </div>
-        <div className="rounded-2xl border border-slate-100 bg-white/70 px-3 py-3">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Что означает результат</p>
-          <p className="mt-2 text-sm text-slate-700">{formula.resultMeaning}</p>
+        <div className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)] px-3 py-3">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">Что означает результат</p>
+          <p className="mt-2 text-sm text-[color:var(--text-muted)]">{formula.resultMeaning}</p>
         </div>
       </div>
 
-      <div className="rounded-2xl border border-slate-100 bg-white/70 px-3 py-3">
-        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Область применимости</p>
-        <p className="mt-2 text-sm text-slate-700">{formula.applicability}</p>
+      <div className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)] px-3 py-3">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">Область применимости</p>
+        <p className="mt-2 text-sm text-[color:var(--text-muted)]">{formula.applicability}</p>
       </div>
 
-      <div className="rounded-2xl border border-slate-100 bg-white/70 px-3 py-3">
-        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Допущения</p>
-        <ul className="mt-2 space-y-1 text-sm text-slate-700">
+      <div className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)] px-3 py-3">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">Допущения</p>
+        <ul className="mt-2 space-y-1 text-sm text-[color:var(--text-muted)]">
           {formula.assumptions.map((assumption) => (
             <li key={`${formula.id}-${assumption}`}>{assumption}</li>
           ))}
@@ -235,17 +234,17 @@ const FormulaCard = ({ formula, context }: { formula: Formula; context: FormulaV
 };
 
 const AssumptionsPanel = ({ items }: { items: Assumption[] }) => (
-  <section id="assumptions" className="space-y-3 rounded-3xl border border-slate-200 bg-white/80 p-5 shadow-sm">
+  <section id="assumptions" className="ui-panel space-y-3 p-5 sm:p-6">
     <div>
-      <h2 className="text-2xl font-semibold text-slate-900">Допущения и константы</h2>
-      <p className="text-sm text-slate-600">
+      <h2 className="text-2xl font-semibold text-[color:var(--text-base)]">Допущения и константы</h2>
+      <p className="text-sm text-[color:var(--text-muted)]">
         Значения используются по умолчанию для расчётов инфильтрации, сетпоинтов, контактных коэффициентов и тепловой массы. Изменение этих параметров влияет на все формулы RC-модели.
       </p>
     </div>
-    <div className="overflow-x-auto rounded-2xl border border-slate-100 bg-slate-50/70">
-      <table className="w-full text-left text-sm text-slate-600">
+    <div className="overflow-x-auto rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)]">
+      <table className="w-full text-left text-sm text-[color:var(--text-muted)]">
         <thead>
-          <tr className="text-xs uppercase tracking-wide text-slate-500">
+          <tr className="text-xs uppercase tracking-wide text-[color:var(--text-soft)]">
             <th className="px-4 py-2 font-semibold">Параметр</th>
             <th className="px-4 py-2 font-semibold">Значение</th>
             <th className="px-4 py-2 font-semibold">Описание</th>
@@ -254,13 +253,13 @@ const AssumptionsPanel = ({ items }: { items: Assumption[] }) => (
         </thead>
         <tbody>
           {items.map((assumption) => (
-            <tr key={assumption.id} className="border-t border-slate-100">
-              <td className="px-4 py-2 font-semibold text-slate-900">{assumption.label}</td>
+            <tr key={assumption.id} className="border-t border-[color:var(--border-soft)]">
+              <td className="px-4 py-2 font-semibold text-[color:var(--text-base)]">{assumption.label}</td>
               <td className="px-4 py-2">
                 {assumption.value} {assumption.unit}
               </td>
               <td className="px-4 py-2">{assumption.description}</td>
-              <td className="px-4 py-2 text-xs text-slate-500">{assumption.source}</td>
+              <td className="px-4 py-2 text-xs text-[color:var(--text-soft)]">{assumption.source}</td>
             </tr>
           ))}
         </tbody>

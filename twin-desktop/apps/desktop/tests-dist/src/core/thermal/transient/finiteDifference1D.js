@@ -239,6 +239,7 @@ function interpolateProfile(profile, x_m) {
     }
     return profile[profile.length - 1].temperature_C;
 }
+/** Условие устойчивости явной 1D-схемы: Fo = a·Δt/Δx² ≤ 0.5 (узловая формулировка). */
 function evaluateExplicitStability(nodes, timeStep_s) {
     let maxR = 0;
     let suggestedTimeStep_s = Number.POSITIVE_INFINITY;
