@@ -7,12 +7,12 @@ import type { SimulationFrame } from "../../entities/twin/types";
 import { useWorkflowStore, type UncertaintyConfig } from "../../entities/workflow/workflow.store";
 import {
   assumptions,
-  formulaModules,
-  groupedFormulas,
+  formulaRegistry,
   type Formula,
   type Assumption,
   type FormulaVariable,
 } from "../../entities/formulas/registry";
+import type { ScenarioConfig } from "../../entities/workflow/workflow.store";
 
 interface FormulaValueContext {
   selectedSpace: Space | null;
@@ -27,13 +27,164 @@ interface ResolvedVariableValue {
   reason?: string;
 }
 
-const moduleDescriptions: Record<string, string> = {
-  Geometry: "Формулы площади, периметра и объёма используются в конструкторе и при конвертации в студию.",
-  Envelope: "Классические уравнения теплопередачи для стен, окон и инфильтрации.",
-  Thermal: "Сердце RC-модели, определяющей динамику температур и нагрузок.",
-  Uncertainty: "Математический аппарат Монте-Карло и статистических оценок.",
-  Calibration: "Метрики качества и ошибка между наблюдениями и симуляцией.",
+type FormulaUsageStatus =
+  | "используется в RC-модели"
+  | "используется в инженерном балансе"
+  | "используется в инженерной оценке оборудования"
+  | "используется в hydronic mode"
+  | "используется в проверке СП 50"
+  | "используется в 1D transient"
+  | "используется только в legacy path"
+  | "справочная / пока не участвует в основном расчёте";
+
+interface FormulaTopic {
+  id: string;
+  title: string;
+  description: string;
+  formulaIds: string[];
+}
+
+const formulaTopics: FormulaTopic[] = [
+  {
+    id: "envelope",
+    title: "Теплопередача через ограждения",
+    description: "R, U и тепловой поток через стены, окна, двери и многослойные конструкции.",
+    formulaIds: ["layer_resistance", "total_resistance", "envelope_heat_loss", "transmission_loss"],
+  },
+  {
+    id: "transient",
+    title: "Нестационарный тепловой режим",
+    description: "RC-баланс зоны, эффективная теплоёмкость и дискретный шаг температуры.",
+    formulaIds: ["geom_volume", "thermal_balance", "thermal_balance_room", "rc_lumped"],
+  },
+  {
+    id: "ventilation",
+    title: "Вентиляция и инфильтрация",
+    description: "ACH, расход воздуха и чувствительные теплопотери на приток наружного воздуха.",
+    formulaIds: ["envelope_infiltration", "ventilation_loss"],
+  },
+  {
+    id: "gains",
+    title: "Внутренние теплопоступления",
+    description: "Люди, оборудование, освещение и расписания эксплуатации как входы RC-модели.",
+    formulaIds: ["internal_gains", "thermal_balance"],
+  },
+  {
+    id: "heating",
+    title: "Отопительное оборудование",
+    description: "Идеализированная мощность отопления и связь оборудования с балансом помещения.",
+    formulaIds: ["thermal_peak_load", "thermal_balance", "radiator_heat_output", "coolant_flow_rate"],
+  },
+  {
+    id: "climate",
+    title: "Климатический сценарий",
+    description: "Синусоидальный профиль наружной температуры и период моделирования.",
+    formulaIds: ["weather_sinusoid", "rc_lumped"],
+  },
+  {
+    id: "uncertainty",
+    title: "Вероятностный анализ / Monte Carlo",
+    description: "Распределения входов, число испытаний, перцентили и риск превышения.",
+    formulaIds: ["uncertainty_mc", "uncertainty_std"],
+  },
+  {
+    id: "metrics",
+    title: "Энергетические показатели",
+    description: "Суммарная энергия, пиковая нагрузка, средние и перцентильные значения.",
+    formulaIds: ["thermal_peak_load", "calibration_rmse", "calibration_mape"],
+  },
+];
+
+const calculationContours = [
+  {
+    id: "rc",
+    title: "RC-модель помещения",
+    description:
+      "Основной зональный расчёт во времени: температура по зонам, идеальный догрев до уставки, KPI, графики и основной Monte Carlo поверх RC.",
+  },
+  {
+    id: "engineering",
+    title: "Инженерный квазистационарный баланс",
+    description:
+      "Разложение потерь через ограждения, вентиляцию и инфильтрацию, инженерные диагностики и интерпретация тепловой нагрузки.",
+  },
+  {
+    id: "sp50",
+    title: "Проверка по СП 50",
+    description:
+      "Отдельный нормативный контур для сопротивления теплопередаче и отчетности по СП 50. Не смешивается с RC-результатами.",
+  },
+  {
+    id: "transient1d",
+    title: "1D transient расчёт конструкции",
+    description:
+      "Отдельный нестационарный расчёт по слоям конструкции. Базовые свойства слоёв связаны с этой страницей, но контур считается отдельно.",
+  },
+  {
+    id: "legacy",
+    title: "Legacy report / legacy Monte Carlo path",
+    description:
+      "Устаревший отчётный контур по данным Twin API. Нуждается в синхронизации с основным расчётом конструктора и помечается отдельно.",
+  },
+] as const;
+
+const formulaStatusLegend: Array<{ status: FormulaUsageStatus; note: string }> = [
+  {
+    status: "используется в RC-модели",
+    note: "Основной зональный расчёт во времени и его результаты.",
+  },
+  {
+    status: "используется в инженерном балансе",
+    note: "Квазистационарная инженерная интерпретация теплопотерь и нагрузок.",
+  },
+  {
+    status: "используется в инженерной оценке оборудования",
+    note: "Derived hydronic metrics и проверка доступной мощности без прямого влияния на базовый RC solver.",
+  },
+  {
+    status: "используется в hydronic mode",
+    note: "Формула участвует в отдельном режиме ограничения мощности отопления по теплоносителю.",
+  },
+  {
+    status: "используется в проверке СП 50",
+    note: "Нормативная проверка ограждающих конструкций отдельным модулем.",
+  },
+  {
+    status: "используется в 1D transient",
+    note: "Отдельный нестационарный расчёт конструкции по слоям.",
+  },
+  {
+    status: "используется только в legacy path",
+    note: "Старый отчётный или калибровочный контур, не основной расчёт конструктора.",
+  },
+  {
+    status: "справочная / пока не участвует в основном расчёте",
+    note: "Показывается как инженерная ориентирующая формула следующего этапа модели.",
+  },
+];
+
+const formulaUsageStatus: Record<string, FormulaUsageStatus> = {
+  layer_resistance: "используется в инженерном балансе",
+  total_resistance: "используется в проверке СП 50",
+  envelope_heat_loss: "используется в инженерном балансе",
+  transmission_loss: "используется в инженерном балансе",
+  envelope_infiltration: "используется в RC-модели",
+  ventilation_loss: "используется в инженерном балансе",
+  internal_gains: "используется в RC-модели",
+  thermal_balance: "используется в RC-модели",
+  thermal_balance_room: "используется в инженерном балансе",
+  rc_lumped: "используется в RC-модели",
+  weather_sinusoid: "используется в RC-модели",
+  thermal_peak_load: "используется в RC-модели",
+  uncertainty_mc: "используется в RC-модели",
+  uncertainty_std: "используется в RC-модели",
+  calibration_rmse: "используется только в legacy path",
+  calibration_mape: "используется только в legacy path",
+  radiator_heat_output: "используется в инженерной оценке оборудования",
+  coolant_flow_rate: "используется в инженерной оценке оборудования",
 };
+
+const formulaById: Record<string, Formula> = Object.fromEntries(formulaRegistry.map((formula) => [formula.id, formula]));
 
 export default function FormulasPage() {
   const twin = useTwinStore((state) => state.twin);
@@ -52,6 +203,8 @@ export default function FormulasPage() {
   }, [twin, selectedSpaceId]);
   const currentFrame = frames[timeIndex] ?? null;
   const uncertaintyConfig = useWorkflowStore((state) => state.uncertaintyConfig);
+  const scenarioConfig = useWorkflowStore((state) => state.scenarioConfig);
+  const setScenarioConfig = useWorkflowStore((state) => state.setScenarioConfig);
 
   const valueContext = useMemo<FormulaValueContext>(
     () => ({
@@ -74,21 +227,58 @@ export default function FormulasPage() {
         </p>
       </header>
 
-      {formulaModules.map((module) => (
-        <FormulaGroup key={module} module={module} formulas={groupedFormulas[module]} context={valueContext} />
+      <section className="ui-panel space-y-4 p-5 sm:p-6">
+        <div className="space-y-1">
+          <h2 className="text-2xl font-semibold text-[color:var(--text-base)]">Расчётные контуры проекта</h2>
+          <p className="text-sm text-[color:var(--text-muted)]">
+            В приложении используются несколько расчётных контуров. Они не равнозначны и не должны смешиваться в одном выводе без пояснения.
+          </p>
+        </div>
+        <div className="grid gap-3 xl:grid-cols-2">
+          {calculationContours.map((contour) => (
+            <article
+              key={contour.id}
+              className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] p-4"
+            >
+              <p className="text-sm font-semibold text-[color:var(--text-base)]">{contour.title}</p>
+              <p className="mt-1 text-sm text-[color:var(--text-muted)]">{contour.description}</p>
+            </article>
+          ))}
+        </div>
+        <div className="grid gap-2 lg:grid-cols-2">
+          {formulaStatusLegend.map((entry) => (
+            <div
+              key={entry.status}
+              className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)] px-3 py-2"
+            >
+              <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--accent-base)]">{entry.status}</p>
+              <p className="mt-1 text-sm text-[color:var(--text-muted)]">{entry.note}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {formulaTopics.map((topic) => (
+        <FormulaGroup
+          key={topic.id}
+          topic={topic}
+          formulas={topic.formulaIds.map((id) => formulaById[id]).filter(Boolean) as Formula[]}
+          context={valueContext}
+        />
       ))}
 
+      <EditableAssumptionsPanel scenarioConfig={scenarioConfig} onSave={setScenarioConfig} />
       <AssumptionsPanel items={assumptions} />
     </section>
   );
 }
 
 const FormulaGroup = ({
-  module,
+  topic,
   formulas,
   context,
 }: {
-  module: string;
+  topic: FormulaTopic;
   formulas: Formula[];
   context: FormulaValueContext;
 }) => {
@@ -96,10 +286,10 @@ const FormulaGroup = ({
     return null;
   }
   return (
-    <section className="ui-panel space-y-3 p-5 sm:p-6" id={`module-${module}`}>
+    <section className="ui-panel space-y-3 p-5 sm:p-6" id={`topic-${topic.id}`}>
       <div className="flex flex-col gap-1">
-        <h2 className="text-2xl font-semibold text-[color:var(--text-base)]">{module}</h2>
-        <p className="text-sm text-[color:var(--text-soft)]">{moduleDescriptions[module] ?? ""}</p>
+        <h2 className="text-2xl font-semibold text-[color:var(--text-base)]">{topic.title}</h2>
+        <p className="text-sm text-[color:var(--text-soft)]">{topic.description}</p>
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
         {formulas.map((formula) => (
@@ -131,11 +321,19 @@ const FormulaCard = ({ formula, context }: { formula: Formula; context: FormulaV
   return (
     <article id={`formula-${formula.id}`} className="flex flex-col gap-3 rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] p-4">
       <div>
-        <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">{formula.id}</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">{formula.id}</p>
+          <span className="rounded-full bg-[color:var(--accent-soft)] px-2 py-0.5 text-[11px] font-semibold text-[color:var(--accent-base)]">
+            {formulaUsageStatus[formula.id] ?? "справочная / пока не участвует в основном расчёте"}
+          </span>
+        </div>
         <h3 className="text-lg font-semibold text-[color:var(--text-base)]">{formula.title}</h3>
         <p className="text-sm text-[color:var(--text-muted)]">{formula.description}</p>
         <p className="mt-1 text-xs text-[color:var(--text-soft)]">
           <span className="font-semibold text-[color:var(--text-muted)]">Метод:</span> {formula.methodName}
+        </p>
+        <p className="mt-1 text-xs text-[color:var(--text-soft)]">
+          <span className="font-semibold text-[color:var(--text-muted)]">Где используется:</span> {resolveFormulaUsage(formula)}
         </p>
       </div>
       <div className="overflow-x-auto rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-elevated)] px-4 py-3">
@@ -233,6 +431,108 @@ const FormulaCard = ({ formula, context }: { formula: Formula; context: FormulaV
   );
 };
 
+const DEFAULT_SCENARIO: ScenarioConfig = {
+  climate: { baseC: -2, amplitudeC: 9, seasonalOffsetC: 0 },
+  setpoints: { day: 21, night: 18, dayStartHour: 6, nightStartHour: 22 },
+  internalGains: { dayGain_W_m2: 5, nightGain_W_m2: 1 },
+  occupancy: { dayFraction: 1, nightFraction: 0.2 },
+  ventilation: { infiltrationACH: 0.5 },
+};
+
+const EditableAssumptionsPanel = ({
+  scenarioConfig,
+  onSave,
+}: {
+  scenarioConfig: ScenarioConfig | null;
+  onSave: (config: ScenarioConfig) => void;
+}) => {
+  const initial = scenarioConfig ?? DEFAULT_SCENARIO;
+  const [draft, setDraft] = React.useState<ScenarioConfig>(initial);
+
+  React.useEffect(() => {
+    setDraft(scenarioConfig ?? DEFAULT_SCENARIO);
+  }, [scenarioConfig]);
+
+  const update = (section: keyof ScenarioConfig, key: string, value: number) => {
+    setDraft((prev) => ({
+      ...prev,
+      [section]: {
+        ...prev[section],
+        [key]: value,
+      },
+    }));
+  };
+
+  return (
+    <section id="editable-assumptions" className="ui-panel space-y-4 p-5 sm:p-6">
+      <div>
+        <h2 className="text-2xl font-semibold text-[color:var(--text-base)]">Настройки расчётных допущений</h2>
+        <p className="text-sm text-[color:var(--text-muted)]">
+          Эти значения сохраняются в workflow-сценарии и используются локальным RC-расчётом и Monte Carlo через `ThermalSimulationOptions`.
+        </p>
+      </div>
+      <div className="grid gap-3 lg:grid-cols-3">
+        <AssumptionField label="Уставка днём" unit="°C" value={draft.setpoints.day} min={10} max={30} onChange={(value) => update("setpoints", "day", value)} usage="evaluateSetpoint → solver" />
+        <AssumptionField label="Уставка ночью" unit="°C" value={draft.setpoints.night} min={8} max={28} onChange={(value) => update("setpoints", "night", value)} usage="evaluateSetpoint → solver" />
+        <AssumptionField label="ACH инфильтрации" unit="1/ч" value={draft.ventilation.infiltrationACH} min={0} max={5} step={0.1} onChange={(value) => update("ventilation", "infiltrationACH", value)} usage="G_inf = rho·cp·ACH·V/3600" />
+        <AssumptionField label="Наружная базовая" unit="°C" value={draft.climate.baseC} min={-60} max={40} step={0.5} onChange={(value) => update("climate", "baseC", value)} usage="createSinusoidalWeatherProfile" />
+        <AssumptionField label="Амплитуда улицы" unit="°C" value={draft.climate.amplitudeC} min={0} max={35} step={0.5} onChange={(value) => update("climate", "amplitudeC", value)} usage="createSinusoidalWeatherProfile" />
+        <AssumptionField label="Дневные теплопоступления" unit="Вт/м²" value={draft.internalGains.dayGain_W_m2} min={0} max={50} step={0.5} onChange={(value) => update("internalGains", "dayGain_W_m2", value)} usage="evaluateInternalGains" />
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <button type="button" onClick={() => onSave(draft)} className="ui-btn-primary px-5 py-2 text-sm">
+          Сохранить допущения
+        </button>
+        <button type="button" onClick={() => setDraft(DEFAULT_SCENARIO)} className="ui-btn-secondary px-5 py-2 text-sm">
+          Сбросить к пресету
+        </button>
+      </div>
+    </section>
+  );
+};
+
+const AssumptionField = ({
+  label,
+  unit,
+  value,
+  min,
+  max,
+  step = 1,
+  usage,
+  onChange,
+}: {
+  label: string;
+  unit: string;
+  value: number;
+  min: number;
+  max: number;
+  step?: number;
+  usage: string;
+  onChange: (value: number) => void;
+}) => {
+  const suspicious = value < min || value > max;
+  return (
+    <label className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] p-3 text-sm">
+      <span className="font-semibold text-[color:var(--text-base)]">{label}</span>
+      <span className="mt-1 block text-xs text-[color:var(--text-soft)]">Используется: {usage}</span>
+      <div className="mt-2 flex items-center gap-2">
+        <input
+          type="number"
+          value={value}
+          min={min}
+          max={max}
+          step={step}
+          onChange={(event) => onChange(Number(event.target.value))}
+          className="ui-field w-full px-3 py-2"
+        />
+        <span className="w-14 text-xs text-[color:var(--text-soft)]">{unit}</span>
+      </div>
+      <span className="mt-1 block text-xs text-[color:var(--text-soft)]">Диапазон: {min}…{max} {unit}</span>
+      {suspicious ? <span className="mt-1 block text-xs font-semibold text-[color:var(--danger-fg)]">Проверьте значение: оно вне ожидаемого диапазона.</span> : null}
+    </label>
+  );
+};
+
 const AssumptionsPanel = ({ items }: { items: Assumption[] }) => (
   <section id="assumptions" className="ui-panel space-y-3 p-5 sm:p-6">
     <div>
@@ -284,6 +584,66 @@ const buildPlainText = (formula: Formula): string => {
     "Допущения:",
     assumptionsText,
   ].join("\n");
+};
+
+const resolveFormulaUsage = (formula: Formula): string => {
+  const explicitUsage: Record<string, string> = {
+    layer_resistance:
+      "Послойный инженерный баланс ограждений; служит входом для оценки конструкций и связанных теплотехнических проверок.",
+    total_resistance:
+      "Проверка сопротивления теплопередаче и формирование эквивалентного U в модуле СП 50; используется и в инженерной интерпретации ограждений.",
+    envelope_heat_loss:
+      "Инженерный квазистационарный баланс потерь через ограждения в результатах и диагностике.",
+    transmission_loss:
+      "Разложение потерь через стены, окна, двери, кровлю и пол в инженерном балансе.",
+    envelope_infiltration:
+      "Основной RC solver через эквивалентную проводимость инфильтрации по ACH.",
+    ventilation_loss:
+      "Инженерный квазистационарный баланс вентиляционных и инфильтрационных потерь; не просто справочное допущение.",
+    internal_gains:
+      "RC-модель помещения и её сценарные входы по людям, освещению и оборудованию.",
+    thermal_balance:
+      "Основной RC solver и интерпретация суммарного баланса мощности по зоне.",
+    thermal_balance_room:
+      "Инженерный квазистационарный срез по помещению для оценки дефицита тепла.",
+    rc_lumped:
+      "Основной зональный RC solver, временные ряды температуры, энергии и мощности.",
+    weather_sinusoid:
+      "Климатический сценарий основного RC solver.",
+    thermal_peak_load:
+      "Пиковая нагрузка основного RC расчёта и связанный подбор требуемой мощности.",
+    uncertainty_mc:
+      "Панель вероятностного анализа поверх RC-модели; не норматив СП 50 и не legacy calibration report.",
+    uncertainty_std:
+      "Статистика разброса результатов вероятностного анализа поверх RC-модели.",
+    calibration_rmse:
+      "Только legacy report path и связанный калибровочный отчёт по данным Twin API.",
+    calibration_mape:
+      "Только legacy report path и связанный калибровочный отчёт по данным Twin API.",
+    radiator_heat_output:
+      "Используется в derived hydronic metrics для инженерной оценки доступной мощности оборудования; пока не управляет основным зональным отоплением.",
+    coolant_flow_rate:
+      "Используется в derived hydronic metrics для оценки требуемого расхода теплоносителя; прямой hydronic mode пока не включён.",
+  };
+  if (explicitUsage[formula.id]) {
+    return explicitUsage[formula.id];
+  }
+  if (formula.id.includes("uncertainty")) {
+    return "Monte Carlo, панель рисков, отчётные перцентили";
+  }
+  if (formula.id.includes("calibration")) {
+    return "интерпретация калибровки и качества совпадения";
+  }
+  if (formula.module === "Envelope") {
+    return "оболочка здания, проводимости стен, теплопотери";
+  }
+  if (formula.module === "Thermal") {
+    return "RC-решатель, тепловой баланс, результаты расчёта";
+  }
+  if (formula.module === "Geometry") {
+    return "геометрия помещений, объём, площадь, удельные нагрузки";
+  }
+  return "справочный раздел и инженерные подсказки";
 };
 
 const AIR_DENSITY = 1.204; // kg/m3

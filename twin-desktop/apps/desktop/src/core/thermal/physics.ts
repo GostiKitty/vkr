@@ -11,6 +11,7 @@ import {
   type OpeningCutDescriptor,
   type RoomVolumeDescriptor,
 } from "../geometry/bimPipeline";
+import { airflowFromACH } from "./formulas";
 
 const AIR_DENSITY_KG_M3 = 1.204;
 const AIR_CP_J_KG_K = 1005;
@@ -57,6 +58,9 @@ export interface ThermalRoomBalance {
   equipmentGainW: number;
   pipeGainW: number;
   solarGainW: number;
+  infiltrationLossW: number;
+  mechanicalVentilationLossW: number;
+  airExchangeLossW: number;
   ventilationLossW: number;
   envelopeLossW: number;
   adjacentExchangeW: number;
@@ -220,10 +224,10 @@ function createRoomSeed(
     return sum;
   }, 0);
   const infiltrationAch = Math.max(0.02, options.infiltrationACH ?? DEFAULT_INFILTRATION_ACH);
-  const infiltrationUA_W_K = (AIR_DENSITY_KG_M3 * AIR_CP_J_KG_K * infiltrationAch * volumeM3) / 3600;
+  const infiltrationUA_W_K = AIR_DENSITY_KG_M3 * AIR_CP_J_KG_K * airflowFromACH(infiltrationAch, volumeM3);
   const roomSupply = networkContext.roomSupplyAir.get(room.roomId);
   const scheduledVentilationAch = Math.max(0, options.ventilationACH ?? DEFAULT_VENTILATION_ACH);
-  const scheduledVentilationUA_W_K = (AIR_DENSITY_KG_M3 * AIR_CP_J_KG_K * scheduledVentilationAch * volumeM3) / 3600;
+  const scheduledVentilationUA_W_K = AIR_DENSITY_KG_M3 * AIR_CP_J_KG_K * airflowFromACH(scheduledVentilationAch, volumeM3);
   const mechanicalSupplyUA_W_K = roomSupply
     ? AIR_DENSITY_KG_M3 * AIR_CP_J_KG_K * Math.max(0, roomSupply.airflow_m3_s)
     : 0;
@@ -392,7 +396,7 @@ function solveRoomBalances(
       0,
       (room.ventilationUA_W_K - room.infiltrationUA_W_K) * (airTemperatureC - room.supplyAirTemperatureC)
     );
-    const ventilationLossW = infiltrationLossW + mechanicalVentilationLossW;
+    const airExchangeLossW = infiltrationLossW + mechanicalVentilationLossW;
     const denominator = Math.max(1, room.externalUA_W_K + room.ventilationUA_W_K + room.internalCouplingUA_W_K);
     const requiredHeatingW = Math.max(
       0,
@@ -431,7 +435,10 @@ function solveRoomBalances(
       equipmentGainW: room.equipmentGainW,
       pipeGainW: room.pipeGainW,
       solarGainW: room.solarGainW,
-      ventilationLossW,
+      infiltrationLossW,
+      mechanicalVentilationLossW,
+      airExchangeLossW,
+      ventilationLossW: airExchangeLossW,
       envelopeLossW,
       adjacentExchangeW: adjacencyExchangeW,
       externalUA_W_K: room.externalUA_W_K,

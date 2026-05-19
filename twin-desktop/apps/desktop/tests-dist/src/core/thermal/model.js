@@ -2,6 +2,7 @@ import { polygonArea } from "../../entities/geometry/geom";
 import { DEFAULT_WALL_ASSEMBLY_ID } from "../../entities/material/types";
 import { buildAdjacencyGraph } from "../graph/adjacency";
 import { buildGeometryRenderModel } from "../geometry/bimPipeline";
+import { airflowFromACH } from "./formulas";
 import { computeWallFacadeConductances, computeFallbackFacadeConductance_W_K } from "./wallFacadeThermal";
 const AIR_DENSITY_KG_M3 = 1.204; // kg/m3
 const AIR_CP_J_KG_K = 1005; // J/(kg·K)
@@ -90,7 +91,7 @@ function buildZone(room, building, infiltrationACH, defaultHeight, effectiveMass
     const area = Math.max(MIN_AREA_M2, Math.abs(polygonArea(room.polygon)));
     const volume = area * height;
     const capacitance = AIR_DENSITY_KG_M3 * volume * AIR_CP_J_KG_K * Math.max(1, effectiveMassFactor);
-    const infiltrationConductance = (AIR_DENSITY_KG_M3 * AIR_CP_J_KG_K * infiltrationACH * volume) / 3600;
+    const infiltrationConductance = AIR_DENSITY_KG_M3 * AIR_CP_J_KG_K * airflowFromACH(infiltrationACH, volume);
     return {
         id: room.id,
         name: room.name,

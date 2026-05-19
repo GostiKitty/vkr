@@ -1,9 +1,10 @@
+import { getSpaceDisplayName } from "../../shared/utils/roomNames";
 export function filterSpaces(spaces, query) {
     const normalized = query.trim().toLowerCase();
     if (!normalized) {
         return spaces.slice();
     }
-    return spaces.filter((space) => (space.name ?? "").toLowerCase().includes(normalized));
+    return spaces.filter((space, index) => getSpaceDisplayName(space, index).toLowerCase().includes(normalized));
 }
 export function sortSpacesByArea(spaces, direction) {
     return spaces

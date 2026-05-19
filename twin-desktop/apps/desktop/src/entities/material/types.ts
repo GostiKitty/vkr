@@ -1,4 +1,5 @@
 import type { WallLayer } from "../geometry/types";
+import { layerResistance, uValue } from "../../core/thermal/formulas";
 import { calculateConstructionResistance } from "../../core/thermal/sp50/calculations";
 import { getMaterialThermalProperties } from "../../norms/sp50_2024/materialThermalProperties";
 import { EXTERNAL_HEAT_TRANSFER_COEFFICIENTS, INTERNAL_HEAT_TRANSFER_COEFFICIENTS } from "../../norms/sp50_2024/heatTransferCoefficients";
@@ -147,7 +148,7 @@ export function computeWallProperties(
     if (!Number.isFinite(lam) || lam <= 0 || !Number.isFinite(thickness) || thickness <= 0) {
       return;
     }
-    rLayers += thickness / lam;
+    rLayers += layerResistance(thickness, lam);
     heatCapacity += material.rho_kg_m3 * material.c_J_kgK * thickness;
     resolvedLayerCount += 1;
   });
@@ -180,8 +181,8 @@ export function computeWallProperties(
       layerResistances,
     });
     const rLayersOnly = layerResistances.reduce((sum, value) => sum + value, 0);
-    const uLayers = 1 / rLayersOnly;
-    const uTot = 1 / rComplete;
+    const uLayers = uValue(rLayersOnly);
+    const uTot = uValue(rComplete);
     return {
       rValue: rComplete,
       uValue: uTot,
@@ -196,7 +197,7 @@ export function computeWallProperties(
       uLayersOnly_W_m2K: uLayers,
     };
   }
-  const uMat = 1 / rLayers;
+  const uMat = uValue(rLayers);
   return {
     rValue: rLayers,
     uValue: uMat,

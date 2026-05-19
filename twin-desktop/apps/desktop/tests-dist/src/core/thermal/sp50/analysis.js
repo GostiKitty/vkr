@@ -1,5 +1,6 @@
+import { gsop as calculateGsopSafe } from "../formulas";
 import { calculateConstructionResistance, calculateHeatTransferCoefficient } from "./calculations";
-import { calculateGsop, calculateNt, getFloorHeatAbsorptionLimit, getGateRequiredResistance, getHeatingEnergyNorm, getInternalHeatTransferCoefficient, getExternalHeatTransferCoefficient, getInternalVaporPartialPressurePa, getLayerAirPermeabilityResistance, getMaterialThermalProperties, getMoistureMode, getNormalizedAirPermeability, getOperationCondition, getRequiredResistance, getSaturationVaporPressurePa, getSheetMaterialVaporResistance, getSolarAbsorptionCoefficient, getSolarRadiation, getSpecificThermalProtectionNorm, } from "../../../norms/sp50_2024/index";
+import { calculateNt, getFloorHeatAbsorptionLimit, getGateRequiredResistance, getHeatingEnergyNorm, getInternalHeatTransferCoefficient, getExternalHeatTransferCoefficient, getInternalVaporPartialPressurePa, getLayerAirPermeabilityResistance, getMaterialThermalProperties, getMoistureMode, getNormalizedAirPermeability, getOperationCondition, getRequiredResistance, getSaturationVaporPressurePa, getSheetMaterialVaporResistance, getSolarAbsorptionCoefficient, getSolarRadiation, getSpecificThermalProtectionNorm, } from "../../../norms/sp50_2024/index";
 export function runSP50Compliance(buildingModel, climateInput, options = {}) {
     const model = climateInput
         ? {
@@ -32,6 +33,7 @@ export function runSp50ComplianceAnalysis(input) {
     const moistureProtection = buildMoistureProtectionCheck(constructions, context);
     const floor = buildFloorCheck(constructions, context);
     const energy = buildEnergyCheck(building, context);
+    context.missingData.push(...energy.placeholderWarnings);
     const materialEfficiency = buildMaterialEfficiency(constructions);
     const recommendations = buildRecommendations(constructions, building, energy, temperature);
     return {
@@ -65,11 +67,7 @@ function resolveSourceData(model, defaultIndoorTemperatureC, defaultOutdoorTempe
     const operationCondition = buildingMeta.operationCondition ??
         (humidityZone ? getOperationCondition({ moistureMode, humidityZone }) : null);
     const gsop = outdoorHeatingPeriodAverageC !== null && heatingPeriodDurationDays !== null
-        ? calculateGsop({
-            indoorTemperatureC,
-            outdoorHeatingPeriodAverageC,
-            heatingPeriodDurationDays,
-        })
+        ? calculateGsopSafe(indoorTemperatureC, outdoorHeatingPeriodAverageC, heatingPeriodDurationDays)
         : null;
     const missingData = [];
     if (outdoorHeatingPeriodAverageC === null) {
@@ -544,6 +542,10 @@ function buildEnergyCheck(building, context) {
     const Ginf = 1;
     const nInf = 1;
     const c = 1;
+    const placeholderWarnings = [
+        "Использованы placeholder-параметры betaV, Lvent, nVent, Ginf, nInf и c.",
+        "Энергохарактеристика СП 50 требует замены этих констант на реальные проектные входные данные.",
+    ];
     const averageAirDensity = tOutdoor !== null ? 353 / (273 + tOutdoor) : null;
     const averageAirExchange = volume && averageAirDensity
         ? ((Lvent * nVent) / 168 + (Ginf * nInf) / (168 * averageAirDensity)) / (betaV * volume)
@@ -579,6 +581,8 @@ function buildEnergyCheck(building, context) {
         solarGainCharacteristic_W_m3K: qrad,
         averageAirDensity_kg_m3: averageAirDensity,
         averageAirExchange_1_h: averageAirExchange,
+        usesPlaceholderInputs: true,
+        placeholderWarnings,
         complies,
         status: resolveStatus(complies),
     };

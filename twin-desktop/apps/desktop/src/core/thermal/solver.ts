@@ -20,6 +20,7 @@ const ABS_ZERO_OFFSET = 273.15;
 export interface ThermalSimulationOptions {
   duration: "24h" | "7d";
   timestepMinutes?: number;
+  heatingMode?: "ideal" | "hydronic_cap";
   outdoor: SinusoidalWeatherParams;
   setpoints: {
     day: number;

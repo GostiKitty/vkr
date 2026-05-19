@@ -20,7 +20,7 @@ export function generateMonteCarloAnalytics(twin) {
         seed: 2026,
         parameters,
         scenarioBuilder,
-        heatingLoadThreshold: (twin.spaces.length || 1) * 1200,
+        heatingLoadThreshold: ((twin.spaces.length || 1) * 1200) / 1000,
         evaluationMode: "full-physics",
         morris: {
             levels: 6,
@@ -91,6 +91,7 @@ export function buildScientificReportData(args) {
         paragraphs: [
             `Workflow mode: ${args.uncertaintyMode ?? "full-physics"} · Monte Carlo runs requested: ${args.uncertaintyRuns ?? 0}.`,
             "Parameters sampled: infiltration (uniform 0.15–0.60 ACH), internal gains (normal μ=8 W/m², σ=2), envelope U-value (uniform 0.18–0.35 W/m²K).",
+            "Примечание: отчётный Monte Carlo по данным Twin использует упрощённую нодовую модель по площадям помещений API, а не геометрическую модель конструктора; это иллюстрация метода, а не полноценный расчёт ограждения конкретного здания.",
         ],
     });
     if (args.monteCarlo?.result) {
@@ -248,7 +249,6 @@ function escapePdfText(text) {
     return text.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
 }
 function buildPdfDocument(pages, width, height) {
-    const objects = [];
     const offsets = [];
     let body = "%PDF-1.4\n";
     const encoder = new TextEncoder();

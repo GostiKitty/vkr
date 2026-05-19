@@ -354,6 +354,12 @@ test("SP50: produces structured report for a minimal building", () => {
   if (report.sourceData.gsop === null) {
     throw new Error("Expected GSOP in structured report.");
   }
+  if (!report.energy.usesPlaceholderInputs) {
+    throw new Error("Ожидалась пометка о placeholder-параметрах в energy check СП 50.");
+  }
+  if (!report.missingData.some((entry) => entry.includes("placeholder"))) {
+    throw new Error("Ожидалось предупреждение о placeholder-параметрах в missingData.");
+  }
 });
 
 test("SP50: maps roof to covering in derived envelope report", () => {

@@ -146,10 +146,47 @@ export interface RoomBalanceResult {
   equipmentGainW: number;
   pipeGainW: number;
   solarGainW: number;
+  infiltrationLossW: number;
+  mechanicalVentilationLossW: number;
+  airExchangeLossW: number;
   ventilationLossW: number;
   transmissionLossW: number;
   adjacentExchangeW: number;
   passiveBalanceW: number;
+}
+
+export interface HydronicAssessment {
+  mode: "derived_only";
+  requiredPowerW: number;
+  availablePowerW: number | null;
+  requiredMassFlowKgS: number | null;
+  requiredVolumeFlowM3H: number | null;
+  powerDeficitW: number | null;
+  supplyTemperatureC: number | null;
+  returnTemperatureC: number | null;
+  deltaT_C: number | null;
+  systemsConsidered: number;
+  warnings: string[];
+  usedInputs: {
+    massFlowKgS: number | null;
+    volumeFlowM3H: number | null;
+    supplyTemperatureC: number | null;
+    returnTemperatureC: number | null;
+    fluidDensityKgM3: number | null;
+    fluidHeatCapacityJkgK: number | null;
+    efficiency: number | null;
+    maxPowerW: number | null;
+  };
+  display: {
+    availablePower: string;
+    requiredPower: string;
+    requiredMassFlow: string;
+    requiredVolumeFlow: string;
+    powerDeficit: string;
+    supplyTemperature: string;
+    returnTemperature: string;
+    deltaT: string;
+  };
 }
 
 export interface EngineeringBalanceSummary {
@@ -172,6 +209,7 @@ export interface EngineeringBalanceSummary {
   surplusW: number;
   totalUA_W_K: number;
   effectiveCapacitance_J_K: number;
+  hydronic: HydronicAssessment;
 }
 
 export interface EngineeringFieldCell {

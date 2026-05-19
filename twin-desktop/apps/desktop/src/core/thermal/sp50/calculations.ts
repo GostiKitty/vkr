@@ -1,5 +1,7 @@
+import { assemblyResistance, layerResistance, uValue } from "../formulas";
+
 export function calculateLayerResistance(thicknessM: number, conductivity_W_mK: number): number {
-  return thicknessM / conductivity_W_mK;
+  return layerResistance(thicknessM, conductivity_W_mK);
 }
 
 export function calculateConstructionResistance(input: {
@@ -7,11 +9,18 @@ export function calculateConstructionResistance(input: {
   externalHeatTransferCoefficient: number;
   layerResistances: number[];
 }): number {
-  return 1 / input.internalHeatTransferCoefficient + input.layerResistances.reduce((sum, value) => sum + value, 0) + 1 / input.externalHeatTransferCoefficient;
+  return assemblyResistance(
+    input.layerResistances.map((resistance) => ({
+      thicknessM: resistance,
+      lambdaWmK: 1,
+    })),
+    1 / input.internalHeatTransferCoefficient,
+    1 / input.externalHeatTransferCoefficient
+  );
 }
 
 export function calculateHeatTransferCoefficient(resistance_m2K_W: number): number {
-  return 1 / resistance_m2K_W;
+  return uValue(resistance_m2K_W);
 }
 
 export function calculateSectionTemperature(input: {

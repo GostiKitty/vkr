@@ -147,6 +147,8 @@ export interface Sp50EnergyCheck {
   solarGainCharacteristic_W_m3K: number | null;
   averageAirDensity_kg_m3: number | null;
   averageAirExchange_1_h: number | null;
+  usesPlaceholderInputs: boolean;
+  placeholderWarnings: string[];
   complies: boolean | null;
   status: Sp50CheckStatus;
 }

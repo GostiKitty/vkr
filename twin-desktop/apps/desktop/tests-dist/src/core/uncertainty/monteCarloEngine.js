@@ -80,7 +80,7 @@ function createLoadTracker(dtHours) {
     return {
         observer,
         finalize: () => ({
-            peakHeatingLoad,
+            peakHeatingLoad: peakHeatingLoad / 1000,
             annualEnergy: energyWh / 1000,
         }),
     };

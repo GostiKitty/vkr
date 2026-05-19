@@ -2,6 +2,8 @@ import { useDebugConsoleStore } from "../../entities/debug/debugConsole.store";
 import { useNetworkLogStore } from "../../entities/debug/networkLog.store";
 import { useProjectStore } from "../../entities/project/project.store";
 
+import { formatProjectDisplayLabel } from "../../shared/utils/projectLabels";
+
 const formatProjectKind = (value: "local" | "engine" | null | undefined): string => {
   if (value === "engine") {
     return "серверный";
@@ -39,7 +41,10 @@ export function DebugConsole() {
             <p className="mt-1 text-xs text-[color:var(--text-soft)]">
               Режим: <span className="font-semibold text-[color:var(--text-base)]">{formatProjectKind(projectKind)}</span>
               {" · "}
-              Проект: <span className="font-semibold text-[color:var(--text-base)]">{projectId ?? "—"}</span>
+              Проект:{" "}
+              <span className="font-semibold text-[color:var(--text-base)]">
+                {formatProjectDisplayLabel(projectId, { fallback: "—" })}
+              </span>
             </p>
           </div>
           <div className="flex gap-2">

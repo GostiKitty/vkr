@@ -1,3 +1,4 @@
+import { getSpaceDisplayName } from "../../shared/utils/roomNames";
 const DEFAULT_OUTDOOR_TEMPS = Array.from({ length: 24 }, (_, hour) => 5 + 10 * Math.sin((Math.PI * (hour - 6)) / 12));
 export function buildSpaceInstances(spaces) {
     if (!spaces.length) {
@@ -18,7 +19,7 @@ export function buildSpaceInstances(spaces) {
         const z = row * spacing - offset;
         return {
             id: space.id,
-            name: space.name ?? `Space ${index + 1}`,
+            name: getSpaceDisplayName(space, index),
             position: [x, height / 2, z],
             size: [width, height, depth],
             area,
@@ -32,7 +33,7 @@ export function buildThermalGraph(spaces, instances) {
         const area = instance?.area ?? space.area_m2 ?? 50;
         return {
             id: space.id,
-            label: space.name ?? `Space ${idx + 1}`,
+            label: getSpaceDisplayName(space, idx),
             type: "space",
             capacity: 120 + area * 0.3,
             heatGain: 0.15 * area,
@@ -41,7 +42,7 @@ export function buildThermalGraph(spaces, instances) {
     });
     const outdoorNode = {
         id: "outdoor",
-        label: "Outdoor",
+        label: "Наружный воздух",
         type: "outdoor",
         capacity: Infinity,
         heatGain: 0,

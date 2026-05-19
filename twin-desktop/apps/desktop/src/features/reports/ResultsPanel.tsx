@@ -6,12 +6,12 @@ import { Tabs } from "../../shared/ui";
 import SpaceDetails from "../twin/SpaceDetails";
 import SpaceList from "../twin/SpaceList";
 import SpaceViewer3D from "../twin/SpaceViewer3D";
-import SimulationPanel from "../runs/SimulationPanel";
+import { useWorkflowStore } from "../../entities/workflow/workflow.store";
 import ReportGenerator from "./ReportGenerator";
+import MetricsResultsTab from "./MetricsResultsTab";
 import { formatTemperature, temperatureToColor } from "../twin/twin.theme";
-import { useProjectStore } from "../../entities/project/project.store";
 
-type WorkspaceTab = "overview" | "simulation" | "view3d";
+type WorkspaceTab = "overview" | "metrics" | "view3d";
 
 interface ResultsPanelProps {
   projectId: string | null;
@@ -24,29 +24,57 @@ const tabItems = [
     hint: "Список зон и карточка выбранного помещения",
   },
   {
-    id: "simulation" as const,
-    label: "Расчёт",
-    hint: "Зональная RC-модель и ключевые KPI по конструктору",
+    id: "metrics" as const,
+    label: "Показатели",
+    hint: "KPI, графики T(t) и доли потерь после зонального расчёта",
   },
   {
     id: "view3d" as const,
-    label: "3D и карта",
-    hint: "Объёмная модель и условная тепловая окраска по зональным температурам (не CFD)",
+    label: "Карта и связи",
+    hint: "3D-окраска и граф тепловых связей зон (не CFD)",
   },
 ];
 
-export function ResultsPanel({ projectId }: ResultsPanelProps) {
+const calculationContours = [
+  {
+    id: "rc",
+    title: "RC-модель помещения",
+    description: "Основной зональный расчёт во времени: температуры, энергия, пиковая нагрузка и сценарный Monte Carlo поверх RC.",
+  },
+  {
+    id: "engineering",
+    title: "Инженерный квазистационарный баланс",
+    description: "Разложение потерь по ограждениям, окнам, дверям, вентиляции и инфильтрации для инженерной интерпретации результата.",
+  },
+  {
+    id: "sp50",
+    title: "Проверка по СП 50",
+    description: "Отдельный нормативный контур по ограждающим конструкциям. Не равен RC-результатам и не заменяется ими.",
+  },
+  {
+    id: "transient1d",
+    title: "1D transient расчёт конструкции",
+    description: "Отдельный послойный нестационарный анализ конструкции. Используется как самостоятельный контур, а не как часть основного RC solver.",
+  },
+  {
+    id: "legacy",
+    title: "Legacy report / legacy Monte Carlo path",
+    description: "Устаревший отчётный контур по данным Twin API. Требует синхронизации с основным расчётом конструктора и помечается отдельно.",
+  },
+] as const;
+
+export function ResultsPanel(_props: ResultsPanelProps) {
   const frames = useTwinStore((state) => state.simulationFrames);
   const timeIndex = useTwinStore((state) => state.timeIndex);
   const setTimeIndex = useTwinStore((state) => state.setTimeIndex);
   const thermalGraph = useTwinStore((state) => state.thermalGraph);
+  const simulationDataSource = useTwinStore((state) => state.simulationDataSource);
   const selectSpace = useTwinStore((state) => state.selectSpace);
   const selectedSpaceId = useTwinStore((state) => state.selectedSpaceId);
+  const setWorkflowStep = useWorkflowStore((state) => state.setCurrentStep);
 
   const [playing, setPlaying] = useState(false);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("overview");
-  const projectKind = useProjectStore((state) => state.projectKind);
-
   const currentFrame = frames[timeIndex] ?? null;
   const timeLabel = currentFrame ? formatTime(currentFrame.time) : "—";
 
@@ -98,15 +126,8 @@ export function ResultsPanel({ projectId }: ResultsPanelProps) {
         <SpaceDetails />
       </div>
     ),
-    simulation: (
-      <SimulationPanel
-        projectId={projectId}
-        projectKind={projectKind}
-        onShowOnModel={() => setActiveTab("view3d")}
-        onGenerateReport={() =>
-          document.getElementById("report-generator-anchor")?.scrollIntoView({ behavior: "smooth", block: "start" })
-        }
-      />
+    metrics: (
+      <MetricsResultsTab onRecalculate={() => setWorkflowStep("solve")} />
     ),
     view3d: (
       <div className="space-y-4">
@@ -116,8 +137,6 @@ export function ResultsPanel({ projectId }: ResultsPanelProps) {
     ),
   };
 
-  const simulationTabDisabled = projectKind === "engine" && !projectId;
-
   return (
     <div className="flex min-h-0 flex-col gap-6">
       <div className="ui-panel shrink-0 p-5 ring-1 ring-[color:var(--accent-muted)]/30 sm:p-6">
@@ -125,8 +144,17 @@ export function ResultsPanel({ projectId }: ResultsPanelProps) {
           <EngineeringSectionHeader
             kicker="Результаты"
             title="Обзор после расчёта"
-            subtitle="Сдвигайте момент времени, чтобы увидеть, как меняются зональные температуры. Вкладки ниже разделяют помещения, численный расчёт и 3D с тепловой картой."
+            subtitle="Сдвигайте момент времени, чтобы увидеть, как меняются зональные температуры. Вкладки: помещения, показатели расчёта, 3D и граф связей."
           />
+          {simulationDataSource === "demo" && frames.length > 0 ? (
+            <span className="mt-2 inline-flex rounded-full border border-[color:var(--warning-border)] bg-[color:var(--warning-bg)] px-2.5 py-1 text-xs font-medium text-[color:var(--warning-fg)]">
+              Демо-кадры twin
+            </span>
+          ) : simulationDataSource === "computed" ? (
+            <span className="mt-2 inline-flex rounded-full border border-[color:var(--success-border)] bg-[color:var(--success-bg)] px-2.5 py-1 text-xs font-medium text-[color:var(--success-fg)]">
+              После расчёта RC
+            </span>
+          ) : null}
           {frames.length > 0 ? (
             <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <EngineeringMetricTile
@@ -209,16 +237,32 @@ export function ResultsPanel({ projectId }: ResultsPanelProps) {
       </div>
 
       <div className="shrink-0">
+        <div className="ui-panel-muted mb-4 space-y-3 rounded-2xl p-4">
+          <div className="space-y-1">
+            <p className="text-sm font-semibold text-[color:var(--text-base)]">Расчётные контуры</p>
+            <p className="text-sm text-[color:var(--text-muted)]">
+              В результатах одновременно присутствуют несколько независимых расчётных контуров. Их нужно читать раздельно, а не как один общий solver.
+            </p>
+          </div>
+          <div className="grid gap-3 xl:grid-cols-2">
+            {calculationContours.map((contour) => (
+              <article
+                key={contour.id}
+                className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)] p-3"
+              >
+                <p className="text-sm font-semibold text-[color:var(--text-base)]">{contour.title}</p>
+                <p className="mt-1 text-sm text-[color:var(--text-muted)]">{contour.description}</p>
+              </article>
+            ))}
+          </div>
+        </div>
         <Tabs<WorkspaceTab>
-          tabs={tabItems.map((item) => ({
-            ...item,
-            disabled: item.id === "simulation" ? simulationTabDisabled : false,
-          }))}
+          tabs={tabItems}
           value={activeTab}
           onChange={setActiveTab}
         />
         <p className="mt-2 text-xs text-[color:var(--text-soft)]">
-          Подсказка: наведите на вкладку — краткое описание. Сценарии «худший / медиана / лучший» для нестационарного анализа настраиваются в конструкторе (ВКР).
+          Подсказка: наведите на вкладку — краткое описание. Сценарии и параметры неопределённости настраиваются в конструкторе проекта.
         </p>
       </div>
 
@@ -263,6 +307,14 @@ function GraphPanel({
   const height = 320;
   const nodes = graph.nodes;
   const edges = graph.edges;
+  const frameTemps = frame
+    ? Object.values(frame.temperatures).filter((value): value is number => Number.isFinite(value))
+    : [];
+  const dynamicMin = frameTemps.length ? Math.min(...frameTemps) : 15;
+  const dynamicMax = frameTemps.length ? Math.max(...frameTemps) : 30;
+  const legendMin = Math.min(15, dynamicMin);
+  const legendMax = Math.max(30, dynamicMax);
+  const scaleClamped = dynamicMin < 15 || dynamicMax > 30;
   const positions = new Map<string, { x: number; y: number }>();
   const spaceNodes = nodes.filter((node) => node.type === "space");
   const radius = Math.min(width, height) / 2 - 40;
@@ -279,8 +331,19 @@ function GraphPanel({
   return (
     <div className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-elevated)] p-4 shadow-sm">
       <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
-        <h3 className="text-sm font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">Тепловой граф зон</h3>
-        <TemperatureScaleLegend caption="Те же 15…30 °C, что и для цвета узлов (при отсутствии данных — серая заливка)." />
+        <div>
+          <h3 className="text-sm font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">Тепловой граф зон</h3>
+          <p className="mt-1 text-xs text-[color:var(--text-muted)]">
+            Условная зональная модель. Толщина линии ∝ проводимость (Вт/К). Не CFD.
+          </p>
+        </div>
+        <TemperatureScaleLegend
+          caption={
+            scaleClamped
+              ? `Шкала ${legendMin.toFixed(0)}…${legendMax.toFixed(0)} °C (кадр: ${dynamicMin.toFixed(1)}…${dynamicMax.toFixed(1)} °C).`
+              : `Шкала ${legendMin.toFixed(0)}…${legendMax.toFixed(0)} °C для узлов кадра.`
+          }
+        />
       </div>
       <div className="w-full overflow-x-auto">
         <svg width={width} height={height} className="max-w-full">
@@ -309,7 +372,8 @@ function GraphPanel({
               return null;
             }
             const temp = frame?.temperatures[node.id] ?? node.initialTemp;
-            const color = temperatureToColor(temp);
+            const color = temperatureToColor(temp, legendMin, legendMax);
+            const displayLabel = node.id === "outdoor" ? "Наружный воздух" : node.label;
             const isSelected = selectedId === node.id;
             return (
               <g
@@ -327,7 +391,7 @@ function GraphPanel({
                   opacity={node.type === "space" ? 0.95 : 0.7}
                 />
                 <text x={pos.x} y={pos.y + 30} textAnchor="middle" className="text-xs font-medium fill-[color:var(--text-muted)]">
-                  {node.label}
+                  {displayLabel}
                 </text>
                 <text x={pos.x} y={pos.y + 44} textAnchor="middle" className="text-[10px] fill-[color:var(--text-soft)]">
                   {formatTemperature(temp)}

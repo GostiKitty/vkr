@@ -9,6 +9,8 @@ import { getDefaultSurfaceResistanceProfile } from "../../../norms/sp50_2024/hea
 
 export const AIR_DENSITY_KG_M3 = 1.204;
 export const AIR_HEAT_CAPACITY_J_KG_K = 1005;
+export const DEFAULT_WATER_DENSITY_KG_M3 = 998;
+export const DEFAULT_WATER_HEAT_CAPACITY_J_KG_K = 4180;
 export const DEFAULT_WINDOW_U_W_M2K = 2.35;
 export const DEFAULT_DOOR_U_W_M2K = 1.8;
 export const DEFAULT_FLOOR_U_W_M2K = 0.45;

@@ -109,6 +109,12 @@ test("engineering analysis builds envelope, balance and confidence summary", () 
     if (result.balance.totalLossW <= 0) {
         throw new Error("Суммарные теплопотери должны быть положительными для холодного наружного воздуха.");
     }
+    if (!result.balance.hydronic.display.requiredPower.includes("Вт")) {
+        throw new Error("Ожидалась строковая derived-метрика по требуемой гидравлической мощности.");
+    }
+    if (typeof room.infiltrationLossW !== "number" || typeof room.airExchangeLossW !== "number") {
+        throw new Error("Ожидалось раздельное хранение потерь на инфильтрацию и суммарный воздухообмен.");
+    }
     if (!result.scenarios.length) {
         throw new Error("Должны быть построены сценарии сравнения.");
     }

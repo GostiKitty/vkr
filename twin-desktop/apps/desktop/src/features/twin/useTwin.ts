@@ -21,6 +21,8 @@ export function useTwin(projectId: string | null, projectKind: ProjectKind): Use
   const setSpaceInstances = useTwinStore((state) => state.setSpaceInstances);
   const setThermalGraph = useTwinStore((state) => state.setThermalGraph);
   const setSimulationFrames = useTwinStore((state) => state.setSimulationFrames);
+  const setSimulationResult = useTwinStore((state) => state.setSimulationResult);
+  const clearSimulation = useTwinStore((state) => state.clearSimulation);
   const engineBase = useEngineSettingsStore((state) => state.baseUrl.trim());
 
   useEffect(() => {
@@ -65,6 +67,7 @@ export function useTwin(projectId: string | null, projectKind: ProjectKind): Use
       if (!isMounted) {
         return;
       }
+      clearSimulation();
       setTwin(data);
       setError(null);
       setLoading(false);
@@ -99,22 +102,33 @@ export function useTwin(projectId: string | null, projectKind: ProjectKind): Use
       window.clearTimeout(retryTimeoutId);
       controller.abort();
     };
-  }, [engineBase, projectId, projectKind, reset, setError, setLoading, setTwin, twin]);
+  }, [clearSimulation, engineBase, projectId, projectKind, reset, setError, setLoading, setTwin, twin]);
 
   useEffect(() => {
+    const { simulationDataSource } = useTwinStore.getState();
     if (!twin) {
-      setSpaceInstances([]);
-      setThermalGraph(null);
-      setSimulationFrames([]);
+      if (simulationDataSource !== "computed") {
+        setSpaceInstances([]);
+        setThermalGraph(null);
+        setSimulationFrames([]);
+      }
+      return;
+    }
+    if (simulationDataSource === "computed") {
       return;
     }
     const spaces = twin.spaces ?? [];
     const instances = buildSpaceInstances(spaces);
-    setSpaceInstances(instances);
     const graph = buildThermalGraph(spaces, instances);
-    setThermalGraph(graph);
-    setSimulationFrames(simulateThermalGraph(graph));
-  }, [setSpaceInstances, setThermalGraph, setSimulationFrames, twin]);
+    const frames = simulateThermalGraph(graph);
+    setSpaceInstances(instances);
+    setSimulationResult({
+      frames,
+      graph,
+      result: null,
+      source: "demo",
+    });
+  }, [setSimulationFrames, setSimulationResult, setSpaceInstances, setThermalGraph, twin]);
 
   const spaces = useMemo(() => twin?.spaces ?? [], [twin]);
   const selectedSpace = useMemo(() => {

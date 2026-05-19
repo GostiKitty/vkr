@@ -68,7 +68,7 @@ export function simulateThermalModel(nodes, connections, boundary, options, step
         deltas.forEach((value, key) => {
             temperatures.set(key, value);
         });
-        if (observerSnapshots) {
+        if (observerSnapshots && stepObserver) {
             stepObserver({
                 timeHours: currentTimeHours + dtHours,
                 nodes: observerSnapshots,

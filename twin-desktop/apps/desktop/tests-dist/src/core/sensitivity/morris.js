@@ -25,7 +25,7 @@ export function runMorrisAnalysis(config) {
         const directions = createDirections(k, rng);
         let currentPoint = basePoint.slice();
         let currentOutput = config.evaluator(toActual(currentPoint, config.parameters));
-        order.forEach((paramIndex, stepIndex) => {
+        order.forEach((paramIndex) => {
             const direction = adjustDirection(currentPoint[paramIndex], directions[paramIndex], deltaNormalized);
             const nextPoint = currentPoint.slice();
             nextPoint[paramIndex] = clamp01(currentPoint[paramIndex] + direction * deltaNormalized);

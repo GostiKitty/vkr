@@ -1,8 +1,8 @@
 import type { BuildingModel, EnvelopeSurface, Sp50BuildingMetadata, Sp50ConstructionType, WallLayer } from "../../../entities/geometry/types";
 import type { EnvelopeElementResult } from "../engineering/types";
+import { gsop as calculateGsopSafe } from "../formulas";
 import { calculateConstructionResistance, calculateHeatTransferCoefficient } from "./calculations";
 import {
-  calculateGsop,
   calculateNt,
   getFloorHeatAbsorptionLimit,
   getGateRequiredResistance,
@@ -99,6 +99,7 @@ export function runSp50ComplianceAnalysis(input: RunSp50ComplianceOptions): Sp50
   const moistureProtection = buildMoistureProtectionCheck(constructions, context);
   const floor = buildFloorCheck(constructions, context);
   const energy = buildEnergyCheck(building, context);
+  context.missingData.push(...energy.placeholderWarnings);
   const materialEfficiency = buildMaterialEfficiency(constructions);
   const recommendations = buildRecommendations(constructions, building, energy, temperature);
 
@@ -138,11 +139,7 @@ function resolveSourceData(model: BuildingModel, defaultIndoorTemperatureC: numb
     (humidityZone ? getOperationCondition({ moistureMode, humidityZone }) : null);
   const gsop =
     outdoorHeatingPeriodAverageC !== null && heatingPeriodDurationDays !== null
-      ? calculateGsop({
-          indoorTemperatureC,
-          outdoorHeatingPeriodAverageC,
-          heatingPeriodDurationDays,
-        })
+      ? calculateGsopSafe(indoorTemperatureC, outdoorHeatingPeriodAverageC, heatingPeriodDurationDays)
       : null;
   const missingData: string[] = [];
 
@@ -670,6 +667,10 @@ function buildEnergyCheck(building: Sp50BuildingCheck, context: DerivedContext):
   const Ginf = 1;
   const nInf = 1;
   const c = 1;
+  const placeholderWarnings = [
+    "Использованы placeholder-параметры betaV, Lvent, nVent, Ginf, nInf и c.",
+    "Энергохарактеристика СП 50 требует замены этих констант на реальные проектные входные данные.",
+  ];
   const averageAirDensity = tOutdoor !== null ? 353 / (273 + tOutdoor) : null;
   const averageAirExchange =
     volume && averageAirDensity
@@ -709,6 +710,8 @@ function buildEnergyCheck(building: Sp50BuildingCheck, context: DerivedContext):
     solarGainCharacteristic_W_m3K: qrad,
     averageAirDensity_kg_m3: averageAirDensity,
     averageAirExchange_1_h: averageAirExchange,
+    usesPlaceholderInputs: true,
+    placeholderWarnings,
     complies,
     status: resolveStatus(complies),
   };

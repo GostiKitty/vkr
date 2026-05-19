@@ -2,14 +2,17 @@ import { useMemo, useState } from "react";
 
 import { useBuildStore } from "../build/build.store";
 import { buildAdjacencyGraph } from "../../core/graph/adjacency";
+import { syncBuildSimulationToStudio } from "../../core/thermal/thermalSimulationExport";
 import { runThermalSimulation, type ThermalSimulationResult } from "../../core/thermal/solver";
 import type { EngineeringMetricCard } from "../../core/thermal/thermalDiagnostics";
 import { buildThermalSimulationInsightLines } from "../../core/thermal/thermalResultsInterpretation";
-import { DEFAULT_THERMAL_OPTIONS } from "../build/thermal/defaultThermalOptions";
+import { buildThermalOptionsFromWorkflow } from "../build/thermal/workflowThermalOptions";
 import { formatEnergy, formatNumber } from "../../shared/utils/format";
 import type { ProjectKind } from "../../entities/project/project.store";
 import type { RunResult, RunResultMetric } from "../../shared/api/types";
 import { runEngineSimulation } from "./runs.api";
+import { FormulaHint } from "../formulas/components/FormulaHint";
+import { useWorkflowStore } from "../../entities/workflow/workflow.store";
 import {
   EngineeringCallout,
   EngineeringMetricTile,
@@ -35,7 +38,9 @@ export function SimulationPanel({
   onGenerateReport,
 }: SimulationPanelProps) {
   const buildModel = useBuildStore((state) => state.model);
+  const scenarioConfig = useWorkflowStore((state) => state.scenarioConfig);
   const isLocalProject = projectKind === "local";
+  const simulationOptions = useMemo(() => buildThermalOptionsFromWorkflow(scenarioConfig), [scenarioConfig]);
 
   const [result, setResult] = useState<ThermalSimulationResult | null>(null);
   const [running, setRunning] = useState(false);
@@ -61,8 +66,8 @@ export function SimulationPanel({
   const roomTempRange = useMemo(() => (result ? roomTemperatureRangeAcrossTimeline(result) : { min: null, max: null }), [result]);
 
   const insightLines = useMemo(
-    () => (result ? buildThermalSimulationInsightLines(result, { duration: DEFAULT_THERMAL_OPTIONS.duration }) : []),
-    [result]
+    () => (result ? buildThermalSimulationInsightLines(result, { duration: simulationOptions.duration }) : []),
+    [result, simulationOptions.duration]
   );
 
   const balanceTone: MetricStatusTone = useMemo(() => {
@@ -90,7 +95,8 @@ export function SimulationPanel({
     setShowSuccess(false);
     try {
       const adjacency = buildAdjacencyGraph(buildModel);
-      const simulation = runThermalSimulation(buildModel, DEFAULT_THERMAL_OPTIONS, adjacency);
+      const simulation = runThermalSimulation(buildModel, simulationOptions, adjacency);
+      syncBuildSimulationToStudio(buildModel, simulation, adjacency);
       setResult(simulation);
       setShowSuccess(true);
       setTimeout(() => setShowSuccess(false), 1500);
@@ -135,7 +141,7 @@ export function SimulationPanel({
         <EngineeringSectionHeader
           kicker="Шаг расчёта"
           title="Локальный тепловой расчёт"
-          subtitle="Зональная RC-модель по текущей геометрии из конструктора. Параметры сценария (климат, уставки, ACH) задаются на шаге «Сценарий» в студии; здесь используется встроенный пресет решателя для быстрого прогона."
+          subtitle="Зональная RC-модель по текущей геометрии из конструктора. Если сценарий сохранён, расчёт использует его климат, уставки, теплопоступления и ACH; иначе применяется встроенный пресет."
         />
         <div className="mt-5 flex flex-wrap gap-3">
           <button
@@ -229,11 +235,14 @@ export function SimulationPanel({
       )}
 
       <div className="ui-panel p-5 sm:p-6">
-        <EngineeringSectionHeader
-          kicker="Выходные данные"
-          title="Сводка по расчёту"
-          subtitle="Ключевые величины за выбранный период сценария. Удельные показатели отнесены к суммарной площади пола зон модели (не к «отапливаемой площади» СП)."
-        />
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <EngineeringSectionHeader
+            kicker="Выходные данные"
+            title="Сводка по расчёту"
+            subtitle="Ключевые величины за выбранный период сценария. Удельные показатели отнесены к суммарной площади пола зон модели (не к «отапливаемой площади» СП)."
+          />
+          <FormulaHint ids={["thermal_peak_load"]} />
+        </div>
         {isBusy ? (
           <div className="mt-4 space-y-2">
             {Array.from({ length: 4 }).map((_, idx) => (

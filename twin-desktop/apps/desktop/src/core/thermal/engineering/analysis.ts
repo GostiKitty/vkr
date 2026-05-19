@@ -2,14 +2,28 @@ import type { AdjacencyResult } from "../../graph/adjacency";
 import type { BuildingModel } from "../../../entities/geometry/types";
 import { computeWallProperties } from "../../../entities/material/types";
 import { buildGeometryRenderModel } from "../../geometry/bimPipeline";
+import { buildHeatingModelSnapshot } from "../../networks/heatingModel";
 import { createThermalFieldModel } from "../field";
+import {
+  calculateHydronicHeatPower,
+  calculateRequiredHydronicMassFlow,
+  calculateRequiredHydronicVolumeFlowM3H,
+  transmissionLoss,
+  uValue,
+} from "../formulas";
 import { buildThermalPhysicsModel } from "../physics";
 import type { ThermalSimulationOptions, ThermalSimulationResult } from "../solver";
-import { DEFAULT_ENGINEERING_OPTIONS, DEFAULT_SURFACE_RESISTANCE_PROFILE, ENGINEERING_METHODS } from "./constants";
+import {
+  DEFAULT_ENGINEERING_OPTIONS,
+  DEFAULT_SURFACE_RESISTANCE_PROFILE,
+  ENGINEERING_METHODS,
+  DEFAULT_WATER_DENSITY_KG_M3,
+  DEFAULT_WATER_HEAT_CAPACITY_J_KG_K,
+} from "./constants";
 import { getEnvelopeElementLabel, getRoomDisplayName } from "./display";
 import { buildComfortSummary, buildDetailedFieldResult, buildFastFieldSummary } from "./fieldSolver";
 import { buildPresentationSummary } from "./presentation";
-import { clamp, effectiveAirCapacitance, formatFormulaSubstitution, roundNumber, ventilationHeatLossW } from "./units";
+import { clamp, effectiveAirCapacitance, formatFormulaSubstitution, roundNumber } from "./units";
 import { validateEngineeringInputs } from "./validation";
 import { buildZoneInsights } from "./zoneAnalysis";
 import { runSp50ComplianceAnalysis } from "../sp50/analysis";
@@ -17,6 +31,7 @@ import type {
   EngineeringAnalysisResult,
   EngineeringConfidenceSummary,
   EngineeringInputSource,
+  HydronicAssessment,
   EngineeringOptions,
   ResolvedEngineeringOptions,
   EngineeringScenarioResult,
@@ -133,6 +148,24 @@ export function runEngineeringThermalAnalysis(
     defaultIndoorTemperatureC: targetTemperatureC,
     defaultOutdoorTemperatureC: outdoorTemperatureC,
   });
+  if (balance.hydronic.warnings.length) {
+    validation.push({
+      id: "hydronic-derived-warnings",
+      severity: "info",
+      scope: "Гидравлическая оценка",
+      message: balance.hydronic.warnings[0],
+      recommendation: "Проверьте расход, температуры подачи/обратки и ограничения мощности приборов перед включением hydronic_cap режима.",
+    });
+  }
+  if (sp50?.energy.usesPlaceholderInputs) {
+    validation.push({
+      id: "sp50-energy-placeholders",
+      severity: "warning",
+      scope: "СП 50",
+      message: "Энергохарактеристика СП 50 пока использует placeholder-параметры воздухообмена и инфильтрации.",
+      recommendation: "Не трактуйте этот блок как полноценный нормативный расчёт до замены betaV, Lvent, Ginf, nVent, nInf и c на реальные входные данные.",
+    });
+  }
   const presentation = buildPresentationSummary({
     timestampIso: new Date().toISOString(),
     options: engineeringOptions,
@@ -296,10 +329,10 @@ function evaluateEngineeringState(
   );
   const gains = buildGainResults(model, physics);
   const balance = buildBalanceSummary(
+    model,
     rooms,
     envelope,
     gains,
-    { ...options, infiltrationACH },
     resolvedOptions,
     targetTemperatureC,
     outdoorTemperatureC
@@ -368,6 +401,9 @@ function buildRoomBalances(model: BuildingModel, physics: ReturnType<typeof buil
       equipmentGainW: balance.equipmentGainW,
       pipeGainW: balance.pipeGainW,
       solarGainW: balance.solarGainW,
+      infiltrationLossW: balance.infiltrationLossW,
+      mechanicalVentilationLossW: balance.mechanicalVentilationLossW,
+      airExchangeLossW: balance.airExchangeLossW,
       ventilationLossW: balance.ventilationLossW,
       transmissionLossW: balance.envelopeLossW,
       adjacentExchangeW: balance.adjacentExchangeW,
@@ -405,7 +441,7 @@ function buildEnvelopeResults(
         options.surfaceResistances.internal_m2K_W +
         layerResistance +
         options.surfaceResistances.external_m2K_W;
-      const wallU = 1 / Math.max(totalResistance, 1e-6);
+      const wallU = uValue(Math.max(totalResistance, 1e-6));
       const deltaTC = targetTemperatureC - outdoorTemperatureC;
       const base = {
         roomId,
@@ -419,7 +455,7 @@ function buildEnvelopeResults(
       const results: EnvelopeElementResult[] = [];
 
       if (surface.opaqueAreaM2 > 0) {
-        const heatFluxW = wallU * surface.opaqueAreaM2 * deltaTC;
+        const heatFluxW = transmissionLoss(wallU, surface.opaqueAreaM2, deltaTC);
         results.push({
           id: `wall-${surface.wallId}`,
           label: getEnvelopeElementLabel("wall", surface.orientation, roomName),
@@ -445,7 +481,7 @@ function buildEnvelopeResults(
       }
 
       if (surface.windowAreaM2 > 0) {
-        const heatFluxW = options.windowU_W_m2K * surface.windowAreaM2 * deltaTC;
+        const heatFluxW = transmissionLoss(options.windowU_W_m2K, surface.windowAreaM2, deltaTC);
         results.push({
           id: `window-${surface.wallId}`,
           label: getEnvelopeElementLabel("window", surface.orientation, roomName),
@@ -471,7 +507,7 @@ function buildEnvelopeResults(
       }
 
       if (surface.doorAreaM2 > 0) {
-        const heatFluxW = options.doorU_W_m2K * surface.doorAreaM2 * deltaTC;
+        const heatFluxW = transmissionLoss(options.doorU_W_m2K, surface.doorAreaM2, deltaTC);
         results.push({
           id: `door-${surface.wallId}`,
           label: getEnvelopeElementLabel("door", surface.orientation, roomName),
@@ -503,8 +539,8 @@ function buildEnvelopeResults(
     const roomName = getRoomDisplayName(model, balance.roomId);
     const floorDelta = targetTemperatureC - options.groundTemperatureC;
     const roofDelta = targetTemperatureC - outdoorTemperatureC;
-    const floorHeatFluxW = options.floorU_W_m2K * balance.areaM2 * floorDelta;
-    const roofHeatFluxW = options.roofU_W_m2K * balance.areaM2 * roofDelta;
+    const floorHeatFluxW = transmissionLoss(options.floorU_W_m2K, balance.areaM2, floorDelta);
+    const roofHeatFluxW = transmissionLoss(options.roofU_W_m2K, balance.areaM2, roofDelta);
     return [
       {
         id: `floor-${balance.roomId}`,
@@ -656,10 +692,10 @@ function buildGainResults(model: BuildingModel, physics: ReturnType<typeof build
 }
 
 function buildBalanceSummary(
+  model: BuildingModel,
   rooms: RoomBalanceResult[],
   envelope: EnvelopeElementResult[],
   gains: HeatGainResult[],
-  simulationOptions: ThermalSimulationOptions,
   options: ResolvedEngineeringOptions,
   targetTemperatureC: number,
   outdoorTemperatureC: number
@@ -670,15 +706,8 @@ function buildBalanceSummary(
   const floorLossW = sumEnvelope(envelope, "floor");
   const roofLossW = sumEnvelope(envelope, "roof");
   const transmissionLossW = wallLossW + windowLossW + doorLossW + floorLossW + roofLossW;
-  const infiltrationLossW = rooms.reduce(
-    (sum, room) => sum + ventilationHeatLossW(room.volumeM3, simulationOptions.infiltrationACH ?? 0.5, targetTemperatureC - outdoorTemperatureC),
-    0
-  );
-  const ventilationLossW = rooms.reduce(
-    (sum, room) =>
-      sum + ventilationHeatLossW(room.volumeM3, options.ventilationACH, targetTemperatureC - (options.supplyAirTemperatureC ?? outdoorTemperatureC)),
-    0
-  );
+  const infiltrationLossW = rooms.reduce((sum, room) => sum + room.infiltrationLossW, 0);
+  const ventilationLossW = rooms.reduce((sum, room) => sum + room.mechanicalVentilationLossW, 0);
   const internalGainsW = gains
     .filter((entry) => entry.kind !== "solar" && entry.kind !== "heating" && entry.kind !== "pipes")
     .reduce((sum, entry) => sum + entry.effectivePowerW, 0);
@@ -692,6 +721,8 @@ function buildBalanceSummary(
     (sum, room) => sum + effectiveAirCapacitance(room.volumeM3, options.effectiveMassFactor),
     0
   );
+  const requiredHeatingW = Math.max(0, totalLossW - passiveGainsW);
+  const hydronic = buildHydronicAssessment(model, requiredHeatingW, installedHeatingCapacityW);
 
   return {
     transmissionLossW,
@@ -709,10 +740,11 @@ function buildBalanceSummary(
     heatingDeliveredW,
     installedHeatingCapacityW,
     netBalanceW: passiveGainsW - totalLossW,
-    requiredHeatingW: Math.max(0, totalLossW - passiveGainsW),
+    requiredHeatingW,
     surplusW: Math.max(0, passiveGainsW - totalLossW),
     totalUA_W_K,
     effectiveCapacitance_J_K,
+    hydronic,
   };
 }
 
@@ -1162,6 +1194,82 @@ function summarizeScenario(points: EngineeringScenarioResult["points"], timestep
     maxTemperatureC: Math.max(...temperatures),
     finalTemperatureC: points[points.length - 1]?.indoorTemperatureC ?? 0,
     warmupHoursToTarget: warmupPoint ? warmupPoint.timeHours : null,
+  };
+}
+
+function buildHydronicAssessment(
+  model: BuildingModel,
+  requiredPowerW: number,
+  installedHeatingCapacityW: number
+): HydronicAssessment {
+  const snapshot = buildHeatingModelSnapshot(model);
+  const system = snapshot.systems[0] ?? null;
+  const systemsConsidered = snapshot.systems.length;
+  const warnings = snapshot.issues.map((issue) => issue.message);
+
+  if (snapshot.systems.length > 1) {
+    warnings.push("Обнаружено несколько гидравлических систем. Derived hydronic metrics агрегированы только по первой системе.");
+  }
+
+  const supplyTemperatureC = system?.supplyTemperatureC ?? null;
+  const returnTemperatureC = system?.returnTemperatureC ?? null;
+  const massFlowKgS = system?.estimatedFlow_kg_s && system.estimatedFlow_kg_s > 0 ? system.estimatedFlow_kg_s : null;
+  const maxPowerW = installedHeatingCapacityW > 0 ? installedHeatingCapacityW : system?.totalLoadW ?? null;
+
+  const hydronic = calculateHydronicHeatPower({
+    massFlowKgS,
+    supplyTemperatureC,
+    returnTemperatureC,
+    fluidDensityKgM3: DEFAULT_WATER_DENSITY_KG_M3,
+    fluidHeatCapacityJkgK: DEFAULT_WATER_HEAT_CAPACITY_J_KG_K,
+    efficiency: 1,
+    maxPowerW,
+  });
+  warnings.push(...hydronic.warnings);
+
+  const requiredMassFlowKgS =
+    hydronic.deltaT === null
+      ? null
+      : calculateRequiredHydronicMassFlow(requiredPowerW, hydronic.deltaT, DEFAULT_WATER_HEAT_CAPACITY_J_KG_K, 1);
+  const requiredVolumeFlowM3H =
+    hydronic.deltaT === null
+      ? null
+      : calculateRequiredHydronicVolumeFlowM3H(
+          requiredPowerW,
+          hydronic.deltaT,
+          DEFAULT_WATER_DENSITY_KG_M3,
+          DEFAULT_WATER_HEAT_CAPACITY_J_KG_K,
+          1
+        );
+  const powerDeficitW =
+    hydronic.availablePowerW === null ? null : Math.max(0, requiredPowerW - hydronic.availablePowerW);
+
+  const formatNullable = (value: number | null, unit: string, digits = 2) =>
+    value === null ? "не задано" : `${roundNumber(value, digits)} ${unit}`;
+
+  return {
+    mode: "derived_only",
+    requiredPowerW,
+    availablePowerW: hydronic.availablePowerW,
+    requiredMassFlowKgS,
+    requiredVolumeFlowM3H,
+    powerDeficitW,
+    supplyTemperatureC,
+    returnTemperatureC,
+    deltaT_C: hydronic.deltaT,
+    systemsConsidered,
+    warnings: Array.from(new Set(warnings)),
+    usedInputs: hydronic.usedInputs,
+    display: {
+      availablePower: formatNullable(hydronic.availablePowerW, "Вт", 1),
+      requiredPower: formatNullable(requiredPowerW, "Вт", 1),
+      requiredMassFlow: formatNullable(requiredMassFlowKgS, "кг/с", 4),
+      requiredVolumeFlow: formatNullable(requiredVolumeFlowM3H, "м³/ч", 3),
+      powerDeficit: formatNullable(powerDeficitW, "Вт", 1),
+      supplyTemperature: formatNullable(supplyTemperatureC, "°C", 1),
+      returnTemperature: formatNullable(returnTemperatureC, "°C", 1),
+      deltaT: formatNullable(hydronic.deltaT, "К", 1),
+    },
   };
 }
 

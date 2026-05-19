@@ -1,13 +1,12 @@
-import { useCallback, useEffect, useMemo, useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
 import ModelPage from "../model/ModelPage";
 import { QuickImportButton } from "../model/QuickImportButton";
 import SimulationPanel from "../runs/SimulationPanel";
 import ResultsPanel from "../reports/ResultsPanel";
 import UncertaintyPanel from "../scenarios/UncertaintyPanel";
 import ScenarioSetupPanel from "../scenarios/ScenarioSetupPanel";
-import { summarizeBuilding } from "../../entities/building";
 import { EmptyState, Tooltip } from "../../shared/ui";
-import { formatArea, formatVolume } from "../../shared/utils/format";
+import { formatProjectDisplayLabel } from "../../shared/utils/projectLabels";
 import { useTwin } from "./useTwin";
 import SpaceList from "./SpaceList";
 import { useTwinStore } from "../../entities/twin/twin.store";
@@ -17,7 +16,6 @@ import {
   useWorkflowStore,
   workflowOrder,
   type WorkflowStep,
-  type WorkflowStepStatus,
 } from "../../entities/workflow/workflow.store";
 import { evaluateWorkflowDiagnostics } from "../../entities/workflow/workflow.diagnostics";
 import { navigate } from "../../app/router";
@@ -79,6 +77,7 @@ export function TwinPage() {
   const currentStep = useWorkflowStore((state) => state.currentStep);
   const setCurrentStep = useWorkflowStore((state) => state.setCurrentStep);
   const resetWorkflow = useWorkflowStore((state) => state.resetWorkflow);
+  const clearSimulation = useTwinStore((state) => state.clearSimulation);
   const solveCompleted = useWorkflowStore((state) => state.solveCompleted);
   const markSolveCompleted = useWorkflowStore((state) => state.markSolveCompleted);
   const scenarioConfig = useWorkflowStore((state) => state.scenarioConfig);
@@ -95,7 +94,8 @@ export function TwinPage() {
 
   useEffect(() => {
     resetWorkflow();
-  }, [storedProjectId, resetWorkflow]);
+    clearSimulation();
+  }, [clearSimulation, resetWorkflow, storedProjectId]);
 
   const wallsWithoutAssembly = useMemo(
     () => buildModel.walls.filter((wall) => !(wall.wallAssemblyId || wall.layers?.length)).length,
@@ -150,20 +150,15 @@ export function TwinPage() {
     [projectIdInput, setProjectId]
   );
 
-  const helperText = useMemo(() => {
-    const currentMeta = stepMetadata[currentStep];
-    const prefix = `${currentMeta.order}. ${currentMeta.label} — ${currentMeta.description}`;
-    if (loading) {
-      return `${prefix}. Загружаю данные проекта…`;
-    }
-    if (error) {
-      return `${prefix}. Ошибка: ${error}`;
-    }
-    return prefix;
-  }, [currentStep, error, loading]);
-
-  const buildingSummary = useMemo(() => summarizeBuilding(twin), [twin]);
   const currentMissing = diagnostics[currentStep].missing;
+  const currentMeta = stepMetadata[currentStep];
+  const isDemoProject =
+    storedProjectId === VIDEO_DEMO_PROJECT_ID || isVideoDemoProjectModel(buildModel);
+  const showEngineProjectForm = projectKind === "engine";
+  const showDemoCta = !isDemoProject && !twin && buildModel.rooms.length === 0;
+  const projectChipLabel = formatProjectDisplayLabel(storedProjectId, {
+    modelName: isDemoProject ? VIDEO_DEMO_PROJECT_NAME : null,
+  });
   const currentIndex = workflowOrder.indexOf(currentStep);
   const prevStep = workflowOrder[currentIndex - 1];
   const nextStep = workflowOrder[currentIndex + 1];
@@ -182,15 +177,6 @@ export function TwinPage() {
   }, [canEnterStep, currentStep, diagnostics, nextStep]);
 
   const nextDisabled = !nextStep || nextBlockingReasons.length > 0;
-
-  const goToStep = (step: WorkflowStep) => {
-    if (step === currentStep) {
-      return;
-    }
-    if (step === "geometry" || canEnterStep(step)) {
-      setCurrentStep(step);
-    }
-  };
 
   const handleOpenInBuild = useCallback(() => {
     if (!twin) {
@@ -292,134 +278,55 @@ export function TwinPage() {
   };
 
   return (
-    <section className="mx-auto flex max-w-[min(100%,96rem)] flex-col gap-8 px-1 py-3 sm:px-2">
+    <section className="mx-auto flex max-w-[min(100%,96rem)] flex-col gap-5 px-1 py-3 sm:px-2">
       <header className="space-y-3">
-        <p className="ui-kicker">Рабочий процесс</p>
-        <h2 className="ui-heading-hero">Инженерная студия</h2>
-        <p className="max-w-3xl text-sm leading-relaxed text-[color:var(--text-muted)]">{helperText}</p>
-        <ol className="mt-3 flex list-none flex-wrap gap-2 text-[11px] font-medium text-[color:var(--text-soft)]">
-          {workflowOrder.map((step) => {
-            const meta = stepMetadata[step];
-            const active = currentStep === step;
-            return (
-              <li
-                key={step}
-                className={`rounded-full border px-2.5 py-1 transition ${
-                  active
-                    ? "border-[color:var(--accent-base)] bg-[color:var(--accent-soft)] text-[color:var(--text-base)]"
-                    : "border-transparent bg-[color:var(--surface-muted)]"
-                }`}
-              >
-                <span className="tabular-nums text-[color:var(--accent-base)]">{meta.order}</span> {meta.label}
-              </li>
-            );
-          })}
-        </ol>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 space-y-1">
+            <p className="ui-kicker">Шаг {currentMeta.order} из 6</p>
+            <h2 className="ui-heading-hero">{currentMeta.label}</h2>
+            <p className="max-w-3xl text-sm leading-relaxed text-[color:var(--text-muted)]">{currentMeta.description}</p>
+            {loading ? <p className="text-sm text-[color:var(--text-soft)]">Загружаю данные проекта…</p> : null}
+            {error ? <p className="text-sm text-[color:var(--danger-fg)]">{error}</p> : null}
+          </div>
+          <span
+            className="shrink-0 rounded-full border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] px-3 py-1.5 text-xs font-medium text-[color:var(--text-base)]"
+            title={projectChipLabel}
+          >
+            {projectChipLabel}
+          </span>
+        </div>
       </header>
 
-      <form
-        onSubmit={handleSubmit}
-        className="ui-panel flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:p-5"
-      >
-        <input
-          type="text"
-          value={projectIdInput}
-          onChange={handleInputChange}
-          placeholder="Идентификатор проекта на движке"
-          className="ui-field flex-1 px-4 py-2 text-base shadow-inner"
-        />
-        <button
-          type="submit"
-          className="ui-btn-primary px-6 py-2 text-base"
-          disabled={loading}
-        >
-          {loading ? "Загружаю…" : "Применить"}
-        </button>
-      </form>
+      {showDemoCta ? (
+        <div className="ui-panel ui-demo-spotlight flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+          <div className="min-w-0">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--accent-base)]">Быстрый старт</p>
+            <h3 className="mt-1 text-lg font-semibold text-[color:var(--text-base)]">{VIDEO_DEMO_PROJECT_NAME}</h3>
+            <p className="mt-1 text-sm text-[color:var(--text-muted)]">Двухэтажный дом с сетями и 3D.</p>
+          </div>
+          <button type="button" onClick={handleOpenVideoDemo} className="ui-btn-primary shrink-0 px-4 py-2.5 text-sm">
+            Открыть демонстрационный дом
+          </button>
+        </div>
+      ) : null}
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(280px,0.8fr)]">
-        <div className="ui-panel ui-demo-spotlight p-5">
-          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-            <div className="min-w-0">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--accent-base)]">Демонстрация</p>
-              <h3 className="mt-1 text-xl font-semibold text-[color:var(--text-base)]">{VIDEO_DEMO_PROJECT_NAME}</h3>
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-[color:var(--text-muted)]">
-                Двухэтажный дом с кровлей, тепловым пунктом, отоплением, вентиляцией, датчиками и готовыми 2D/3D-сценами для показа всех возможностей.
-              </p>
-            </div>
-            <button type="button" onClick={handleOpenVideoDemo} className="ui-btn-primary shrink-0 px-4 py-3 text-sm">
-              Открыть демонстрационный дом
+      {showEngineProjectForm ? (
+        <details className="ui-panel group p-4 sm:p-5">
+          <summary className="cursor-pointer text-sm font-semibold text-[color:var(--text-base)]">Подключить проект на движке</summary>
+          <form onSubmit={handleSubmit} className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center">
+            <input
+              type="text"
+              value={projectIdInput}
+              onChange={handleInputChange}
+              placeholder="Идентификатор проекта на движке"
+              className="ui-field flex-1 px-4 py-2 text-base shadow-inner"
+            />
+            <button type="submit" className="ui-btn-primary px-6 py-2 text-base" disabled={loading}>
+              {loading ? "Загружаю…" : "Применить"}
             </button>
-          </div>
-          <div className="mt-4 grid gap-3 sm:grid-cols-3">
-            <SummaryCard label="Источник" value="Локальный preset" />
-            <SummaryCard label="Сохранение" value="localStorage + проект" />
-            <SummaryCard label="Результат" value="2 этажа · сети · 3D" />
-          </div>
-        </div>
-        <div className="ui-panel p-5">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--text-soft)]">Состояние проекта</p>
-          <h3 className="mt-1 text-lg font-semibold text-[color:var(--text-base)]">
-            {storedProjectId === VIDEO_DEMO_PROJECT_ID || isVideoDemoProjectModel(buildModel) ? "Демо-дом загружен" : "Обычный проект"}
-          </h3>
-          <p className="mt-2 text-sm leading-6 text-[color:var(--text-muted)]">
-            {storedProjectId === VIDEO_DEMO_PROJECT_ID || isVideoDemoProjectModel(buildModel)
-              ? "Последний демо-дом хранится в отдельном локальном проекте и восстанавливается после перезагрузки страницы."
-              : "Можно загрузить демо-дом без влияния на IFC-проект: он откроется как отдельный локальный пресет."}
-          </p>
-        </div>
-      </div>
-
-      {buildingSummary && (
-        <div className="ui-panel grid gap-4 p-4 sm:grid-cols-3 sm:p-5">
-          <SummaryCard label="Здание" value={buildingSummary.name} />
-          <SummaryCard label="Помещений" value={String(buildingSummary.spaces)} />
-          <SummaryCard
-            label="Суммарные параметры"
-            value={`${formatVolume(buildingSummary.totalVolume)} · ${formatArea(buildingSummary.totalArea)}`}
-          />
-        </div>
-      )}
-
-      <div className="ui-panel-muted p-3 sm:p-4">
-        <p className="mb-3 px-1 text-xs font-medium text-[color:var(--text-soft)]">
-          Шаги 1–6: выберите этап или «Назад» / «Далее»
-        </p>
-        <div className="flex flex-wrap gap-2 sm:gap-3">
-          {workflowOrder.map((step) => {
-            const locked = step !== "geometry" && !canEnterStep(step);
-            const isActive = currentStep === step;
-            const status = diagnostics[step].status;
-            const meta = stepMetadata[step];
-            return (
-              <button
-                key={step}
-                type="button"
-                onClick={() => goToStep(step)}
-                disabled={locked}
-                className={`min-w-[140px] flex-1 rounded-2xl border px-3 py-3 text-left transition sm:min-w-[158px] sm:flex-none sm:px-4 ${
-                  isActive
-                    ? "border-[color:var(--accent-base)] bg-[color:var(--accent-soft)] shadow-[var(--accent-glow)] ring-1 ring-[color:var(--accent-muted)]"
-                    : locked
-                      ? "cursor-not-allowed border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] text-[color:var(--text-soft)]"
-                      : "border-[color:var(--border-soft)] bg-[color:var(--surface-base)] text-[color:var(--text-base)] hover:border-[color:var(--accent-base)]/40"
-                }`}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <p className={`text-sm font-semibold ${isActive ? "text-[color:var(--accent-base)]" : ""}`}>
-                    <span className="mr-1.5 tabular-nums text-xs font-bold text-[color:var(--text-soft)]">{meta.order}.</span>
-                    {meta.label}
-                  </p>
-                  <StatusBadge status={status} />
-                </div>
-                <p className={`mt-1 text-xs leading-snug ${isActive ? "text-[color:var(--text-muted)]" : "text-[color:var(--text-soft)]"}`}>
-                  {meta.description}
-                </p>
-              </button>
-            );
-          })}
-        </div>
-      </div>
+          </form>
+        </details>
+      ) : null}
 
       <div className="ui-panel space-y-4 p-4 sm:p-6">
         {currentMissing.length > 0 && (
@@ -481,37 +388,6 @@ export function TwinPage() {
         </div>
       </div>
     </section>
-  );
-}
-
-function StatusBadge({ status }: { status: WorkflowStepStatus }) {
-  if (status === "ready") {
-    return (
-      <span className="rounded-full bg-[color:var(--success-bg)] px-2 py-0.5 text-[11px] font-semibold text-[color:var(--success-fg)] ring-1 ring-[color:var(--success-border)]">
-        Готово
-      </span>
-    );
-  }
-  if (status === "error") {
-    return (
-      <span className="rounded-full bg-[color:var(--danger-bg)] px-2 py-0.5 text-[11px] font-semibold text-[color:var(--danger-fg)] ring-1 ring-[color:var(--danger-border)]">
-        Ошибка
-      </span>
-    );
-  }
-  return (
-    <span className="rounded-full bg-[color:var(--surface-strong)] px-2 py-0.5 text-[11px] font-semibold text-[color:var(--text-muted)]">
-      Ожидает
-    </span>
-  );
-}
-
-function SummaryCard({ label, value }: { label: string; value: ReactNode }) {
-  return (
-    <div className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] px-4 py-3 text-sm">
-      <p className="text-xs uppercase tracking-wide text-[color:var(--text-soft)]">{label}</p>
-      <p className="text-lg font-semibold text-[color:var(--text-base)]">{value}</p>
-    </div>
   );
 }
 

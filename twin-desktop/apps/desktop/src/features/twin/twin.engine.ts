@@ -63,7 +63,7 @@ export function buildThermalGraph(spaces: Space[], instances: SpaceInstance[]): 
 
   const outdoorNode: ThermalNode = {
     id: "outdoor",
-    label: "Outdoor",
+    label: "Наружный воздух",
     type: "outdoor",
     capacity: Infinity,
     heatGain: 0,

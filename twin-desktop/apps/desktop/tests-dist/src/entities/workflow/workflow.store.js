@@ -4,6 +4,7 @@ const initialState = {
     scenarioConfig: null,
     uncertaintyConfig: null,
     solveCompleted: false,
+    monteCarloResult: null,
 };
 export const workflowOrder = ["geometry", "envelope", "scenario", "solve", "uncertainty", "results"];
 export const useWorkflowStore = create((set) => ({
@@ -15,5 +16,6 @@ export const useWorkflowStore = create((set) => ({
     setScenarioConfig: (config) => set({ scenarioConfig: config, solveCompleted: false }),
     setUncertaintyConfig: (config) => set({ uncertaintyConfig: config, solveCompleted: false }),
     markSolveCompleted: (completed) => set({ solveCompleted: completed }),
+    setMonteCarloResult: (result) => set({ monteCarloResult: result }),
     resetWorkflow: () => set(initialState),
 }));

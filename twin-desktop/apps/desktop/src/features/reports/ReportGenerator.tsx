@@ -75,6 +75,13 @@ export function ReportGenerator() {
         </div>
       </div>
 
+      <EngineeringCallout variant="attention" title="Устаревший контур отчёта / требует синхронизации с основным расчётом">
+        <p>
+          Этот PDF собирается через legacy report path по данным Twin API и отдельным отчётным процедурам. Его выводы нужно читать отдельно от основного builder-расчёта,
+          результатов RC-модели и нормативной проверки СП 50.
+        </p>
+      </EngineeringCallout>
+
       <div className="grid gap-4 lg:grid-cols-[1fr_minmax(0,1.1fr)]">
         <div className="ui-report-frame space-y-3">
           <p className="ui-kicker">Чеклист разделов</p>

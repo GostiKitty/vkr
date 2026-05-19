@@ -1,6 +1,9 @@
 import { create } from "zustand";
+import type { ThermalSimulationResult } from "../../core/thermal/solver";
 import type { Twin } from "../../shared/api/types";
 import type { SimulationFrame, SpaceInstance, ThermalGraph } from "./types";
+
+export type SimulationDataSource = "demo" | "computed" | null;
 
 interface TwinStoreState {
   twin: Twin | null;
@@ -11,6 +14,8 @@ interface TwinStoreState {
   thermalGraph: ThermalGraph | null;
   simulationFrames: SimulationFrame[];
   timeIndex: number;
+  lastThermalResult: ThermalSimulationResult | null;
+  simulationDataSource: SimulationDataSource;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
   setTwin: (nextTwin: Twin | null) => void;
@@ -18,11 +23,31 @@ interface TwinStoreState {
   setSpaceInstances: (instances: SpaceInstance[]) => void;
   setThermalGraph: (graph: ThermalGraph | null) => void;
   setSimulationFrames: (frames: SimulationFrame[]) => void;
+  setSimulationResult: (payload: {
+    frames: SimulationFrame[];
+    graph: ThermalGraph | null;
+    result?: ThermalSimulationResult | null;
+    source: "demo" | "computed";
+  }) => void;
   setTimeIndex: (index: number) => void;
+  clearSimulation: () => void;
   reset: () => void;
 }
 
-const initialState: Omit<TwinStoreState, "setLoading" | "setError" | "setTwin" | "selectSpace" | "setSpaceInstances" | "setThermalGraph" | "setSimulationFrames" | "setTimeIndex" | "reset"> = {
+const initialState: Omit<
+  TwinStoreState,
+  | "setLoading"
+  | "setError"
+  | "setTwin"
+  | "selectSpace"
+  | "setSpaceInstances"
+  | "setThermalGraph"
+  | "setSimulationFrames"
+  | "setSimulationResult"
+  | "setTimeIndex"
+  | "clearSimulation"
+  | "reset"
+> = {
   twin: null,
   selectedSpaceId: null,
   loading: false,
@@ -31,6 +56,8 @@ const initialState: Omit<TwinStoreState, "setLoading" | "setError" | "setTwin" |
   thermalGraph: null,
   simulationFrames: [],
   timeIndex: 0,
+  lastThermalResult: null,
+  simulationDataSource: null,
 };
 
 export const useTwinStore = create<TwinStoreState>((set, get) => ({
@@ -38,13 +65,13 @@ export const useTwinStore = create<TwinStoreState>((set, get) => ({
   setLoading: (loading) => set({ loading }),
   setError: (error) => set({ error }),
   setTwin: (nextTwin) =>
-    set(() => {
+    set((state) => {
       const spaces = nextTwin?.spaces ?? [];
+      const previousId = state.selectedSpaceId;
+      const keepSelection = Boolean(previousId && spaces.some((space) => space.id === previousId));
       return {
         twin: nextTwin,
-        selectedSpaceId: spaces.length ? spaces[0].id : null,
-        simulationFrames: [],
-        timeIndex: 0,
+        selectedSpaceId: keepSelection ? previousId : spaces.length ? spaces[0].id : null,
       };
     }),
   selectSpace: (spaceId) =>
@@ -53,7 +80,11 @@ export const useTwinStore = create<TwinStoreState>((set, get) => ({
         return { selectedSpaceId: null };
       }
       const spaces = state.twin?.spaces ?? [];
-      if (!spaces.some((space) => space.id === spaceId)) {
+      const graphSpaceIds =
+        state.thermalGraph?.nodes.filter((node) => node.type === "space").map((node) => node.id) ?? [];
+      const isKnown =
+        spaces.some((space) => space.id === spaceId) || graphSpaceIds.includes(spaceId);
+      if (!isKnown) {
         return {};
       }
       return { selectedSpaceId: spaceId };
@@ -65,6 +96,14 @@ export const useTwinStore = create<TwinStoreState>((set, get) => ({
       simulationFrames: frames,
       timeIndex: frames.length ? Math.min(get().timeIndex, frames.length - 1) : 0,
     }),
+  setSimulationResult: ({ frames, graph, result, source }) =>
+    set({
+      simulationFrames: frames,
+      thermalGraph: graph,
+      lastThermalResult: result ?? null,
+      simulationDataSource: source,
+      timeIndex: frames.length ? 0 : 0,
+    }),
   setTimeIndex: (index) =>
     set((state) => {
       if (!state.simulationFrames.length) {
@@ -72,6 +111,15 @@ export const useTwinStore = create<TwinStoreState>((set, get) => ({
       }
       const clamped = Math.max(0, Math.min(index, state.simulationFrames.length - 1));
       return { timeIndex: clamped };
+    }),
+  clearSimulation: () =>
+    set({
+      spaceInstances: [],
+      thermalGraph: null,
+      simulationFrames: [],
+      timeIndex: 0,
+      lastThermalResult: null,
+      simulationDataSource: null,
     }),
   reset: () => set(initialState),
 }));

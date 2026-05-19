@@ -1,4 +1,5 @@
 import { AIR_DENSITY_KG_M3, AIR_HEAT_CAPACITY_J_KG_K } from "./constants";
+import { airflowFromACH as airflowFromAchFormula, assemblyResistance as assemblyResistanceFormula, gsop as gsopFormula, infiltrationLoss as infiltrationLossFormula, layerResistance as layerResistanceFormula, transmissionLoss as transmissionLossFormula, uValue as uValueFormula, ventilationLoss as ventilationLossFormula, } from "../formulas";
 export function clamp(value, min, max) {
     if (value < min) {
         return min;
@@ -13,15 +14,21 @@ export function roundNumber(value, digits = 3) {
     return Math.round(value * factor) / factor;
 }
 export function airflowFromAch(volumeM3, ach) {
-    return Math.max(0, ach) * Math.max(0, volumeM3) / 3600;
+    return airflowFromAchFormula(ach, volumeM3);
 }
 export function ventilationHeatLossW(volumeM3, ach, deltaTC) {
-    const airflowM3s = airflowFromAch(volumeM3, ach);
-    return AIR_DENSITY_KG_M3 * AIR_HEAT_CAPACITY_J_KG_K * airflowM3s * Math.max(0, deltaTC);
+    return ventilationLossFormula(airflowFromAchFormula(Math.max(0, ach), Math.max(0, volumeM3)), AIR_DENSITY_KG_M3, AIR_HEAT_CAPACITY_J_KG_K, deltaTC);
 }
 export function effectiveAirCapacitance(volumeM3, factor) {
     return AIR_DENSITY_KG_M3 * AIR_HEAT_CAPACITY_J_KG_K * Math.max(0, volumeM3) * Math.max(1, factor);
 }
+export const layerResistance = layerResistanceFormula;
+export const assemblyResistance = assemblyResistanceFormula;
+export const uValue = uValueFormula;
+export const transmissionLoss = transmissionLossFormula;
+export const ventilationLoss = ventilationLossFormula;
+export const infiltrationLoss = infiltrationLossFormula;
+export const gsop = gsopFormula;
 export function weightedAverage(values, fallback = 0) {
     let numerator = 0;
     let denominator = 0;
