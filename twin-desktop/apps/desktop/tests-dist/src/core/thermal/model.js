@@ -14,6 +14,7 @@ export function buildThermalModel(building, options = {}) {
     }
     const adjacency = options.adjacency ?? buildAdjacencyGraph(building);
     const infiltrationACH = options.infiltrationACH ?? 0.5;
+    const ventilationACH = options.ventilationACH ?? 0;
     const defaultHeight = options.defaultHeight_m ?? MIN_HEIGHT_M;
     const defaultAssembly = options.defaultAssemblyId ?? DEFAULT_WALL_ASSEMBLY_ID;
     const effectiveMassFactor = Math.max(1, options.effectiveMassFactor ?? 1);
@@ -23,7 +24,7 @@ export function buildThermalModel(building, options = {}) {
     renderGeometry.walls.forEach(({ wall, openings }) => {
         openingsByWallId.set(wall.id, openings);
     });
-    const zones = building.rooms.map((room) => buildZone(room, building, infiltrationACH, defaultHeight, effectiveMassFactor));
+    const zones = building.rooms.map((room) => buildZone(room, building, infiltrationACH, ventilationACH, defaultHeight, effectiveMassFactor));
     const wallMap = new Map(building.walls.map((wall) => [wall.id, wall]));
     const internalLinks = adjacency.graph.edges.map((edge, index) => {
         const wall = wallMap.get(edge.wallId);
@@ -85,13 +86,16 @@ export function buildThermalModel(building, options = {}) {
         warnings,
     };
 }
-function buildZone(room, building, infiltrationACH, defaultHeight, effectiveMassFactor) {
+function buildZone(room, building, infiltrationACH, ventilationACH, defaultHeight, effectiveMassFactor) {
     const level = building.levels.find((lvl) => lvl.id === room.levelId);
     const height = Math.max(level?.height_m ?? defaultHeight, MIN_HEIGHT_M);
     const area = Math.max(MIN_AREA_M2, Math.abs(polygonArea(room.polygon)));
     const volume = area * height;
     const capacitance = AIR_DENSITY_KG_M3 * volume * AIR_CP_J_KG_K * Math.max(1, effectiveMassFactor);
     const infiltrationConductance = AIR_DENSITY_KG_M3 * AIR_CP_J_KG_K * airflowFromACH(infiltrationACH, volume);
+    const ventilationConductance = ventilationACH > 0
+        ? AIR_DENSITY_KG_M3 * AIR_CP_J_KG_K * airflowFromACH(ventilationACH, volume)
+        : 0;
     return {
         id: room.id,
         name: room.name,
@@ -100,6 +104,8 @@ function buildZone(room, building, infiltrationACH, defaultHeight, effectiveMass
         capacitance_J_K: capacitance,
         infiltrationACH,
         infiltrationConductance_W_K: infiltrationConductance,
+        ventilationACH,
+        ventilationConductance_W_K: ventilationConductance,
     };
 }
 function resolveConductanceForWall(wall, openings, area_m2_from_graph, fallbackAssemblyId, warnings) {

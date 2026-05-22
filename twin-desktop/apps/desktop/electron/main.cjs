@@ -7,7 +7,7 @@ function createWindow() {
   });
 
   // Vite dev server
-  win.loadURL("http://localhost:5173");
+  win.loadURL("http://127.0.0.1:5173");
 }
 
 app.whenReady().then(() => {

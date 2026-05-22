@@ -162,8 +162,9 @@ export function runEngineeringThermalAnalysis(
       id: "sp50-energy-placeholders",
       severity: "warning",
       scope: "СП 50",
-      message: "Энергохарактеристика СП 50 пока использует placeholder-параметры воздухообмена и инфильтрации.",
-      recommendation: "Не трактуйте этот блок как полноценный нормативный расчёт до замены betaV, Lvent, Ginf, nVent, nInf и c на реальные входные данные.",
+      message: sp50.energy.placeholderWarnings[0] ?? "Не хватает данных для полного расчёта энергохарактеристики СП 50.",
+      recommendation:
+        "Задайте климат (СП 131), ACH инфильтрации/вентиляции в сценарии или energyVentilation в thermalProtection здания.",
     });
   }
   const presentation = buildPresentationSummary({

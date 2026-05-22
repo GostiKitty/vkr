@@ -270,8 +270,11 @@ test("workspace modes and actions keep the results viewport reachable", () => {
   const workspaceStore = readFileSync(resolve(process.cwd(), "src/entities/workspace/workspace.store.ts"), "utf8");
   const leftToolbar = readFileSync(resolve(process.cwd(), "src/features/build/components/LeftToolbar.tsx"), "utf8");
   const topBar = readFileSync(resolve(process.cwd(), "src/app/TopBar.tsx"), "utf8");
-  if (!workspaceStore.includes('type WorkspaceMode = "plan" | "view3d" | "networks" | "thermal" | "results"')) {
+  if (!workspaceStore.includes('type WorkspaceMode = "plan" | "view3d" | "networks" | "results"')) {
     throw new Error("WorkspaceMode should keep the results viewport.");
+  }
+  if (workspaceStore.includes('id: "thermal"')) {
+    throw new Error("Workspace modes should not expose a separate thermal tab.");
   }
   if (!leftToolbar.includes('id: "results"')) {
     throw new Error("LeftToolbar should keep the results action.");
@@ -312,10 +315,7 @@ test("build results viewport keeps a dedicated vertical scroll shell", () => {
     throw new Error("Results viewport should keep a vertical scroll container without shell-level horizontal overflow.");
   }
   if (!source.includes('id="thermal-results-section"')) {
-    throw new Error("BuildPage should expose a jump target for the thermal results section.");
-  }
-  if (!source.includes('title={thermalResult ? "Тепловой расчёт доступен" : "Тепловой расчёт ещё не запускался"}')) {
-    throw new Error("BuildPage should explain whether thermal results are already available.");
+    throw new Error("BuildPage should expose the thermal results section anchor.");
   }
 });
 

@@ -36,6 +36,8 @@ export interface ThermalSimulationOptions {
   };
   occupancy?: OccupancySchedule;
   infiltrationACH?: number;
+  /** Кратность механической вентиляции (отдельный канал G_vent в RC). */
+  ventilationACH?: number;
   initialTemperatureC?: number;
   engineering?: EngineeringOptions;
 }
@@ -107,6 +109,7 @@ export function runThermalSimulation(
   const { model: thermalModel, warnings: thermalModelWarnings } = buildThermalModel(building, {
     adjacency,
     infiltrationACH: options.infiltrationACH,
+    ventilationACH: options.ventilationACH,
     effectiveMassFactor: options.engineering?.effectiveMassFactor ?? 1,
   });
   const scenario: SimulationScenario = {
@@ -252,6 +255,7 @@ export function simulateThermalNetwork(model: ThermalModel, scenario: Simulation
       });
 
       netPowerW += zone.infiltrationConductance_W_K * (outdoorK - currentTempK);
+      netPowerW += zone.ventilationConductance_W_K * (outdoorK - currentTempK);
 
       const { gainW } = evaluateInternalGains(scenario.gains, scenario.occupancy, timeSeconds, zone.area_m2);
       netPowerW += gainW;

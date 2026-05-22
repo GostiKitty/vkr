@@ -7,8 +7,10 @@ import SpaceDetails from "../twin/SpaceDetails";
 import SpaceList from "../twin/SpaceList";
 import SpaceViewer3D from "../twin/SpaceViewer3D";
 import { useWorkflowStore } from "../../entities/workflow/workflow.store";
+import { useWorkspaceStore } from "../../entities/workspace/workspace.store";
 import ReportGenerator from "./ReportGenerator";
 import MetricsResultsTab from "./MetricsResultsTab";
+import ProjectDocumentationPage from "./ProjectDocumentationPage";
 import { formatTemperature, temperatureToColor } from "../twin/twin.theme";
 const tabItems = [
     {
@@ -25,6 +27,11 @@ const tabItems = [
         id: "view3d",
         label: "Карта и связи",
         hint: "3D-окраска и граф тепловых связей зон (не CFD)",
+    },
+    {
+        id: "passport",
+        label: "Справка по ПП РФ №87",
+        hint: "Справочный материал по составу проектной документации РФ. Готовые выгрузки документов теперь доступны в меню «Выгрузка документов» в верхней панели.",
     },
 ];
 const calculationContours = [
@@ -54,7 +61,7 @@ const calculationContours = [
         description: "Устаревший отчётный контур по данным Twin API. Требует синхронизации с основным расчётом конструктора и помечается отдельно.",
     },
 ];
-export function ResultsPanel(_props) {
+export function ResultsPanel(props) {
     const frames = useTwinStore((state) => state.simulationFrames);
     const timeIndex = useTwinStore((state) => state.timeIndex);
     const setTimeIndex = useTwinStore((state) => state.setTimeIndex);
@@ -63,6 +70,9 @@ export function ResultsPanel(_props) {
     const selectSpace = useTwinStore((state) => state.selectSpace);
     const selectedSpaceId = useTwinStore((state) => state.selectedSpaceId);
     const setWorkflowStep = useWorkflowStore((state) => state.setCurrentStep);
+    const workspaceCommand = useWorkspaceStore((state) => state.command);
+    const workspaceCommandNonce = useWorkspaceStore((state) => state.commandNonce);
+    const consumeProjectCommand = useWorkspaceStore((state) => state.consumeProjectCommand);
     const [playing, setPlaying] = useState(false);
     const [activeTab, setActiveTab] = useState("overview");
     const currentFrame = frames[timeIndex] ?? null;
@@ -94,6 +104,13 @@ export function ResultsPanel(_props) {
             setPlaying(false);
         }
     }, [frames.length]);
+    useEffect(() => {
+        if (workspaceCommand !== "export-report") {
+            return;
+        }
+        setActiveTab("passport");
+        consumeProjectCommand(workspaceCommandNonce);
+    }, [consumeProjectCommand, workspaceCommand, workspaceCommandNonce]);
     const handleSliderChange = (event) => {
         setTimeIndex(Number(event.target.value));
     };
@@ -105,8 +122,9 @@ export function ResultsPanel(_props) {
     };
     const tabContent = {
         overview: (_jsxs("div", { className: "grid gap-4 lg:grid-cols-[1fr,0.7fr]", children: [_jsx(SpaceList, {}), _jsx(SpaceDetails, {})] })),
-        metrics: (_jsx(MetricsResultsTab, { onRecalculate: () => setWorkflowStep("solve") })),
+        metrics: (_jsx(MetricsResultsTab, { onRecalculate: () => setWorkflowStep("solve"), onEditUncertainty: () => setWorkflowStep("uncertainty") })),
         view3d: (_jsxs("div", { className: "space-y-4", children: [_jsx(SpaceViewer3D, { heatmap: true, caption: "\u0422\u0435\u043C\u043F\u0435\u0440\u0430\u0442\u0443\u0440\u043D\u0430\u044F \u0432\u0438\u0437\u0443\u0430\u043B\u0438\u0437\u0430\u0446\u0438\u044F \u043F\u043E \u0437\u043E\u043D\u0430\u043C", height: 420, showLegend: true, showFitControl: true }), _jsx(GraphPanel, { graph: thermalGraph, frame: currentFrame, selectedId: selectedSpaceId, onSelect: selectSpace })] })),
+        passport: _jsx(ProjectDocumentationPage, { projectId: props.projectId }),
     };
     return (_jsxs("div", { className: "flex min-h-0 flex-col gap-6", children: [_jsx("div", { className: "ui-panel shrink-0 p-5 ring-1 ring-[color:var(--accent-muted)]/30 sm:p-6", children: _jsxs("div", { className: "flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between", children: [_jsx(EngineeringSectionHeader, { kicker: "\u0420\u0435\u0437\u0443\u043B\u044C\u0442\u0430\u0442\u044B", title: "\u041E\u0431\u0437\u043E\u0440 \u043F\u043E\u0441\u043B\u0435 \u0440\u0430\u0441\u0447\u0451\u0442\u0430", subtitle: "\u0421\u0434\u0432\u0438\u0433\u0430\u0439\u0442\u0435 \u043C\u043E\u043C\u0435\u043D\u0442 \u0432\u0440\u0435\u043C\u0435\u043D\u0438, \u0447\u0442\u043E\u0431\u044B \u0443\u0432\u0438\u0434\u0435\u0442\u044C, \u043A\u0430\u043A \u043C\u0435\u043D\u044F\u044E\u0442\u0441\u044F \u0437\u043E\u043D\u0430\u043B\u044C\u043D\u044B\u0435 \u0442\u0435\u043C\u043F\u0435\u0440\u0430\u0442\u0443\u0440\u044B. \u0412\u043A\u043B\u0430\u0434\u043A\u0438: \u043F\u043E\u043C\u0435\u0449\u0435\u043D\u0438\u044F, \u043F\u043E\u043A\u0430\u0437\u0430\u0442\u0435\u043B\u0438 \u0440\u0430\u0441\u0447\u0451\u0442\u0430, 3D \u0438 \u0433\u0440\u0430\u0444 \u0441\u0432\u044F\u0437\u0435\u0439." }), simulationDataSource === "demo" && frames.length > 0 ? (_jsx("span", { className: "mt-2 inline-flex rounded-full border border-[color:var(--warning-border)] bg-[color:var(--warning-bg)] px-2.5 py-1 text-xs font-medium text-[color:var(--warning-fg)]", children: "\u0414\u0435\u043C\u043E-\u043A\u0430\u0434\u0440\u044B twin" })) : simulationDataSource === "computed" ? (_jsx("span", { className: "mt-2 inline-flex rounded-full border border-[color:var(--success-border)] bg-[color:var(--success-bg)] px-2.5 py-1 text-xs font-medium text-[color:var(--success-fg)]", children: "\u041F\u043E\u0441\u043B\u0435 \u0440\u0430\u0441\u0447\u0451\u0442\u0430 RC" })) : null, frames.length > 0 ? (_jsxs("div", { className: "mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4", children: [_jsx(EngineeringMetricTile, { label: "\u041A\u0430\u0434\u0440\u044B \u043F\u043E \u0432\u0440\u0435\u043C\u0435\u043D\u0438", value: frames.length, hint: "\u0414\u0438\u0441\u043A\u0440\u0435\u0442\u043D\u044B\u0435 \u0448\u0430\u0433\u0438 \u043F\u043E\u0441\u043B\u0435 \u0437\u043E\u043D\u0430\u043B\u044C\u043D\u043E\u0433\u043E \u0440\u0430\u0441\u0447\u0451\u0442\u0430", tone: "neutral" }), _jsx(EngineeringMetricTile, { label: "\u0422\u0435\u043A\u0443\u0449\u0438\u0439 \u043A\u0430\u0434\u0440", value: timeIndex + 1, unit: ` / ${frames.length}`, hint: "\u041F\u043E\u0437\u0438\u0446\u0438\u044F \u043D\u0430 \u0432\u0440\u0435\u043C\u0435\u043D\u043D\u043E\u0439 \u043E\u0441\u0438", tone: "neutral" }), _jsx(EngineeringMetricTile, { label: "\u041C\u0438\u043D. T \u043F\u043E \u0437\u043E\u043D\u0430\u043C (\u043A\u0430\u0434\u0440)", value: frameTempRange.min == null ? "—" : formatTemperature(frameTempRange.min), hint: "\u041C\u0438\u043D\u0438\u043C\u0443\u043C \u043F\u043E \u0432\u0441\u0435\u043C \u0437\u043E\u043D\u0430\u043C \u0432 \u0432\u044B\u0431\u0440\u0430\u043D\u043D\u044B\u0439 \u043C\u043E\u043C\u0435\u043D\u0442", tone: "neutral" }), _jsx(EngineeringMetricTile, { label: "\u041C\u0430\u043A\u0441. T \u043F\u043E \u0437\u043E\u043D\u0430\u043C (\u043A\u0430\u0434\u0440)", value: frameTempRange.max == null ? "—" : formatTemperature(frameTempRange.max), hint: "\u041C\u0430\u043A\u0441\u0438\u043C\u0443\u043C \u043F\u043E \u0432\u0441\u0435\u043C \u0437\u043E\u043D\u0430\u043C \u0432 \u0432\u044B\u0431\u0440\u0430\u043D\u043D\u044B\u0439 \u043C\u043E\u043C\u0435\u043D\u0442", tone: "neutral" })] })) : null, _jsxs("div", { className: "mt-5 flex w-full flex-col gap-3 xl:max-w-md", children: [_jsxs("div", { className: "flex items-center justify-between text-sm font-medium text-[color:var(--text-muted)]", children: [_jsx("span", { children: "\u041C\u043E\u043C\u0435\u043D\u0442 \u0432\u0440\u0435\u043C\u0435\u043D\u0438" }), _jsx("span", { className: "tabular-nums text-[color:var(--text-base)]", children: timeLabel })] }), _jsx("input", { type: "range", min: 0, max: Math.max(frames.length - 1, 0), value: timeIndex, onChange: handleSliderChange, className: "w-full accent-[color:var(--accent-base)]", disabled: !frames.length }), _jsxs("div", { className: "flex flex-wrap items-center gap-2", children: [_jsx("button", { type: "button", onClick: handlePlayToggle, disabled: !frames.length, className: !frames.length
                                                 ? "cursor-not-allowed rounded-full px-4 py-2 text-sm font-semibold opacity-45 ui-btn-secondary"

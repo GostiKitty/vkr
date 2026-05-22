@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { listSp131Cities } from "../../norms/sp131_2025/climate";
 import { notifyInfo } from "../../entities/notifications/notification.store";
 import { useWorkflowStore } from "../../entities/workflow/workflow.store";
 import { EngineeringCallout, EngineeringSectionHeader } from "../../shared/ui";
@@ -25,7 +26,12 @@ export function ScenarioSetupPanel() {
   const [dayOcc, setDayOcc] = useState(saved?.occupancy.dayFraction ?? 1);
   const [nightOcc, setNightOcc] = useState(saved?.occupancy.nightFraction ?? 0.2);
   const [infiltration, setInfiltration] = useState(saved?.ventilation.infiltrationACH ?? 0.5);
+  const [ventilationAch, setVentilationAch] = useState(saved?.ventilation.ventilationACH ?? 0.18);
+  const [kEf, setKEf] = useState(saved?.ventilation.heatRecoveryFactor ?? 0);
+  const [mechVent, setMechVent] = useState(saved?.ventilation.mechanicalVentilationEnabled ?? true);
+  const [climateCityId, setClimateCityId] = useState(saved?.climateCityId ?? "moscow");
   const [justSaved, setJustSaved] = useState(false);
+  const cities = listSp131Cities();
 
   useEffect(() => {
     if (!saved) {
@@ -43,6 +49,10 @@ export function ScenarioSetupPanel() {
     setDayOcc(saved.occupancy.dayFraction);
     setNightOcc(saved.occupancy.nightFraction);
     setInfiltration(saved.ventilation.infiltrationACH);
+    setVentilationAch(saved.ventilation.ventilationACH ?? 0.18);
+    setKEf(saved.ventilation.heatRecoveryFactor ?? 0);
+    setMechVent(saved.ventilation.mechanicalVentilationEnabled ?? true);
+    setClimateCityId(saved.climateCityId ?? "moscow");
   }, [saved]);
 
   const handleSubmit = (event: React.FormEvent) => {
@@ -69,7 +79,11 @@ export function ScenarioSetupPanel() {
       },
       ventilation: {
         infiltrationACH: Math.max(0, infiltration),
+        ventilationACH: Math.max(0, ventilationAch),
+        heatRecoveryFactor: clamp(kEf, 0, 1),
+        mechanicalVentilationEnabled: mechVent,
       },
+      climateCityId: climateCityId || null,
     });
     setJustSaved(true);
     notifyInfo("Сценарий сохранён. Можно переходить к расчёту.");
@@ -93,6 +107,20 @@ export function ScenarioSetupPanel() {
 
       <section className="ui-section space-y-3">
         <h4 className="text-xs font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">Климат</h4>
+        <label className="text-xs font-semibold text-[color:var(--text-muted)]">
+          Город (СП 131.13330.2025)
+          <select
+            value={climateCityId}
+            onChange={(e) => setClimateCityId(e.target.value)}
+            className="ui-field mt-1 w-full px-3 py-2 text-sm"
+          >
+            {cities.map((city) => (
+              <option key={city.id} value={city.id}>
+                {city.label}
+              </option>
+            ))}
+          </select>
+        </label>
         <div className="grid gap-3 sm:grid-cols-3">
           <NumberField label="Базовая температура, °C" value={baseC} onChange={setBaseC} step={0.5} />
           <NumberField label="Амплитуда, °C" value={amplitudeC} min={0} onChange={setAmplitudeC} step={0.5} />
@@ -118,10 +146,22 @@ export function ScenarioSetupPanel() {
         </div>
       </section>
 
+      <section className="ui-section space-y-3">
+        <h4 className="text-xs font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">Воздухообмен</h4>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <NumberField label="Инфильтрация, ACH" value={infiltration} min={0} step={0.1} onChange={(v) => setInfiltration(Math.max(0, v))} />
+          <NumberField label="Вентиляция, ACH" value={ventilationAch} min={0} step={0.05} onChange={(v) => setVentilationAch(Math.max(0, v))} />
+          <NumberField label="k_ef рекуперации" value={kEf} min={0} max={1} step={0.05} onChange={(v) => setKEf(clamp(v, 0, 1))} />
+          <label className="flex items-end gap-2 text-xs font-semibold text-[color:var(--text-muted)]">
+            <input type="checkbox" checked={mechVent} onChange={(e) => setMechVent(e.target.checked)} className="size-4" />
+            Механическая вентиляция
+          </label>
+        </div>
+      </section>
+
       <section className="grid gap-3 sm:grid-cols-3">
         <NumberField label="Занятость днём, доля" value={dayOcc} min={0} max={1} step={0.05} onChange={(v) => setDayOcc(clamp(v, 0, 1))} />
         <NumberField label="Занятость ночью, доля" value={nightOcc} min={0} max={1} step={0.05} onChange={(v) => setNightOcc(clamp(v, 0, 1))} />
-        <NumberField label="Инфильтрация, ACH" value={infiltration} min={0} step={0.1} onChange={(v) => setInfiltration(Math.max(0, v))} />
       </section>
 
       <button type="submit" className="ui-btn-primary w-full px-6 py-3 text-sm">

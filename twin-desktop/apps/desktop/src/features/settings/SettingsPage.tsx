@@ -138,7 +138,7 @@ export function SettingsPage() {
           <p className="ui-kicker">Визуализация</p>
           <h2 className="text-xl font-semibold text-[color:var(--text-base)]">Рабочая область</h2>
           <p className="mt-1 text-sm text-[color:var(--text-muted)]">
-            Положение панели инструментов, проводника и инспектора в режимах План, 3D, Сети и Теплокарта.
+            Положение панели инструментов, проводника и инспектора в режимах План, 3D, Сети и Результаты.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">

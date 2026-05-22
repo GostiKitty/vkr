@@ -1,87 +1,119 @@
 import { useMemo } from "react";
-import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import {
+  Bar,
+  CartesianGrid,
+  ComposedChart,
+  ReferenceLine,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import type { ThermalMonteCarloResult } from "../../../core/uncertainty/thermalMonteCarlo";
+import { formatNumber } from "../../../shared/utils/format";
 
 interface MonteCarloChartProps {
   result: ThermalMonteCarloResult;
+  baselineEnergyKWh?: number | null;
 }
 
-export function MonteCarloChart({ result }: MonteCarloChartProps) {
+export function MonteCarloChart({ result, baselineEnergyKWh = null }: MonteCarloChartProps) {
   const histogramData = useMemo(
     () =>
-      result.peakLoad.histogram.map((bin) => ({
+      result.totalEnergy.histogram.map((bin) => ({
         mid: bin.mid,
-        probability: bin.probability * 100,
-        label: `${bin.binStart.toFixed(1)}–${bin.binEnd.toFixed(1)}`,
+        count: bin.count,
+        label: `${formatNumber(bin.binStart, { maximumFractionDigits: 1 })}–${formatNumber(bin.binEnd, {
+          maximumFractionDigits: 1,
+        })} кВт·ч`,
       })),
-    [result.peakLoad.histogram]
+    [result.totalEnergy.histogram]
   );
 
-  const cdfData = useMemo(
+  const markers = useMemo(
     () =>
-      result.peakLoad.cdf.map((point) => ({
-        value: point.value,
-        probability: point.probability * 100,
-      })),
-    [result.peakLoad.cdf]
+      [
+        { key: "p10", label: "P10", value: result.totalEnergy.p10, stroke: "var(--chart-line-muted)" },
+        { key: "p50", label: "P50", value: result.totalEnergy.p50, stroke: "var(--accent-base)" },
+        { key: "p90", label: "P90", value: result.totalEnergy.p90, stroke: "var(--warning-border)" },
+        baselineEnergyKWh == null
+          ? null
+          : { key: "base", label: "База", value: baselineEnergyKWh, stroke: "var(--danger-border)" },
+      ].filter((entry): entry is { key: string; label: string; value: number; stroke: string } => entry !== null),
+    [baselineEnergyKWh, result.totalEnergy.p10, result.totalEnergy.p50, result.totalEnergy.p90]
   );
 
   return (
-    <div className="grid gap-4 lg:grid-cols-2">
-      <div className="space-y-2">
-        <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">
-          Пиковая нагрузка — гистограмма ({result.runs} прогонов)
-        </p>
-        <div className="h-48 rounded-xl border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] p-2">
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={histogramData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-              <CartesianGrid stroke="var(--chart-grid)" strokeDasharray="3 3" />
-              <XAxis dataKey="mid" tick={{ fill: "var(--text-soft)", fontSize: 10 }} tickFormatter={(v) => `${v}`} />
-              <YAxis tick={{ fill: "var(--text-soft)", fontSize: 10 }} width={36} />
-              <Tooltip
-                formatter={(value: number) => [`${value.toFixed(2)}%`, "Вероятность"]}
-                labelFormatter={(_, payload) => payload?.[0]?.payload?.label ?? ""}
-                contentStyle={{
-                  background: "var(--surface-elevated)",
-                  border: "1px solid var(--border-soft)",
-                  borderRadius: 12,
-                  fontSize: 12,
-                }}
-              />
-              <Area type="monotone" dataKey="probability" stroke="var(--chart-line)" fill="var(--accent-soft)" />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-        <p className="text-xs text-[color:var(--text-muted)]">
-          P5={result.peakLoad.p5.toFixed(2)} кВт · P50={result.peakLoad.p50.toFixed(2)} кВт · P95=
-          {result.peakLoad.p95.toFixed(2)} кВт
+    <section className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)] p-4">
+      <div className="mb-3">
+        <p className="text-sm font-semibold text-[color:var(--text-base)]">Гистограмма энергопотребления</p>
+        <p className="text-sm text-[color:var(--text-muted)]">
+          X: totalEnergyKWh, Y: количество сценариев. Маркеры показывают P10, P50, P90 и базовый сценарий.
         </p>
       </div>
 
-      <div className="space-y-2">
-        <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">CDF пиковой нагрузки</p>
-        <div className="h-48 rounded-xl border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] p-2">
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={cdfData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-              <CartesianGrid stroke="var(--chart-grid)" strokeDasharray="3 3" />
-              <XAxis dataKey="value" tick={{ fill: "var(--text-soft)", fontSize: 10 }} />
-              <YAxis tick={{ fill: "var(--text-soft)", fontSize: 10 }} width={36} domain={[0, 100]} />
-              <Tooltip
-                formatter={(value: number) => [`${value.toFixed(1)}%`, "Накопленная вероятность"]}
-                labelFormatter={(label) => `${Number(label).toFixed(2)} кВт`}
-                contentStyle={{
-                  background: "var(--surface-elevated)",
-                  border: "1px solid var(--border-soft)",
-                  borderRadius: 12,
-                  fontSize: 12,
+      <div className="h-80 rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] p-3">
+        <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart data={histogramData} margin={{ top: 8, right: 16, bottom: 6, left: 4 }}>
+            <CartesianGrid stroke="var(--chart-grid)" strokeDasharray="3 3" />
+            <XAxis
+              type="number"
+              dataKey="mid"
+              tick={{ fill: "var(--text-soft)", fontSize: 11 }}
+              tickFormatter={(value) => formatNumber(Number(value), { maximumFractionDigits: 0 })}
+              domain={["dataMin", "dataMax"]}
+            />
+            <YAxis
+              tick={{ fill: "var(--text-soft)", fontSize: 11 }}
+              allowDecimals={false}
+              width={42}
+            />
+            <Tooltip
+              formatter={(value: number) => [`${formatNumber(value, { maximumFractionDigits: 0 })}`, "Сценарии"]}
+              labelFormatter={(_, payload) => payload?.[0]?.payload?.label ?? ""}
+              contentStyle={{
+                background: "var(--surface-elevated)",
+                border: "1px solid var(--border-soft)",
+                borderRadius: 12,
+                fontSize: 12,
+              }}
+            />
+            <Bar dataKey="count" fill="var(--accent-soft)" radius={[8, 8, 0, 0]} barSize={14} />
+            {markers.map((marker) => (
+              <ReferenceLine
+                key={marker.key}
+                x={marker.value}
+                stroke={marker.stroke}
+                strokeWidth={2}
+                label={{
+                  value: marker.label,
+                  position: "top",
+                  fill: marker.stroke,
+                  fontSize: 11,
                 }}
               />
-              <Area type="monotone" dataKey="probability" stroke="var(--chart-line-muted)" fill="var(--surface-strong)" />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
+            ))}
+          </ComposedChart>
+        </ResponsiveContainer>
       </div>
-    </div>
+
+      <div className="mt-3 flex flex-wrap gap-2 text-xs text-[color:var(--text-muted)]">
+        <span className="rounded-full border border-[color:var(--border-soft)] px-3 py-1">
+          P10: {formatNumber(result.totalEnergy.p10, { maximumFractionDigits: 1 })} кВт·ч
+        </span>
+        <span className="rounded-full border border-[color:var(--border-soft)] px-3 py-1">
+          P50: {formatNumber(result.totalEnergy.p50, { maximumFractionDigits: 1 })} кВт·ч
+        </span>
+        <span className="rounded-full border border-[color:var(--border-soft)] px-3 py-1">
+          P90: {formatNumber(result.totalEnergy.p90, { maximumFractionDigits: 1 })} кВт·ч
+        </span>
+        {baselineEnergyKWh != null ? (
+          <span className="rounded-full border border-[color:var(--danger-border)] px-3 py-1 text-[color:var(--text-base)]">
+            Базовый сценарий: {formatNumber(baselineEnergyKWh, { maximumFractionDigits: 1 })} кВт·ч
+          </span>
+        ) : null}
+      </div>
+    </section>
   );
 }
 

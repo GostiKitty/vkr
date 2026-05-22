@@ -1,7 +1,11 @@
 import { create } from "zustand";
 
 const STORAGE_KEY = "twinstudio.engine.base";
-const ENV_DEFAULT = ((import.meta.env?.VITE_ENGINE_BASE as string | undefined) ?? "").trim();
+/** Совпадает с примером в Settings и портом dev:engine. */
+export const DEFAULT_ENGINE_BASE_URL = "http://127.0.0.1:8010";
+const ENV_DEFAULT = (
+  (import.meta.env?.VITE_ENGINE_BASE as string | undefined) ?? DEFAULT_ENGINE_BASE_URL
+).trim();
 
 const sanitize = (value: string): string => value.trim().replace(/\/+$/, "");
 

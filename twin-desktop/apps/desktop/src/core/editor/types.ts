@@ -1,7 +1,7 @@
 import type { Vec2, Wall } from "../../entities/geometry/types";
 
 export type EditorMode = "architecture" | "networks" | "view3d" | "results";
-export type EditorViewport = "plan" | "view3d" | "networks" | "thermal" | "results";
+export type EditorViewport = "plan" | "view3d" | "networks" | "results";
 export type LinearTool = "wall" | "pipe" | "duct";
 
 export interface LinearDraft {

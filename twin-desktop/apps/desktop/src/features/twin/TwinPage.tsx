@@ -17,6 +17,7 @@ import {
   workflowOrder,
   type WorkflowStep,
 } from "../../entities/workflow/workflow.store";
+import { useWorkspaceStore } from "../../entities/workspace/workspace.store";
 import { evaluateWorkflowDiagnostics } from "../../entities/workflow/workflow.diagnostics";
 import { navigate } from "../../app/router";
 import { buildModelFromTwin } from "../build/import/fromTwin";
@@ -77,6 +78,8 @@ export function TwinPage() {
   const currentStep = useWorkflowStore((state) => state.currentStep);
   const setCurrentStep = useWorkflowStore((state) => state.setCurrentStep);
   const resetWorkflow = useWorkflowStore((state) => state.resetWorkflow);
+  const workspaceCommand = useWorkspaceStore((state) => state.command);
+  const workspaceCommandNonce = useWorkspaceStore((state) => state.commandNonce);
   const clearSimulation = useTwinStore((state) => state.clearSimulation);
   const solveCompleted = useWorkflowStore((state) => state.solveCompleted);
   const markSolveCompleted = useWorkflowStore((state) => state.markSolveCompleted);
@@ -96,6 +99,13 @@ export function TwinPage() {
     resetWorkflow();
     clearSimulation();
   }, [clearSimulation, resetWorkflow, storedProjectId]);
+
+  useEffect(() => {
+    if (workspaceCommand !== "export-report") {
+      return;
+    }
+    setCurrentStep("results");
+  }, [setCurrentStep, workspaceCommand, workspaceCommandNonce]);
 
   const wallsWithoutAssembly = useMemo(
     () => buildModel.walls.filter((wall) => !(wall.wallAssemblyId || wall.layers?.length)).length,

@@ -11,3 +11,5 @@ export * from "./requiredResistance";
 export * from "./solarRadiation";
 export * from "./specificThermalProtection";
 export * from "./vaporPermeability";
+export * from "./volumeCoefficient";
+export * from "./typicalOpeningU";

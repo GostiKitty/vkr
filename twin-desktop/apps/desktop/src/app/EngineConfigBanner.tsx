@@ -48,7 +48,7 @@ export function EngineConfigBanner() {
           <p className="opacity-90">
             {isUnconfigured
               ? "Укажите адрес в разделе «Настройки», чтобы включить импорт IFC и расчёты на сервере. Локальный демо-проект работает без движка."
-              : "Проверьте, что backend запущен и URL в настройках верный. Локальные расчёты в конструкторе доступны."}
+              : "Запустите движок: в каталоге twin-desktop/engine выполните pip install -r requirements.txt, затем npm run dev:engine (или полный npm run dev). URL по умолчанию: http://127.0.0.1:8010. Локальные расчёты в конструкторе доступны без движка."}
           </p>
         </div>
         <button type="button" onClick={() => navigate("/settings")} className="ui-btn-secondary shrink-0 px-4 py-1.5 text-xs">

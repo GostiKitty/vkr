@@ -69,16 +69,16 @@ export function ReportGenerator() {
         <div className="min-w-0 flex-1">
           <EngineeringSectionHeader
             kicker="Инженерное заключение"
-            title="Подготовка отчёта PDF"
-            subtitle="Сводка модели, уравнения, неопределённость и калибровка в одном файле для пояснительной записки или приложения. Не заменяет полный комплект ТПР и нормативную экспертизу СП 50."
+            title="Legacy PDF (Twin API)"
+            subtitle="Вспомогательная сводка для внутреннего использования. Нормативный расчёт теплозащиты и энергопаспорт — в конструкторе, «Экспорт для экспертизы»."
           />
         </div>
       </div>
 
-      <EngineeringCallout variant="attention" title="Устаревший контур отчёта / требует синхронизации с основным расчётом">
+      <EngineeringCallout variant="attention" title="Устаревший контур / не для экспертизы по СП 50">
         <p>
-          Этот PDF собирается через legacy report path по данным Twin API и отдельным отчётным процедурам. Его выводы нужно читать отдельно от основного builder-расчёта,
-          результатов RC-модели и нормативной проверки СП 50.
+          Этот PDF — legacy-отчёт по Twin API (англоязычная сводка, Monte Carlo). Для государственной и негосударственной экспертизы по теплозащите используйте кнопку
+          «Экспорт для экспертизы (PDF)» в конструкторе после расчёта (блок СП 50.13330.2024).
         </p>
       </EngineeringCallout>
 
@@ -125,7 +125,7 @@ export function ReportGenerator() {
           disabled={status === "working" || !twin}
           className="ui-btn-primary disabled:cursor-not-allowed"
         >
-          {status === "working" ? "Формирую PDF…" : "Сформировать отчёт"}
+          {status === "working" ? "Формирую PDF…" : "Сформировать legacy PDF"}
         </button>
         {!twin ? (
           <p className="text-xs text-[color:var(--text-soft)]">Сначала загрузите проект на шаге «Модель», затем выполните расчёт.</p>

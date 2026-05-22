@@ -29,13 +29,21 @@ import "./geometry/polygonArea.test.js";
 import "./thermal/singleZone.test.js";
 import "./thermal/formulaHelpers.test.js";
 import "./thermal/wallFacadeAndDiagnostics.test.js";
+import "./thermal/thermalResultsChartPayload.test.js";
 import "./thermal/transient1D.test.js";
 import "./thermal/transientMonteCarlo.test.js";
 import "./thermal/transientVisualization.test.js";
 import "./thermal/engineeringAnalysis.test.js";
 import "./thermal/sp50Compliance.test.js";
+import "./sp50/energyCharacteristic.test.js";
+import "./formulas/registryReferences.test.js";
 import "./thermal/zoneAnalysis.test.js";
 import "./ai/aiEngine.test.js";
+import "./reports/exportGenerators.test.js";
+import "./reports/demoExportQa.test.js";
+import "./reports/demoDefaults.test.js";
+import "./reports/demoExportDocumentQuality.test.js";
+import "./reports/expertiseInputs.test.js";
 
 runTests().catch((error) => {
   console.error(error instanceof Error ? error.message : error);

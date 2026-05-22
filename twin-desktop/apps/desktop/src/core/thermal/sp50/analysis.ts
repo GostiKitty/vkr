@@ -2,6 +2,8 @@ import type { BuildingModel, EnvelopeSurface, Sp50BuildingMetadata, Sp50Construc
 import type { EnvelopeElementResult } from "../engineering/types";
 import { gsop as calculateGsopSafe } from "../formulas";
 import { calculateConstructionResistance, calculateHeatTransferCoefficient } from "./calculations";
+import { computeSp50EnergyCharacteristic } from "./energyCharacteristic";
+import { getSp131CityClimate } from "../../../norms/sp131_2025/climate";
 import {
   calculateNt,
   getFloorHeatAbsorptionLimit,
@@ -128,9 +130,12 @@ function resolveSourceData(model: BuildingModel, defaultIndoorTemperatureC: numb
   const averageHeight =
     model.levels.reduce((sum, level) => sum + level.height_m, 0) / Math.max(model.levels.length, 1);
   const heatedVolumeM3 = buildingMeta.heatedVolumeM3 ?? heatedAreaM2 * averageHeight;
+  const sp131 = getSp131CityClimate(climate.city ?? null);
   const indoorTemperatureC = climate.indoorTemperatureC ?? defaultIndoorTemperatureC;
-  const outdoorHeatingPeriodAverageC = climate.outdoorHeatingPeriodAverageC ?? null;
-  const heatingPeriodDurationDays = climate.heatingPeriodDurationDays ?? null;
+  const outdoorHeatingPeriodAverageC =
+    climate.outdoorHeatingPeriodAverageC ?? sp131?.outdoorHeatingPeriodAverageC ?? null;
+  const heatingPeriodDurationDays =
+    climate.heatingPeriodDurationDays ?? sp131?.heatingPeriodDurationDays ?? null;
   const indoorRelativeHumidityPercent = climate.indoorRelativeHumidityPercent ?? 55;
   const humidityZone = climate.humidityZone ?? null;
   const moistureMode = buildingMeta.moistureMode ?? getMoistureMode({ indoorTemperature: indoorTemperatureC, relativeHumidity: indoorRelativeHumidityPercent });
@@ -166,7 +171,8 @@ function resolveSourceData(model: BuildingModel, defaultIndoorTemperatureC: numb
       indoorRelativeHumidityPercent,
       outdoorHeatingPeriodAverageC,
       heatingPeriodDurationDays,
-      outdoorDesignTemperatureC: climate.outdoorDesignTemperatureC ?? defaultOutdoorTemperatureC,
+      outdoorDesignTemperatureC:
+        climate.outdoorDesignTemperatureC ?? sp131?.outdoorDesignTemperatureC ?? defaultOutdoorTemperatureC,
       gsop,
       heatedVolumeM3,
       heatedAreaM2,
@@ -658,60 +664,47 @@ function buildEnergyCheck(building: Sp50BuildingCheck, context: DerivedContext):
   const gsop = context.sourceData.gsop;
   const volume = context.sourceData.heatedVolumeM3;
   const area = context.sourceData.heatedAreaM2;
-  const tIndoor = context.sourceData.indoorTemperatureC;
-  const tOutdoor = context.sourceData.outdoorHeatingPeriodAverageC;
-  const betaV = 0.85;
-  const Lvent = 1;
-  const nVent = 1;
-  const kEf = 0;
-  const Ginf = 1;
-  const nInf = 1;
-  const c = 1;
-  const placeholderWarnings = [
-    "Использованы placeholder-параметры betaV, Lvent, nVent, Ginf, nInf и c.",
-    "Энергохарактеристика СП 50 требует замены этих констант на реальные проектные входные данные.",
-  ];
-  const averageAirDensity = tOutdoor !== null ? 353 / (273 + tOutdoor) : null;
-  const averageAirExchange =
-    volume && averageAirDensity
-      ? ((Lvent * nVent) / 168 + (Ginf * nInf) / (168 * averageAirDensity)) / (betaV * volume)
-      : null;
-  const kVent =
-    volume && averageAirDensity
-      ? (0.28 * c * (Lvent * averageAirDensity * nVent * (1 - kEf) + Ginf * nInf)) / (168 * volume)
-      : null;
-  const deltaT = tIndoor !== null && tOutdoor !== null ? tIndoor - tOutdoor : null;
-  const qbyt =
-    volume && deltaT && deltaT > 0
-      ? ((context.buildingMeta.residentialAreaM2 ?? area ?? 0) * 17) / (volume * deltaT)
-      : null;
-  const qrad = volume && gsop ? (11.6 * ((context.buildingMeta.climate?.solarRadiationIavg_W_m2 ?? 0) * 0.001)) / (volume * gsop) : 0;
-  const betaKpi = averageAirExchange !== null ? 1 / (1 + 0.5 * averageAirExchange) : null;
-  const qHeatingCharacteristic =
-    building.kob_W_m3K !== null && kVent !== null && betaKpi !== null
-      ? building.kob_W_m3K + kVent - betaKpi * ((qbyt ?? 0) + qrad)
-      : null;
-  const annualHeatingEnergy = gsop && volume && qHeatingCharacteristic !== null ? 0.024 * gsop * volume * qHeatingCharacteristic : null;
-  const annualTotalLosses = gsop && volume && building.kob_W_m3K !== null && kVent !== null ? 0.024 * gsop * volume * (building.kob_W_m3K + kVent) : null;
-  const qByArea = annualHeatingEnergy !== null && area ? annualHeatingEnergy / area : null;
-  const qByVolume = annualHeatingEnergy !== null && volume ? annualHeatingEnergy / volume : null;
+  const ev = context.buildingMeta.energyVentilation ?? {};
+  const computed = computeSp50EnergyCharacteristic({
+    kob_W_m3K: building.kob_W_m3K,
+    gsop,
+    heatedVolumeM3: volume,
+    heatedAreaM2: area,
+    residentialAreaM2: context.buildingMeta.residentialAreaM2 ?? area,
+    indoorTemperatureC: context.sourceData.indoorTemperatureC,
+    outdoorHeatingPeriodAverageC: context.sourceData.outdoorHeatingPeriodAverageC,
+    buildingCategory: context.sourceData.buildingCategory,
+    storeys: context.sourceData.storeys,
+    solarRadiationIavg_W_m2: context.buildingMeta.climate?.solarRadiationIavg_W_m2,
+    solarRadiationZone: context.buildingMeta.climate?.solarRadiationZone,
+    ventilation: {
+      ventilationFlowM3H: ev.ventilationFlowM3H,
+      infiltrationMassFlowKgH: ev.infiltrationMassFlowKgH,
+      ventilationACH: ev.ventilationACH ?? 0.18,
+      infiltrationACH: ev.infiltrationACH ?? 0.45,
+      heatRecoveryFactor: ev.heatRecoveryFactor ?? 0,
+      volumeCoefficientBetaV: ev.volumeCoefficientBetaV,
+    },
+  });
+  const qByArea = computed.annualHeatingEnergy_kWh !== null && area ? computed.annualHeatingEnergy_kWh / area : null;
+  const qByVolume = computed.annualHeatingEnergy_kWh !== null && volume ? computed.annualHeatingEnergy_kWh / volume : null;
   const qNorm = getHeatingEnergyNorm(context.sourceData.buildingCategory ?? undefined, context.sourceData.storeys ?? undefined);
   const complies = qByArea !== null && qNorm !== null ? qByArea <= qNorm : null;
   return {
-    qHeatingCharacteristic_W_m3K: qHeatingCharacteristic,
+    qHeatingCharacteristic_W_m3K: computed.qHeatingCharacteristic_W_m3K,
     qHeatingNorm_kWh_m2: qNorm,
-    annualHeatingEnergy_kWh: annualHeatingEnergy,
-    annualTotalLosses_kWh: annualTotalLosses,
+    annualHeatingEnergy_kWh: computed.annualHeatingEnergy_kWh,
+    annualTotalLosses_kWh: computed.annualTotalLosses_kWh,
     qByArea_kWh_m2: qByArea,
     qByVolume_kWh_m3: qByVolume,
-    betaGainUseFactor: betaKpi,
-    ventilationCharacteristic_W_m3K: kVent,
-    internalGainCharacteristic_W_m3K: qbyt,
-    solarGainCharacteristic_W_m3K: qrad,
-    averageAirDensity_kg_m3: averageAirDensity,
-    averageAirExchange_1_h: averageAirExchange,
-    usesPlaceholderInputs: true,
-    placeholderWarnings,
+    betaGainUseFactor: computed.betaGainUseFactor,
+    ventilationCharacteristic_W_m3K: computed.ventilationCharacteristic_W_m3K,
+    internalGainCharacteristic_W_m3K: computed.internalGainCharacteristic_W_m3K,
+    solarGainCharacteristic_W_m3K: computed.solarGainCharacteristic_W_m3K,
+    averageAirDensity_kg_m3: computed.averageAirDensity_kg_m3,
+    averageAirExchange_1_h: computed.averageAirExchange_1_h,
+    usesPlaceholderInputs: computed.usesPlaceholderInputs,
+    placeholderWarnings: computed.placeholderWarnings,
     complies,
     status: resolveStatus(complies),
   };

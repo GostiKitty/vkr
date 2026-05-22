@@ -6,6 +6,7 @@ import { syncBuildSimulationToStudio } from "../../core/thermal/thermalSimulatio
 import { runThermalSimulation, type ThermalSimulationResult } from "../../core/thermal/solver";
 import type { EngineeringMetricCard } from "../../core/thermal/thermalDiagnostics";
 import { buildThermalSimulationInsightLines } from "../../core/thermal/thermalResultsInterpretation";
+import { applyScenarioToBuilding } from "../build/thermal/applyScenarioToBuilding";
 import { buildThermalOptionsFromWorkflow } from "../build/thermal/workflowThermalOptions";
 import { formatEnergy, formatNumber } from "../../shared/utils/format";
 import type { ProjectKind } from "../../entities/project/project.store";
@@ -39,6 +40,7 @@ export function SimulationPanel({
 }: SimulationPanelProps) {
   const buildModel = useBuildStore((state) => state.model);
   const scenarioConfig = useWorkflowStore((state) => state.scenarioConfig);
+  const pushScenarioRunSnapshot = useWorkflowStore((state) => state.pushScenarioRunSnapshot);
   const isLocalProject = projectKind === "local";
   const simulationOptions = useMemo(() => buildThermalOptionsFromWorkflow(scenarioConfig), [scenarioConfig]);
 
@@ -95,8 +97,15 @@ export function SimulationPanel({
     setShowSuccess(false);
     try {
       const adjacency = buildAdjacencyGraph(buildModel);
-      const simulation = runThermalSimulation(buildModel, simulationOptions, adjacency);
-      syncBuildSimulationToStudio(buildModel, simulation, adjacency);
+      const modelForSim = applyScenarioToBuilding(buildModel, scenarioConfig);
+      const simulation = runThermalSimulation(modelForSim, simulationOptions, adjacency);
+      syncBuildSimulationToStudio(modelForSim, simulation, adjacency);
+      pushScenarioRunSnapshot({
+        label: scenarioConfig?.climateCityId ?? "Прогон",
+        peakLoadKW: simulation.summary.peakLoadKW,
+        totalEnergyKWh: simulation.summary.totalEnergyKWh,
+        discomfortHours: simulation.summary.discomfortHours,
+      });
       setResult(simulation);
       setShowSuccess(true);
       setTimeout(() => setShowSuccess(false), 1500);

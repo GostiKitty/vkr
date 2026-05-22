@@ -13,6 +13,38 @@ import {
 } from "../entities/workspace/workspace.store";
 import { BuildToolIcon } from "../features/build/components/buildToolIcons";
 
+const EXPORT_DOCUMENT_MENU: ReadonlyArray<{
+  label: string;
+  printCommand: WorkspaceProjectCommand;
+  downloadCommand: WorkspaceProjectCommand;
+}> = [
+  {
+    label: "Раздел 5 ОВ/ТС",
+    printCommand: "export-project-ov-ts",
+    downloadCommand: "download-project-ov-ts",
+  },
+  {
+    label: "Расчёт тепловой защиты здания",
+    printCommand: "export-thermal-protection",
+    downloadCommand: "download-thermal-protection",
+  },
+  {
+    label: "Энергетический паспорт здания",
+    printCommand: "export-energy-passport",
+    downloadCommand: "download-energy-passport",
+  },
+  {
+    label: "Эксплуатационно-технический паспорт",
+    printCommand: "export-operation-passport",
+    downloadCommand: "download-operation-passport",
+  },
+  {
+    label: "Краткое инженерное заключение",
+    printCommand: "export-engineering-summary",
+    downloadCommand: "download-engineering-summary",
+  },
+];
+
 interface TopBarProps {
   currentPath: string;
 }
@@ -103,8 +135,10 @@ export function TopBar({ currentPath }: TopBarProps) {
   const workspaceMode = useWorkspaceStore((state) => state.mode);
   const setWorkspaceMode = useWorkspaceStore((state) => state.setMode);
   const dispatchProjectCommand = useWorkspaceStore((state) => state.dispatchProjectCommand);
+  const applyDemoDefaults = useWorkspaceStore((state) => state.applyDemoDefaults);
   const [engineStatus, setEngineStatus] = useState<EngineStatus>("checking");
   const projectLabel = formatProjectDisplayLabel(projectId, { fallback: "Без проекта" });
+  const isDemoProject = typeof projectId === "string" && projectId.startsWith("local:demo");
 
   useEffect(() => {
     let cancelled = false;
@@ -139,15 +173,22 @@ export function TopBar({ currentPath }: TopBarProps) {
   };
 
   const handleProjectCommand = (command: WorkspaceProjectCommand) => {
+    if (command === "export-report") {
+      setWorkspaceMode("results");
+    }
     dispatchProjectCommand(command);
     if (currentPath !== "/build") {
       navigate("/build");
     }
   };
 
+  const handleExportDocument = (command: WorkspaceProjectCommand) => {
+    dispatchProjectCommand(command);
+  };
+
   return (
     <header className="sticky top-0 z-40 border-b border-[color:var(--border-soft)] bg-[color:var(--surface-elevated)]/95 shadow-[var(--shadow-control)] backdrop-blur-xl">
-      <div className="mx-auto flex min-h-14 max-w-[min(100%,96rem)] flex-wrap items-center gap-2 px-3 py-2 sm:gap-3 sm:px-6 xl:px-8">
+      <div className="mx-auto flex min-h-14 max-w-[min(100%,96rem)] flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2 sm:px-6 xl:px-8">
         <button
           type="button"
           onClick={() => navigate("/build")}
@@ -181,7 +222,6 @@ export function TopBar({ currentPath }: TopBarProps) {
               ["open-project", "Открыть проект"],
               ["open-demo", "Открыть демонстрационный проект"],
               ["save", "Сохранить"],
-              ["export-report", "Экспорт отчёта"],
             ].map(([command, label]) => (
               <button
                 key={command}
@@ -195,8 +235,106 @@ export function TopBar({ currentPath }: TopBarProps) {
           </div>
         </details>
 
+        <details className="group relative shrink-0">
+          <summary
+            className="ui-control flex cursor-pointer list-none items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-semibold [&::-webkit-details-marker]:hidden"
+            title="Выберите тип документа для выгрузки"
+          >
+            Выгрузка документов
+            <span className="text-[10px] text-[color:var(--text-soft)]">▾</span>
+          </summary>
+          <div className="ui-panel absolute left-0 top-[calc(100%+0.5rem)] z-50 grid w-[26rem] gap-1.5 p-3 shadow-[var(--shadow-popover)]">
+            <div className="flex flex-col gap-1 rounded-xl border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] p-2 text-xs">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-semibold text-[color:var(--text-base)]">
+                  Проектные допущения для демо
+                </span>
+                <span
+                  className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${
+                    applyDemoDefaults
+                      ? "bg-[color:var(--accent-soft)] text-[color:var(--accent-base)]"
+                      : "bg-[color:var(--surface-elevated)] text-[color:var(--text-soft)]"
+                  }`}
+                >
+                  {applyDemoDefaults ? "Включено" : "Выключено"}
+                </span>
+              </div>
+              <p className="text-[color:var(--text-soft)]">
+                Если данные демо-дома не заполнены полностью, выгрузка может подставить значения по
+                проектному допущению; каждое такое поле отмечается сноской «*» и попадает в раздел
+                «Принятые проектные допущения».
+              </p>
+              <div className="flex gap-1.5 pt-1">
+                <button
+                  type="button"
+                  disabled={!isDemoProject}
+                  title={
+                    isDemoProject
+                      ? "Подставить демо-допущения в пустые поля"
+                      : "Доступно только для демонстрационного проекта"
+                  }
+                  onClick={() => handleExportDocument("apply-demo-defaults")}
+                  className="flex-1 rounded-lg border border-[color:var(--border-soft)] bg-[color:var(--surface-elevated)] px-2 py-1 text-xs font-medium text-[color:var(--text-base)] transition hover:bg-[color:var(--surface-base)] disabled:opacity-50"
+                >
+                  Заполнить проектные данные для демо-дома
+                </button>
+                <button
+                  type="button"
+                  disabled={!applyDemoDefaults}
+                  title="Отключить подстановку демо-допущений"
+                  onClick={() => handleExportDocument("clear-demo-defaults")}
+                  className="rounded-lg border border-[color:var(--border-soft)] px-2 py-1 text-xs font-medium text-[color:var(--text-muted)] transition hover:bg-[color:var(--surface-muted)] disabled:opacity-50"
+                >
+                  Сбросить
+                </button>
+              </div>
+            </div>
+
+            <div className="my-1 h-px bg-[color:var(--border-soft)]" />
+
+            {EXPORT_DOCUMENT_MENU.map((item) => (
+              <div key={item.label} className="grid grid-cols-[1fr_auto_auto] items-center gap-1.5">
+                <span className="px-2 text-sm font-medium text-[color:var(--text-base)]">
+                  {item.label}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleExportDocument(item.downloadCommand)}
+                  title="Скачать HTML-файл"
+                  className="rounded-lg border border-[color:var(--border-soft)] px-2 py-1 text-xs font-medium text-[color:var(--text-muted)] transition hover:bg-[color:var(--surface-muted)] hover:text-[color:var(--text-base)]"
+                >
+                  Скачать HTML
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleExportDocument(item.printCommand)}
+                  title="Открыть документ для печати в PDF (через диалог браузера)"
+                  className="rounded-lg border border-[color:var(--border-soft)] px-2 py-1 text-xs font-medium text-[color:var(--text-muted)] transition hover:bg-[color:var(--surface-muted)] hover:text-[color:var(--text-base)]"
+                >
+                  Печать / PDF
+                </button>
+              </div>
+            ))}
+
+            <div className="my-1 h-px bg-[color:var(--border-soft)]" />
+
+            <button
+              type="button"
+              onClick={() => handleExportDocument("download-all-exports")}
+              title="Сохранить все 5 документов как набор HTML-файлов (01-…, 02-…, …)."
+              className="rounded-lg border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] px-3 py-1.5 text-sm font-semibold text-[color:var(--text-base)] transition hover:bg-[color:var(--surface-base)]"
+            >
+              Скачать все документы
+            </button>
+            <p className="px-1 text-[10px] text-[color:var(--text-soft)]">
+              Прямой PDF-экспорта в приложении нет: «Печать / PDF» открывает документ и использует
+              системный диалог «Сохранить как PDF» в браузере.
+            </p>
+          </div>
+        </details>
+
         <nav
-          className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          className="flex flex-wrap items-center gap-1"
           aria-label="Режимы рабочего пространства"
         >
           {WORKSPACE_MODES.map((mode) => (
@@ -216,7 +354,7 @@ export function TopBar({ currentPath }: TopBarProps) {
           ))}
         </nav>
 
-        <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+        <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2">
           <button
             type="button"
             onClick={() => navigate("/formulas")}

@@ -7,11 +7,13 @@ import SpaceDetails from "../twin/SpaceDetails";
 import SpaceList from "../twin/SpaceList";
 import SpaceViewer3D from "../twin/SpaceViewer3D";
 import { useWorkflowStore } from "../../entities/workflow/workflow.store";
+import { useWorkspaceStore } from "../../entities/workspace/workspace.store";
 import ReportGenerator from "./ReportGenerator";
 import MetricsResultsTab from "./MetricsResultsTab";
+import ProjectDocumentationPage from "./ProjectDocumentationPage";
 import { formatTemperature, temperatureToColor } from "../twin/twin.theme";
 
-type WorkspaceTab = "overview" | "metrics" | "view3d";
+type WorkspaceTab = "overview" | "metrics" | "view3d" | "passport";
 
 interface ResultsPanelProps {
   projectId: string | null;
@@ -32,6 +34,11 @@ const tabItems = [
     id: "view3d" as const,
     label: "Карта и связи",
     hint: "3D-окраска и граф тепловых связей зон (не CFD)",
+  },
+  {
+    id: "passport" as const,
+    label: "Справка по ПП РФ №87",
+    hint: "Справочный материал по составу проектной документации РФ. Готовые выгрузки документов теперь доступны в меню «Выгрузка документов» в верхней панели.",
   },
 ];
 
@@ -63,7 +70,7 @@ const calculationContours = [
   },
 ] as const;
 
-export function ResultsPanel(_props: ResultsPanelProps) {
+export function ResultsPanel(props: ResultsPanelProps) {
   const frames = useTwinStore((state) => state.simulationFrames);
   const timeIndex = useTwinStore((state) => state.timeIndex);
   const setTimeIndex = useTwinStore((state) => state.setTimeIndex);
@@ -72,6 +79,9 @@ export function ResultsPanel(_props: ResultsPanelProps) {
   const selectSpace = useTwinStore((state) => state.selectSpace);
   const selectedSpaceId = useTwinStore((state) => state.selectedSpaceId);
   const setWorkflowStep = useWorkflowStore((state) => state.setCurrentStep);
+  const workspaceCommand = useWorkspaceStore((state) => state.command);
+  const workspaceCommandNonce = useWorkspaceStore((state) => state.commandNonce);
+  const consumeProjectCommand = useWorkspaceStore((state) => state.consumeProjectCommand);
 
   const [playing, setPlaying] = useState(false);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("overview");
@@ -108,6 +118,14 @@ export function ResultsPanel(_props: ResultsPanelProps) {
     }
   }, [frames.length]);
 
+  useEffect(() => {
+    if (workspaceCommand !== "export-report") {
+      return;
+    }
+    setActiveTab("passport");
+    consumeProjectCommand(workspaceCommandNonce);
+  }, [consumeProjectCommand, workspaceCommand, workspaceCommandNonce]);
+
   const handleSliderChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     setTimeIndex(Number(event.target.value));
   };
@@ -127,7 +145,7 @@ export function ResultsPanel(_props: ResultsPanelProps) {
       </div>
     ),
     metrics: (
-      <MetricsResultsTab onRecalculate={() => setWorkflowStep("solve")} />
+      <MetricsResultsTab onRecalculate={() => setWorkflowStep("solve")} onEditUncertainty={() => setWorkflowStep("uncertainty")} />
     ),
     view3d: (
       <div className="space-y-4">
@@ -135,6 +153,7 @@ export function ResultsPanel(_props: ResultsPanelProps) {
         <GraphPanel graph={thermalGraph} frame={currentFrame} selectedId={selectedSpaceId} onSelect={selectSpace} />
       </div>
     ),
+    passport: <ProjectDocumentationPage projectId={props.projectId} />,
   };
 
   return (

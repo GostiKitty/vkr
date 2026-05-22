@@ -131,8 +131,9 @@ function buildSurfaceEstimates(renderGeometry, options, orientationByWallId) {
             x: midpoint.x - normal.x * probeDistance,
             y: midpoint.y - normal.y * probeDistance,
         });
-        const bridgeFactor = computeBridgeFactor(wall, openings, positiveRoom !== null && negativeRoom !== null);
         const windFactor = clamp(options.windFactor ?? DEFAULT_WIND_FACTOR, 0.4, 2.4);
+        /** Мостики холода — в нормативном R_pr (СП 50); в RC без эвристического множителя. */
+        const bridgeFactor = 1;
         const conductanceMultiplier = positiveRoom && negativeRoom ? 1 : windFactor * bridgeFactor;
         const facade = computeWallFacadeConductances(wall, openings, wall.wallAssemblyId ?? DEFAULT_WALL_ASSEMBLY_ID, conductanceMultiplier);
         warnings.push(...facade.warnings);
@@ -552,13 +553,6 @@ function computeSolarGainW(windowAreaM2, orientation, options) {
     const solarProfile = Math.max(0, Math.sin(((hour - 6) / 12) * Math.PI));
     const orientationWeight = orientation === "S" ? 1 : orientation === "E" || orientation === "W" ? 0.74 : 0.42;
     return windowAreaM2 * 115 * factor * solarProfile * orientationWeight;
-}
-function computeBridgeFactor(wall, openings, isInternal) {
-    const wallLength = Math.max(0.2, segmentLength(wall.a, wall.b));
-    const openingPerimeter = openings.reduce((sum, opening) => sum + opening.widthM * 2 + opening.heightM * 2, 0);
-    const density = openingPerimeter / Math.max(1, wallLength * wall.height_m);
-    const base = isInternal ? 1.02 : 1.06;
-    return clamp(base + density * 0.18 + wall.thickness_m * 0.04, 1, 1.24);
 }
 function resolveRoomAtPoint(rooms, levelId, point) {
     return rooms.find((room) => room.levelId === levelId && polygonContainsPoint(point, room.polygon)) ?? null;

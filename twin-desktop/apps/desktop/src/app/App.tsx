@@ -5,6 +5,7 @@ import TopBar from "./TopBar";
 import DebugConsole from "../features/debug/DebugConsole";
 import FormulaDrawer from "../features/formulas/FormulaDrawer";
 import EngineConfigBanner from "./EngineConfigBanner";
+import ReportExportListener from "../features/reports/exports/ReportExportListener";
 
 export default function App() {
   const pathname = usePathname();
@@ -34,6 +35,7 @@ export default function App() {
       <NotificationPanel />
       <FormulaDrawer />
       <DebugConsole />
+      <ReportExportListener />
     </div>
   );
 }

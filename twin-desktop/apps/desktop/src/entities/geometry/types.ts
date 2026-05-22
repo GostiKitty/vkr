@@ -183,6 +183,15 @@ export interface Sp50EnvelopeFragmentInput {
   riskZones?: string[];
 }
 
+export interface Sp50EnergyVentilationMetadata {
+  ventilationACH?: number;
+  infiltrationACH?: number;
+  ventilationFlowM3H?: number;
+  infiltrationMassFlowKgH?: number;
+  heatRecoveryFactor?: number;
+  volumeCoefficientBetaV?: number;
+}
+
 export interface Sp50BuildingMetadata {
   buildingCategory?: Sp50BuildingCategory;
   storeys?: number;
@@ -194,6 +203,8 @@ export interface Sp50BuildingMetadata {
   moistureMode?: Sp50MoistureMode;
   operationCondition?: Sp50OperationCondition;
   envelope?: Sp50EnvelopeFragmentInput[];
+  /** Входы для расчёта q_от и годовой энергии по СП 50 (вентиляция / инфильтрация). */
+  energyVentilation?: Sp50EnergyVentilationMetadata;
 }
 
 export interface BuildingModel {

@@ -12,6 +12,7 @@ export function runThermalSimulation(building, options, adjacency) {
     const { model: thermalModel, warnings: thermalModelWarnings } = buildThermalModel(building, {
         adjacency,
         infiltrationACH: options.infiltrationACH,
+        ventilationACH: options.ventilationACH,
         effectiveMassFactor: options.engineering?.effectiveMassFactor ?? 1,
     });
     const scenario = {
@@ -140,6 +141,7 @@ export function simulateThermalNetwork(model, scenario) {
                 netPowerW += link.conductance_W_K * (outdoorK - currentTempK);
             });
             netPowerW += zone.infiltrationConductance_W_K * (outdoorK - currentTempK);
+            netPowerW += zone.ventilationConductance_W_K * (outdoorK - currentTempK);
             const { gainW } = evaluateInternalGains(scenario.gains, scenario.occupancy, timeSeconds, zone.area_m2);
             netPowerW += gainW;
             const predictedK = currentTempK + (netPowerW / zone.capacitance_J_K) * timestepSeconds;

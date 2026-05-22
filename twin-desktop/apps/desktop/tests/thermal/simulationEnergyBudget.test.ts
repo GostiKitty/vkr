@@ -19,6 +19,8 @@ test("metric frames cover exactly the simulated duration for energy integration"
         capacitance_J_K: heatCapacity,
         infiltrationACH: 0,
         infiltrationConductance_W_K: 0,
+        ventilationACH: 0,
+        ventilationConductance_W_K: 0,
       },
     ],
     internalLinks: [],

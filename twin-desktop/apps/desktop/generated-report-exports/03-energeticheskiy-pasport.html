@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<!-- Export template: energy-passport v1 -->
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<title>Энергетический паспорт здания</title>
+<style>
+:root { color-scheme: light; }
+* { box-sizing: border-box; }
+@page {
+  size: A4;
+  margin: 20mm 10mm 20mm 30mm;
+}
+body.rx-document {
+  font-family: "Times New Roman", "Liberation Serif", Times, serif;
+  font-size: 12pt;
+  line-height: 1.4;
+  color: #000;
+  background: #fff;
+  margin: 0;
+  padding: 20mm 10mm 20mm 30mm;
+}
+.rx-document h1, .rx-document h2, .rx-document h3, .rx-document h4 {
+  font-family: inherit;
+  font-weight: bold;
+  margin: 0 0 8pt;
+  color: #000;
+}
+.rx-document h1 { font-size: 16pt; text-align: center; }
+.rx-document h2 { font-size: 14pt; }
+.rx-document h3 { font-size: 12pt; text-transform: uppercase; letter-spacing: 0.02em; }
+.rx-document p { margin: 0 0 6pt; text-align: justify; }
+.rx-document section { margin-bottom: 12pt; }
+.rx-section-title { font-size: 12pt; font-weight: bold; margin: 0 0 8pt; text-transform: uppercase; }
+.rx-section-meta { font-size: 11pt; margin: 0 0 4pt; }
+.rx-title-page {
+  page-break-after: always;
+  min-height: 240mm;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 14mm 0 10mm;
+}
+.rx-title-header { text-align: center; }
+.rx-title-organization { font-weight: bold; }
+.rx-title-body { text-align: center; margin: 24pt 0; }
+.rx-title-stage { text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 18pt; }
+.rx-title-object { font-size: 18pt; margin-bottom: 8pt; }
+.rx-title-document { font-size: 14pt; margin-top: 16pt; }
+.rx-title-subtitle { font-style: italic; margin-top: 4pt; }
+.rx-title-footer { text-align: center; }
+.rx-title-document-code { font-weight: bold; margin-top: 8pt; }
+.rx-toc-list { padding-left: 0; list-style: decimal inside; counter-reset: rx-toc; }
+.rx-toc-item { padding: 2pt 0; }
+.rx-toc-link { color: #000; text-decoration: none; }
+.rx-table-block {
+  page-break-inside: avoid;
+  break-inside: avoid-page;
+}
+.rx-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 6pt;
+  page-break-inside: auto;
+  break-inside: auto;
+}
+.rx-table thead { display: table-header-group; }
+.rx-table tfoot { display: table-footer-group; }
+.rx-table tr,
+.rx-table thead,
+.rx-table tbody,
+.rx-table colgroup,
+.rx-stamp-table,
+.rx-signature-block {
+  page-break-inside: avoid;
+  break-inside: avoid-page;
+}
+.rx-table-title { font-style: italic; margin-bottom: 4pt; }
+.rx-th, .rx-td {
+  border: 0.5pt solid #000;
+  padding: 3pt 6pt;
+  vertical-align: top;
+}
+.rx-th { background: #ededed; font-weight: bold; }
+.rx-align-left { text-align: left; }
+.rx-align-right { text-align: right; }
+.rx-align-center { text-align: center; }
+.rx-row-total td { font-weight: bold; background: #f3f3f3; }
+.rx-table-note { font-size: 10pt; font-style: italic; color: #000; margin-top: 4pt; }
+.rx-signature-block {
+  margin-top: 16pt;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 14pt;
+  page-break-inside: avoid;
+}
+.rx-signature { display: flex; flex-direction: column; }
+.rx-signature-role { font-weight: bold; }
+.rx-signature-line { letter-spacing: 0.4em; }
+.rx-gost-stamp {
+  margin-top: 8pt;
+  border-top: 1pt solid #000;
+  padding-top: 4pt;
+  page-break-inside: avoid;
+  break-inside: avoid-page;
+}
+.rx-stamp-table { width: 100%; border-collapse: collapse; }
+.rx-stamp-cell { border: 0.5pt solid #000; padding: 3pt 6pt; font-size: 10.5pt; }
+.rx-bib-list { padding-left: 18pt; }
+.rx-bib-item { margin-bottom: 4pt; }
+.rx-note {
+  border-left: 1pt solid #000;
+  padding: 4pt 10pt;
+  margin: 8pt 0;
+  font-style: italic;
+}
+.rx-draft-banner {
+  display: inline-block;
+  padding: 3pt 10pt;
+  border: 1pt solid #000;
+  font-weight: bold;
+  letter-spacing: 0.08em;
+  margin-bottom: 8pt;
+  text-transform: uppercase;
+}
+.rx-assumptions-block { page-break-inside: avoid; border: 0.5pt solid #000; padding: 6pt 10pt; }
+.rx-assumptions-table th, .rx-assumptions-table td { font-size: 11pt; }
+.rx-export-actions { display: none !important; }
+.rx-page-counter { display: none; }
+@media print {
+  body.rx-document { padding: 0; }
+  .rx-export-actions { display: none !important; }
+  .rx-page-counter {
+    display: block;
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    font-size: 9pt;
+  }
+  .rx-page-counter::after {
+    content: counter(page);
+  }
+}
+</style>
+</head>
+<body class="rx-document">
+
+<section class="rx-title-page">
+  <div class="rx-title-header">
+    <p class="rx-title-organization">ООО «Гнёздышко»</p>
+    <p class="rx-title-customer">Заказчик: Демонстрационный заказчик</p>
+  </div>
+  <div class="rx-title-body">
+    <p class="rx-title-stage">Проектная документация</p>
+    <h1 class="rx-title-object">Демонстрационный дом · 2 этажа</h1>
+    <p class="rx-title-address">г. Москва, ул. Демонстрационная, 1</p>
+    <p class="rx-title-document-code">Шифр: ДЕМО-2026</p>
+    <h2 class="rx-title-document">Энергетический паспорт здания</h2>
+    
+  </div>
+  <div class="rx-title-footer">
+    <p>Москва · 2026</p>
+    <p class="rx-title-generated">Сформировано: 21.05.2026, 13:00</p>
+  </div>
+</section>
+<section id="ep-doc">
+  <h3 class="rx-section-title">Сведения о документе</h3>
+  <section class="rx-table-block">
+  
+  <table class="rx-table">
+    <colgroup><col style="width:45%"/><col style="width:55%"/></colgroup>
+    <thead><tr><th class="rx-th rx-align-left">Показатель</th><th class="rx-th rx-align-left">Значение</th></tr></thead>
+    <tbody><tr class=""><td class="rx-td rx-align-left">Наименование документа</td><td class="rx-td rx-align-left">Энергетический паспорт здания</td></tr><tr class=""><td class="rx-td rx-align-left">Шифр документа</td><td class="rx-td rx-align-left">ДЕМО-2026</td></tr><tr class=""><td class="rx-td rx-align-left">Дата формирования</td><td class="rx-td rx-align-left">21.05.2026, 13:00</td></tr><tr class=""><td class="rx-td rx-align-left">Версия расчётной модели</td><td class="rx-td rx-align-left">сформирована автоматически</td></tr></tbody>
+  </table>
+  
+</section>
+</section>
+<section id="ep-source">
+  <h3 class="rx-section-title">Источник заполнения данных</h3>
+  <section class="rx-table-block">
+  
+  <table class="rx-table">
+    <colgroup><col style="width:45%"/><col style="width:55%"/></colgroup>
+    <thead><tr><th class="rx-th rx-align-left">Показатель</th><th class="rx-th rx-align-left">Значение</th></tr></thead>
+    <tbody><tr class=""><td class="rx-td rx-align-left">Режим комплекта</td><td class="rx-td rx-align-left">демонстрационный комплект</td></tr><tr class=""><td class="rx-td rx-align-left">Источник заполнения данных</td><td class="rx-td rx-align-left">пользовательские реквизиты, данные модели, расчётного сценария и расчётные показатели</td></tr><tr class=""><td class="rx-td rx-align-left">Фактические значения</td><td class="rx-td rx-align-left">не заполняются на проектной стадии</td></tr><tr class=""><td class="rx-td rx-align-left">Солнечные теплопоступления</td><td class="rx-td rx-align-left">автоматически, если расчёт доступен</td></tr></tbody>
+  </table>
+  
+</section>
+</section>
+<section id="ep-registry">
+  <h3 class="rx-section-title">Ведомость исходных данных</h3>
+  <section class="rx-table-block">
+  
+  <table class="rx-table">
+    <colgroup><col style="width:36%"/><col style="width:26%"/><col style="width:22%"/><col style="width:16%"/></colgroup>
+    <thead><tr><th class="rx-th rx-align-left">Параметр</th><th class="rx-th rx-align-left">Значение</th><th class="rx-th rx-align-left">Источник</th><th class="rx-th rx-align-left">Статус</th></tr></thead>
+    <tbody><tr class=""><td class="rx-td rx-align-left">Наименование объекта</td><td class="rx-td rx-align-left">Демонстрационный дом · 2 этажа</td><td class="rx-td rx-align-left">получено из модели</td><td class="rx-td rx-align-left">заполнено</td></tr><tr class=""><td class="rx-td rx-align-left">Адрес объекта</td><td class="rx-td rx-align-left">г. Москва, ул. Демонстрационная, 1</td><td class="rx-td rx-align-left">получено из модели</td><td class="rx-td rx-align-left">заполнено</td></tr><tr class=""><td class="rx-td rx-align-left">Шифр проекта</td><td class="rx-td rx-align-left">ДЕМО-2026</td><td class="rx-td rx-align-left">получено из модели</td><td class="rx-td rx-align-left">заполнено</td></tr><tr class=""><td class="rx-td rx-align-left">Стадия проектирования</td><td class="rx-td rx-align-left">Проектная документация</td><td class="rx-td rx-align-left">получено из модели</td><td class="rx-td rx-align-left">заполнено</td></tr><tr class=""><td class="rx-td rx-align-left">Город выпуска</td><td class="rx-td rx-align-left">Москва</td><td class="rx-td rx-align-left">получено из модели</td><td class="rx-td rx-align-left">заполнено</td></tr><tr class=""><td class="rx-td rx-align-left">Год выпуска</td><td class="rx-td rx-align-left">2026</td><td class="rx-td rx-align-left">получено из модели</td><td class="rx-td rx-align-left">заполнено</td></tr><tr class=""><td class="rx-td rx-align-left">Заказчик</td><td class="rx-td rx-align-left">Демонстрационный заказчик</td><td class="rx-td rx-align-left">получено из модели</td><td class="rx-td rx-align-left">заполнено</td></tr><tr class=""><td class="rx-td rx-align-left">Проектная организация / разработчик</td><td class="rx-td rx-align-left">ООО «Гнёздышко»</td><td class="rx-td rx-align-left">получено из модели</td><td class="rx-td rx-align-left">заполнено</td></tr><tr class=""><td class="rx-td rx-align-left">Разработал</td><td class="rx-td rx-align-left">Автор ВКР</td><td class="rx-td rx-align-left">получено из модели</td><td class="rx-td rx-align-left">заполнено</td></tr><tr class=""><td class="rx-td rx-align-left">Проверил</td><td class="rx-td rx-align-left">—</td><td class="rx-td rx-align-left">принято по проектному допущению</td><td class="rx-td rx-align-left">заполнено условно</td></tr><tr class=""><td class="rx-td rx-align-left">Нормоконтроль</td><td class="rx-td rx-align-left">—</td><td class="rx-td rx-align-left">принято по проектному допущению</td><td class="rx-td rx-align-left">заполнено условно</td></tr><tr class=""><td class="rx-td rx-align-left">ГИП</td><td class="rx-td rx-align-left">—</td><td class="rx-td rx-align-left">принято по проектному допущению</td><td class="rx-td rx-align-left">заполнено условно</td></tr><tr class=""><td class="rx-td rx-align-left">Основание для проектирования</td><td class="rx-td rx-align-left">не заполнено пользователем</td><td class="rx-td rx-align-left">не заполнено</td><td class="rx-td rx-align-left">не заполнено</td></tr><tr class=""><td class="rx-td rx-align-left">Назначение здания</td><td class="rx-td rx-align-left">жилое</td><td class="rx-td rx-align-left">получено из модели</td><td class="rx-td rx-align-left">заполнено</td></tr><tr class=""><td class="rx-td rx-align-left">Этажность</td><td class="rx-td rx-align-left">2</td><td class="rx-td rx-align-left">получено из модели</td><td class="rx-td rx-align-left">заполнено</td></tr><tr class=""><td class="rx-td rx-align-left">Отапливаемая площадь</td><td class="rx-td rx-align-left">196</td><td class="rx-td rx-align-left">получено из модели</td><td class="rx-td rx-align-left">заполнено</td></tr><tr class=""><td class="rx-td rx-align-left">Отапливаемый объём</td><td class="rx-td rx-align-left">588</td><td class="rx-td rx-align-left">получено из модели</td><td class="rx-td rx-align-left">заполнено</td></tr><tr class=""><td class="rx-td rx-align-left">Режим эксплуатации</td><td class="rx-td rx-align-left">проектный демонстрационный сценарий</td><td class="rx-td rx-align-left">принято по расчётному сценарию</td><td class="rx-td rx-align-left">заполнено</td></tr><tr class=""><td class="rx-td rx-align-left">Количество помещений</td><td class="rx-td rx-align-left">8</td><td class="rx-td rx-align-left">получено из модели</td><td class="rx-td rx-align-left">заполнено</td></tr><tr class=""><td class="rx-td rx-align-left">Город / климатическая база</td><td class="rx-td rx-align-left">Москва</td><td class="rx-td rx-align-left">получено из модели</td><td class="rx-td rx-align-left">заполнено</td></tr><tr class=""><td class="rx-td rx-align-left">Расчётная наружная температура для отопления</td><td class="rx-td rx-align-left">-26</td><td class="rx-td rx-align-left">рассчитано</td><td class="rx-td rx-align-left">рассчитано</td></tr><tr class=""><td class="rx-td rx-align-left">Средняя температура отопительного периода</td><td class="rx-td rx-align-left">-2,2</td><td class="rx-td rx-align-left">рассчитано</td><td class="rx-td rx-align-left">рассчитано</td></tr><tr class=""><td class="rx-td rx-align-left">Продолжительность отопительного периода</td><td class="rx-td rx-align-left">214</td><td class="rx-td rx-align-left">рассчитано</td><td class="rx-td rx-align-left">рассчитано</td></tr><tr class=""><td class="rx-td rx-align-left">ГСОП</td><td class="rx-td rx-align-left">4 751</td><td class="rx-td rx-align-left">рассчитано</td><td class="rx-td rx-align-left">рассчитано</td></tr><tr class=""><td class="rx-td rx-align-left">Зона влажности</td><td class="rx-td rx-align-left">нормальная</td><td class="rx-td rx-align-left">получено из модели</td><td class="rx-td rx-align-left">заполнено</td></tr><tr class=""><td class="rx-td rx-align-left">Условия эксплуатации по СП 50</td><td class="rx-td rx-align-left">Б</td><td class="rx-td rx-align-left">получено из модели</td><td class="rx-td rx-align-left">заполнено</td></tr><tr class=""><td class="rx-td rx-align-left">Внутренняя температура</td><td class="rx-td rx-align-left">20</td><td class="rx-td rx-align-left">рассчитано</td><td class="rx-td rx-align-left">рассчитано</td></tr><tr class=""><td class="rx-td rx-align-left">Относительная влажность</td><td class="rx-td rx-align-left">50</td><td class="rx-td rx-align-left">рассчитано</td><td class="rx-td rx-align-left">рассчитано</td></tr><tr class=""><td class="rx-td rx-align-left">Расчётная кратность вентиляции</td><td class="rx-td rx-align-left">0,18</td><td class="rx-td rx-align-left">принято по расчётному сценарию</td><td class="rx-td rx-align-left">заполнено</td></tr><tr class=""><td class="rx-td rx-align-left">Расчётная кратность инфильтрации</td><td class="rx-td rx-align-left">0,5</td><td class="rx-td rx-align-left">принято по расчётному сценарию</td><td class="rx-td rx-align-left">заполнено</td></tr><tr class=""><td class="rx-td rx-align-left">Наличие механической вентиляции</td><td class="rx-td rx-align-left">да</td><td class="rx-td rx-align-left">принято по расчётному сценарию</td><td class="rx-td rx-align-left">заполнено</td></tr><tr class=""><td class="rx-td rx-align-left">Коэффициент рекуперации</td><td class="rx-td rx-align-left">0</td><td class="rx-td rx-align-left">принято по расчётному сценарию</td><td class="rx-td rx-align-left">заполнено</td></tr><tr class=""><td class="rx-td rx-align-left">Дневная уставка температуры</td><td class="rx-td rx-align-left">21</td><td class="rx-td rx-align-left">принято по расчётному сценарию</td><td class="rx-td rx-align-left">заполнено</td></tr><tr class=""><td class="rx-td rx-align-left">Ночная уставка температуры</td><td class="rx-td rx-align-left">18</td><td class="rx-td rx-align-left">принято по расчётному сценарию</td><td class="rx-td rx-align-left">заполнено</td></tr><tr class=""><td class="rx-td rx-align-left">Расчётный сценарий</td><td class="rx-td rx-align-left">сценарий расчёта проекта</td><td class="rx-td rx-align-left">принято по расчётному сценарию</td><td class="rx-td rx-align-left">заполнено</td></tr></tbody>
+  </table>
+  
+</section>
+</section>
+<section>
+  <p>Энергетический паспорт здания сформирован в структуре текстовой части проектной документации и предназначен для представления расчётно-пояснительных материалов. Колонка «Фактическое значение» оставлена «—», так как проектная стадия не предполагает автоматического заполнения данных обследования.</p>
+</section>
+<section id="ep-1">
+  <h3 class="rx-section-title">1 Общая информация</h3>
+  <section class="rx-table-block">
+  
+  <table class="rx-table">
+    <colgroup><col style="width:40%"/><col style="width:10%"/><col/><col/><col/></colgroup>
+    <thead><tr><th class="rx-th rx-align-left">Показатель</th><th class="rx-th rx-align-center">Ед. изм.</th><th class="rx-th rx-align-right">Нормируемое значение</th><th class="rx-th rx-align-right">Расчётное проектное значение</th><th class="rx-th rx-align-right">Фактическое значение</th></tr></thead>
+    <tbody><tr class=""><td class="rx-td rx-align-left">Наименование объекта</td><td class="rx-td rx-align-center">—</td><td class="rx-td rx-align-right">—</td><td class="rx-td rx-align-right">Демонстрационный дом · 2 этажа</td><td class="rx-td rx-align-right">—</td></tr><tr class=""><td class="rx-td rx-align-left">Адрес объекта</td><td class="rx-td rx-align-center">—</td><td class="rx-td rx-align-right">—</td><td class="rx-td rx-align-right">г. Москва, ул. Демонстрационная, 1</td><td class="rx-td rx-align-right">—</td></tr><tr class=""><td class="rx-td rx-align-left">Назначение здания</td><td class="rx-td rx-align-center">—</td><td class="rx-td rx-align-right">—</td><td class="rx-td rx-align-right">жилое</td><td class="rx-td rx-align-right">—</td></tr><tr class=""><td class="rx-td rx-align-left">Разработчик документации</td><td class="rx-td rx-align-center">—</td><td class="rx-td rx-align-right">—</td><td class="rx-td rx-align-right">ООО «Гнёздышко»</td><td class="rx-td rx-align-right">—</td></tr><tr class=""><td class="rx-td rx-align-left">Заказчик</td><td class="rx-td rx-align-center">—</td><td class="rx-td rx-align-right">—</td><td class="rx-td rx-align-right">Демонстрационный заказчик</td><td class="rx-td rx-align-right">—</td></tr><tr class=""><td class="rx-td rx-align-left">Стадия документации</td><td class="rx-td rx-align-center">—</td><td class="rx-td rx-align-right">—</td><td class="rx-td rx-align-right">Проектная документация</td><td class="rx-td rx-align-right">—</td></tr></tbody>
+  </table>
+  
+</section>
+</section>
+<section id="ep-2">
+  <h3 class="rx-section-title">2 Расчётные условия</h3>
+  <section class="rx-table-block">
+  
+  <table class="rx-table">
+    <colgroup><col style="width:40%"/><col style="width:10%"/><col/><col/><col/></colgroup>
+    <thead><tr><th class="rx-th rx-align-left">Показатель</th><th class="rx-th rx-align-center">Ед. изм.</th><th class="rx-th rx-align-right">Нормируемое значение</th><th class="rx-th rx-align-right">Расчётное проектное значение</th><th class="rx-th rx-align-right">Фактическое значение</th></tr></thead>
+    <tbody><tr class=""><td class="rx-td rx-align-left">Город / климатическая база</td><td class="rx-td rx-align-center">—</td><td class="rx-td rx-align-right">—</td><td class="rx-td rx-align-right">Москва</td><td class="rx-td rx-align-right">—</td></tr><tr class=""><td class="rx-td rx-align-left">Расчётная температура наружного воздуха для проектирования отопления</td><td class="rx-td rx-align-center">°C</td><td class="rx-td rx-align-right">—</td><td class="rx-td rx-align-right">-26</td><td class="rx-td rx-align-right">—</td></tr><tr class=""><td class="rx-td rx-align-left">Средняя температура наружного воздуха отопительного периода</td><td class="rx-td rx-align-center">°C</td><td class="rx-td rx-align-right">—</td><td class="rx-td rx-align-right">-2,2</td><td class="rx-td rx-align-right">—</td></tr><tr class=""><td class="rx-td rx-align-left">Продолжительность отопительного периода</td><td class="rx-td rx-align-center">сут.</td><td class="rx-td rx-align-right">—</td><td class="rx-td rx-align-right">214</td><td class="rx-td rx-align-right">—</td></tr><tr class=""><td class="rx-td rx-align-left">ГСОП</td><td class="rx-td rx-align-center">°C·сут.</td><td class="rx-td rx-align-right">—</td><td class="rx-td rx-align-right">4 751</td><td class="rx-td rx-align-right">—</td></tr><tr class=""><td class="rx-td rx-align-left">Расчётная внутренняя температура</td><td class="rx-td rx-align-center">°C</td><td class="rx-td rx-align-right">—</td><td class="rx-td rx-align-right">20</td><td class="rx-td rx-align-right">—</td></tr><tr class=""><td class="rx-td rx-align-left">Расчётная относительная влажность</td><td class="rx-td rx-align-center">%</td><td class="rx-td rx-align-right">—</td><td class="rx-td rx-align-right">50</td><td class="rx-td rx-align-right">—</td></tr></tbody>
+  </table>
+  
+</section>
+</section>
+<section id="ep-3">
+  <h3 class="rx-section-title">3 Геометрические показатели</h3>
+  <section class="rx-table-block">
+  
+  <table class="rx-table">
+    <colgroup><col style="width:40%"/><col style="width:10%"/><col/><col/><col/></colgroup>
+    <thead><tr><th class="rx-th rx-align-left">Показатель</th><th class="rx-th rx-align-center">Ед. изм.</th><th class="rx-th rx-align-right">Нормируемое значение</th><th class="rx-th rx-align-right">Расчётное проектное значение</th><th class="rx-th rx-align-right">Фактическое значение</th></tr></thead>
+    <tbody><tr class=""><td class="rx-td rx-align-left">Этажность</td><td class="rx-td rx-align-center">эт.</td><td class="rx-td rx-align-right">—</td><td class="rx-td rx-align-right">2</td><td class="rx-td rx-align-right">—</td></tr><tr class=""><td class="rx-td rx-align-left">Отапливаемая площадь</td><td class="rx-td rx-align-center">м²</td><td class="rx-td rx-align-right">—</td><td class="rx-td rx-align-right">196</td><td class="rx-td rx-align-right">—</td></tr><tr class=""><td class="rx-td rx-align-left">Отапливаемый объём</td><td class="rx-td rx-align-center">м³</td><td class="rx-td rx-align-right">—</td><td class="rx-td rx-align-right">588</td><td class="rx-td rx-align-right">—</td></tr><tr class=""><td class="rx-td rx-align-left">Показатель компактности</td><td class="rx-td rx-align-center">1/м</td><td class="rx-td rx-align-right">—</td><td class="rx-td rx-align-right">1,253</td><td class="rx-td rx-align-right">—</td></tr><tr class=""><td class="rx-td rx-align-left">Количество помещений</td><td class="rx-td rx-align-center">шт.</td><td class="rx-td rx-align-right">—</td><td class="rx-td rx-align-right">8</td><td class="rx-td rx-align-right">—</td></tr></tbody>
+  </table>
+  
+</section>
+</section>
+<section id="ep-4">
+  <h3 class="rx-section-title">4 Теплотехнические показатели</h3>
+  <section class="rx-table-block">
+  
+  <table class="rx-table">
+    <colgroup><col style="width:40%"/><col style="width:10%"/><col/><col/><col/></colgroup>
+    <thead><tr><th class="rx-th rx-align-left">Показатель</th><th class="rx-th rx-align-center">Ед. изм.</th><th class="rx-th rx-align-right">Нормируемое значение</th><th class="rx-th rx-align-right">Расчётное проектное значение</th><th class="rx-th rx-align-right">Фактическое значение</th></tr></thead>
+    <tbody><tr class=""><td class="rx-td rx-align-left">Удельная теплозащитная характеристика kоб</td><td class="rx-td rx-align-center">Вт/(м³·К)</td><td class="rx-td rx-align-right">0,465</td><td class="rx-td rx-align-right">0,475</td><td class="rx-td rx-align-right">—</td></tr><tr class=""><td class="rx-td rx-align-left">Удельная теплозащитная характеристика наружных ограждений</td><td class="rx-td rx-align-center">Вт/(м²·К)</td><td class="rx-td rx-align-right">—</td><td class="rx-td rx-align-right">0,379</td><td class="rx-td rx-align-right">—</td></tr><tr class=""><td class="rx-td rx-align-left">Средняя кратность воздухообмена</td><td class="rx-td rx-align-center">1/ч</td><td class="rx-td rx-align-right">—</td><td class="rx-td rx-align-right">0,005</td><td class="rx-td rx-align-right">—</td></tr></tbody>
+  </table>
+  
+</section>
+</section>
+<section id="ep-5">
+  <h3 class="rx-section-title">5 Вспомогательные показатели</h3>
+  <section class="rx-table-block">
+  
+  <table class="rx-table">
+    <colgroup><col style="width:40%"/><col style="width:10%"/><col/><col/><col/></colgroup>
+    <thead><tr><th class="rx-th rx-align-left">Показатель</th><th class="rx-th rx-align-center">Ед. изм.</th><th class="rx-th rx-align-right">Нормируемое значение</th><th class="rx-th rx-align-right">Расчётное проектное значение</th><th class="rx-th rx-align-right">Фактическое значение</th></tr></thead>
+    <tbody><tr class=""><td class="rx-td rx-align-left">Средняя плотность воздуха в отопительный период</td><td class="rx-td rx-align-center">кг/м³</td><td class="rx-td rx-align-right">—</td><td class="rx-td rx-align-right">1,304</td><td class="rx-td rx-align-right">—</td></tr><tr class=""><td class="rx-td rx-align-left">Удельная характеристика теплопоступлений</td><td class="rx-td rx-align-center">Вт/(м³·К)</td><td class="rx-td rx-align-right">—</td><td class="rx-td rx-align-right">6 Вт/м²</td><td class="rx-td rx-align-right">—</td></tr><tr class=""><td class="rx-td rx-align-left">Удельная характеристика солнечных теплопоступлений</td><td class="rx-td rx-align-center">Вт/(м³·К)</td><td class="rx-td rx-align-right">—</td><td class="rx-td rx-align-right">требует уточнения методики расчёта солнечных теплопоступлений</td><td class="rx-td rx-align-right">—</td></tr></tbody>
+  </table>
+  
+</section>
+</section>
+<section id="ep-6">
+  <h3 class="rx-section-title">6 Удельные характеристики</h3>
+  <section class="rx-table-block">
+  
+  <table class="rx-table">
+    <colgroup><col style="width:40%"/><col style="width:10%"/><col/><col/><col/></colgroup>
+    <thead><tr><th class="rx-th rx-align-left">Показатель</th><th class="rx-th rx-align-center">Ед. изм.</th><th class="rx-th rx-align-right">Нормируемое значение</th><th class="rx-th rx-align-right">Расчётное проектное значение</th><th class="rx-th rx-align-right">Фактическое значение</th></tr></thead>
+    <tbody><tr class=""><td class="rx-td rx-align-left">Удельная характеристика расхода тепловой энергии на отопление и вентиляцию</td><td class="rx-td rx-align-center">Вт/(м³·К)</td><td class="rx-td rx-align-right">—</td><td class="rx-td rx-align-right">0,258</td><td class="rx-td rx-align-right">—</td></tr><tr class=""><td class="rx-td rx-align-left">Нормативное значение qот</td><td class="rx-td rx-align-center">кВт·ч/м²</td><td class="rx-td rx-align-right">95</td><td class="rx-td rx-align-right">—</td><td class="rx-td rx-align-right">—</td></tr><tr class=""><td class="rx-td rx-align-left">Удельный расход тепловой энергии по площади</td><td class="rx-td rx-align-center">кВт·ч/м²</td><td class="rx-td rx-align-right">—</td><td class="rx-td rx-align-right">88,21</td><td class="rx-td rx-align-right">—</td></tr><tr class=""><td class="rx-td rx-align-left">Удельный расход тепловой энергии по объёму</td><td class="rx-td rx-align-center">кВт·ч/м³</td><td class="rx-td rx-align-right">—</td><td class="rx-td rx-align-right">29,403</td><td class="rx-td rx-align-right">—</td></tr></tbody>
+  </table>
+  
+</section>
+</section>
+<section id="ep-7">
+  <h3 class="rx-section-title">7 Коэффициенты</h3>
+  <section class="rx-table-block">
+  
+  <table class="rx-table">
+    <colgroup><col style="width:40%"/><col style="width:10%"/><col/><col/><col/></colgroup>
+    <thead><tr><th class="rx-th rx-align-left">Показатель</th><th class="rx-th rx-align-center">Ед. изм.</th><th class="rx-th rx-align-right">Нормируемое значение</th><th class="rx-th rx-align-right">Расчётное проектное значение</th><th class="rx-th rx-align-right">Фактическое значение</th></tr></thead>
+    <tbody><tr class=""><td class="rx-td rx-align-left">Коэффициент использования теплопоступлений</td><td class="rx-td rx-align-center">доля</td><td class="rx-td rx-align-right">—</td><td class="rx-td rx-align-right">1</td><td class="rx-td rx-align-right">—</td></tr><tr class=""><td class="rx-td rx-align-left">Коэффициент рекуперации тепла вентиляции</td><td class="rx-td rx-align-center">доля</td><td class="rx-td rx-align-right">—</td><td class="rx-td rx-align-right">0</td><td class="rx-td rx-align-right">—</td></tr></tbody>
+  </table>
+  
+</section>
+</section>
+<section id="ep-8">
+  <h3 class="rx-section-title">8 Комплексные показатели расхода тепловой энергии</h3>
+  <section class="rx-table-block">
+  
+  <table class="rx-table">
+    <colgroup><col style="width:40%"/><col style="width:10%"/><col/><col/><col/></colgroup>
+    <thead><tr><th class="rx-th rx-align-left">Показатель</th><th class="rx-th rx-align-center">Ед. изм.</th><th class="rx-th rx-align-right">Нормируемое значение</th><th class="rx-th rx-align-right">Расчётное проектное значение</th><th class="rx-th rx-align-right">Фактическое значение</th></tr></thead>
+    <tbody><tr class=""><td class="rx-td rx-align-left">Годовой расход тепловой энергии на отопление и вентиляцию</td><td class="rx-td rx-align-center">кВт·ч</td><td class="rx-td rx-align-right">—</td><td class="rx-td rx-align-right">17 288,9</td><td class="rx-td rx-align-right">—</td></tr><tr class=""><td class="rx-td rx-align-left">Годовые теплопотери оболочки</td><td class="rx-td rx-align-center">кВт·ч</td><td class="rx-td rx-align-right">—</td><td class="rx-td rx-align-right">31 922,5</td><td class="rx-td rx-align-right">—</td></tr></tbody>
+  </table>
+  
+</section>
+</section>
+<section id="ep-9">
+  <h3 class="rx-section-title">9 Энергетические нагрузки здания</h3>
+  <section class="rx-table-block">
+  
+  <table class="rx-table">
+    <colgroup><col style="width:40%"/><col style="width:10%"/><col/><col/><col/></colgroup>
+    <thead><tr><th class="rx-th rx-align-left">Показатель</th><th class="rx-th rx-align-center">Ед. изм.</th><th class="rx-th rx-align-right">Нормируемое значение</th><th class="rx-th rx-align-right">Расчётное проектное значение</th><th class="rx-th rx-align-right">Фактическое значение</th></tr></thead>
+    <tbody><tr class=""><td class="rx-td rx-align-left">Расчётная пиковая тепловая нагрузка</td><td class="rx-td rx-align-center">кВт</td><td class="rx-td rx-align-right">—</td><td class="rx-td rx-align-right">18,73</td><td class="rx-td rx-align-right">—</td></tr><tr class=""><td class="rx-td rx-align-left">Удельная пиковая нагрузка</td><td class="rx-td rx-align-center">Вт/м²</td><td class="rx-td rx-align-right">—</td><td class="rx-td rx-align-right">66,9</td><td class="rx-td rx-align-right">—</td></tr><tr class=""><td class="rx-td rx-align-left">Тепловая энергия за расчётный период</td><td class="rx-td rx-align-center">кВт·ч</td><td class="rx-td rx-align-right">—</td><td class="rx-td rx-align-right">128,7</td><td class="rx-td rx-align-right">—</td></tr><tr class=""><td class="rx-td rx-align-left">Удельная тепловая энергия за расчётный период</td><td class="rx-td rx-align-center">кВт·ч/м²</td><td class="rx-td rx-align-right">—</td><td class="rx-td rx-align-right">0,46</td><td class="rx-td rx-align-right">—</td></tr></tbody>
+  </table>
+  
+</section>
+</section>
+<section id="ep-software">
+  <h3 class="rx-section-title">Сведения о программном расчёте</h3>
+  <ul><li>Расчёт выполнен средствами расчётного модуля программного комплекса.</li><li>Документ сформирован в структуре текстовой части проектной документации и предназначен для представления расчётно-пояснительных материалов.</li><li>Оформление выполнено в ГОСТ/СПДС-ориентированном стиле.</li></ul>
+</section>
+<section id="ep-limitations">
+  <h3 class="rx-section-title">Ограничения применения расчёта</h3>
+  <ul><li>Расчётная часть сформирована по логике СП 50 и предназначена для предварительного расчётно-пояснительного анализа.</li><li>Справочная динамическая RC-оценка не заменяет нормативную проверку по СП 50.</li><li>Фактические значения энергопаспорта не заполняются без обследования объекта.</li><li>Солнечные теплопоступления требуют уточнения методики расчёта; значение qrad не подменяется фиктивным числом.</li></ul>
+</section>
+<section class="rx-assumptions-block" id="ep-assumptions">
+  <h3 class="rx-section-title">Принятые проектные допущения</h3>
+  <p>Значения ниже подставлены автоматически из профиля проектных допущений для демонстрационного расчёта. Каждая строка отмечена сноской «*» в основных таблицах документа.</p>
+  <table class="rx-table rx-assumptions-table">
+    <colgroup><col style="width:55%"/><col/></colgroup>
+    <thead>
+      <tr>
+        <th class="rx-th rx-align-left">Параметр</th>
+        <th class="rx-th rx-align-left">Принятое значение</th>
+      </tr>
+    </thead>
+    <tbody><tr><td class="rx-td rx-align-left">Подписанты</td><td class="rx-td rx-align-left">Разработал — Автор ВКР; Проверил — —; Нормоконтроль — —; ГИП — —</td></tr><tr><td class="rx-td rx-align-left">Солнечные теплопоступления</td><td class="rx-td rx-align-left">методика требует уточнения; значение не использовано как расчётное.</td></tr></tbody>
+  </table>
+  <p class="rx-table-note">* Значение принято по проектному допущению для демонстрационного расчёта и требует уточнения.</p>
+</section>
+<section class="rx-signature-block">
+  <div class="rx-signature">
+    <span class="rx-signature-role">Разработал</span>
+    <span class="rx-signature-line">__________________________</span>
+    <span class="rx-signature-name">Автор ВКР</span>
+  </div>
+  <div class="rx-signature">
+    <span class="rx-signature-role">Проверил</span>
+    <span class="rx-signature-line">__________________________</span>
+    <span class="rx-signature-name">—</span>
+  </div>
+  <div class="rx-signature">
+    <span class="rx-signature-role">Нормоконтроль</span>
+    <span class="rx-signature-line">__________________________</span>
+    <span class="rx-signature-name">—</span>
+  </div>
+  <div class="rx-signature">
+    <span class="rx-signature-role">ГИП</span>
+    <span class="rx-signature-line">__________________________</span>
+    <span class="rx-signature-name">—</span>
+  </div>
+</section>
+<section class="rx-gost-stamp">
+  <table class="rx-stamp-table">
+    <tr>
+      <td class="rx-stamp-cell rx-stamp-cipher">ДЕМО-2026</td>
+      <td class="rx-stamp-cell rx-stamp-doc">Энергетический паспорт здания</td>
+    </tr>
+    <tr>
+      <td class="rx-stamp-cell">Разработал: Автор ВКР</td>
+      <td class="rx-stamp-cell">Проверил: —</td>
+    </tr>
+    <tr>
+      <td class="rx-stamp-cell">Нормоконтроль: —</td>
+      <td class="rx-stamp-cell">ГИП: —</td>
+    </tr>
+  </table>
+</section>
+
+<div class="rx-page-counter" aria-hidden="true">Лист </div>
+</body>
+</html>

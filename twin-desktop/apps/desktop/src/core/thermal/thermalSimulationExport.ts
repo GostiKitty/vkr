@@ -74,6 +74,7 @@ export type LossShareBreakdown = {
   window: number;
   door: number;
   infiltration: number;
+  ventilation: number;
 };
 
 export function extractLossSharePercent(result: ThermalSimulationResult): LossShareBreakdown | null {

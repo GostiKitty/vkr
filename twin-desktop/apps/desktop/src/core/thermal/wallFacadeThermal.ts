@@ -1,11 +1,12 @@
 import { segmentLength } from "../../entities/geometry/geom";
 import type { Wall } from "../../entities/geometry/types";
 import { computeWallProperties, DEFAULT_WALL_ASSEMBLY_ID } from "../../entities/material/types";
+import { getTypicalDoorU_W_m2K, getTypicalWindowU_W_m2K } from "../../norms/sp50_2024/typicalOpeningU";
 
-/** Типовое U окон (сводная характеристика блока), Вт/(м²·К). */
-export const DEFAULT_WINDOW_U_W_M2K = 2.35;
-/** Типовое U дверей, Вт/(м²·К). */
-export const DEFAULT_DOOR_U_W_M2K = 1.8;
+/** Типовое U окон по СП 50 (без паспорта изделия), Вт/(м²·К). */
+export const DEFAULT_WINDOW_U_W_M2K = getTypicalWindowU_W_m2K();
+/** Типовое U дверей по СП 50, Вт/(м²·К). */
+export const DEFAULT_DOOR_U_W_M2K = getTypicalDoorU_W_m2K();
 export const DEFAULT_WALL_U_FALLBACK_W_M2K = 1.4;
 
 export interface OpeningDescriptorLike {

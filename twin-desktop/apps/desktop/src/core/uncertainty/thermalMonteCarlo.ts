@@ -25,6 +25,7 @@ export interface ThermalUncertaintySample {
   outdoorBiasC: number;
   infiltrationMultiplier: number;
   internalGainMultiplier: number;
+  occupancyMultiplier: number;
   setpointOffsetC: number;
 }
 
@@ -46,9 +47,16 @@ export const THERMAL_UNCERTAINTY_DEFINITIONS: ThermalUncertaintyDefinition[] = [
   {
     id: "internalGainMultiplier",
     label: "Множитель внутренних теплопоступлений",
-    description: "Бета-распределение, отражающее графики занятости",
+    description: "Бета-распределение для разброса внутренних теплопоступлений по сценариям",
     unit: "×",
     distribution: { kind: "beta", alpha: 2.5, beta: 2, min: 0.6, max: 1.4 },
+  },
+  {
+    id: "occupancyMultiplier",
+    label: "Множитель занятости",
+    description: "Бета-распределение для доли занятости и фактического режима эксплуатации",
+    unit: "×",
+    distribution: { kind: "beta", alpha: 2.2, beta: 2.4, min: 0.7, max: 1.2 },
   },
   {
     id: "setpointOffsetC",
@@ -76,12 +84,42 @@ export interface DistributionSummary {
   mean: number;
   stdDev: number;
   p5: number;
+  p10: number;
   p50: number;
+  p90: number;
   p95: number;
   valueAtRisk: number;
   conditionalValueAtRisk: number;
   histogram: HistogramBin[];
   cdf: CdfPoint[];
+}
+
+export type ThermalMonteCarloSensitivityFactorId =
+  | "infiltrationACH"
+  | "outdoorTemperatureShift"
+  | "daySetpoint"
+  | "nightSetpoint"
+  | "internalGains"
+  | "occupancy";
+
+export interface ThermalMonteCarloSensitivityFactor {
+  id: ThermalMonteCarloSensitivityFactorId;
+  label: string;
+  valuePercent: number;
+}
+
+export interface ThermalMonteCarloScenarioSeries {
+  peakLoadKW: number[];
+  totalEnergyKWh: number[];
+  discomfortHours: number[];
+  minimumIndoorTemperatureC: number[];
+}
+
+export interface ThermalMonteCarloRoomRiskSummary {
+  roomId: string;
+  temperatureP50C: number;
+  minimumTemperatureP10C: number;
+  underheatingRisk: number;
 }
 
 export interface ThermalMonteCarloResult {
@@ -92,10 +130,22 @@ export interface ThermalMonteCarloResult {
   engineeringScopeRu: string;
   samples: ThermalUncertaintySample[];
   peakLoad: DistributionSummary;
+  /** Энергия за тот же период сценария, что и у базового расчёта RC (24 ч или 7 суток), кВт·ч. */
+  totalEnergy: DistributionSummary;
   /** Среднесуточная энергия за период базового сценария (24 ч или 7 суток), кВт·ч. */
   dailyEnergy: DistributionSummary;
   /** 365× среднесуточная энергия — условный год для сравнения прогонов, не нормативный расход. */
   annualEnergy: DistributionSummary;
+  /** Сумма по зонам часов ниже уставки (>0,05 °C), ч. */
+  discomfort: DistributionSummary;
+  /** Сырые ряды по прогонам для последующего UI-анализа риска и отчёта. */
+  scenarioSeries: ThermalMonteCarloScenarioSeries;
+  /** Вероятность, что минимум хотя бы в одной зоне сценария опустится ниже 20 °C. */
+  underheatingBelow20CProbability?: number;
+  /** Нормированная чувствительность по влиянию на totalEnergyKWh. */
+  sensitivity?: ThermalMonteCarloSensitivityFactor[];
+  /** Агрегаты по помещениям, если удалось собрать температурные ряды по зонам. */
+  roomRiskSummary?: ThermalMonteCarloRoomRiskSummary[];
   exceedanceProbability?: number;
   varLevel: number;
 }
@@ -123,9 +173,25 @@ interface MonteCarloCollected {
   samples: ThermalUncertaintySample[];
   peakLoadsKW: number[];
   totalEnergiesKWh: number[];
+  discomfortHours: number[];
+  minimumIndoorTemperaturesC: number[];
+  roomRiskAccumulator: Record<string, CollectedRoomRiskAccumulator>;
+  underheatingBelow20Count: number;
   exceedCount: number;
   durationDays: number;
   varLevel: number;
+}
+
+interface CollectedRoomRiskAccumulator {
+  meanTemperaturesC: number[];
+  minimumTemperaturesC: number[];
+  underheatingCount: number;
+}
+
+interface ExtractedRoomMetrics {
+  roomId: string;
+  meanTemperatureC: number;
+  minimumTemperatureC: number;
 }
 
 function collectThermalMonteCarloSamplesSync(
@@ -140,8 +206,12 @@ function collectThermalMonteCarloSamplesSync(
   const samples: ThermalUncertaintySample[] = [];
   const peakLoadsKW: number[] = [];
   const totalEnergiesKWh: number[] = [];
+  const discomfortHours: number[] = [];
+  const minimumIndoorTemperaturesC: number[] = [];
+  const roomRiskAccumulator: Record<string, CollectedRoomRiskAccumulator> = {};
   const durationDays = options.baseOptions.duration === "7d" ? 7 : 1;
   let exceedCount = 0;
+  let underheatingBelow20Count = 0;
 
   for (let run = 0; run < options.runs; run++) {
     const uniforms = correlator(rng);
@@ -152,13 +222,32 @@ function collectThermalMonteCarloSamplesSync(
     const metrics = extractMetrics(result, durationDays);
     peakLoadsKW.push(metrics.peakLoadKW);
     totalEnergiesKWh.push(metrics.totalEnergyKWh);
+    discomfortHours.push(metrics.discomfortHours);
+    if (Number.isFinite(metrics.minimumIndoorTemperatureC)) {
+      minimumIndoorTemperaturesC.push(metrics.minimumIndoorTemperatureC);
+      if (metrics.minimumIndoorTemperatureC < 20) {
+        underheatingBelow20Count += 1;
+      }
+    }
+    updateRoomRiskAccumulator(roomRiskAccumulator, metrics.roomMetrics);
     if (options.heatingThresholdKW !== undefined && metrics.peakLoadKW > options.heatingThresholdKW) {
       exceedCount += 1;
     }
     options.onProgress?.(run + 1, options.runs);
   }
 
-  return { samples, peakLoadsKW, totalEnergiesKWh, exceedCount, durationDays, varLevel };
+  return {
+    samples,
+    peakLoadsKW,
+    totalEnergiesKWh,
+    discomfortHours,
+    minimumIndoorTemperaturesC,
+    roomRiskAccumulator,
+    underheatingBelow20Count,
+    exceedCount,
+    durationDays,
+    varLevel,
+  };
 }
 
 async function collectThermalMonteCarloSamplesAsync(
@@ -174,8 +263,12 @@ async function collectThermalMonteCarloSamplesAsync(
   const samples: ThermalUncertaintySample[] = [];
   const peakLoadsKW: number[] = [];
   const totalEnergiesKWh: number[] = [];
+  const discomfortHours: number[] = [];
+  const minimumIndoorTemperaturesC: number[] = [];
+  const roomRiskAccumulator: Record<string, CollectedRoomRiskAccumulator> = {};
   const durationDays = options.baseOptions.duration === "7d" ? 7 : 1;
   let exceedCount = 0;
+  let underheatingBelow20Count = 0;
 
   for (let run = 0; run < options.runs; run++) {
     const uniforms = correlator(rng);
@@ -186,6 +279,14 @@ async function collectThermalMonteCarloSamplesAsync(
     const metrics = extractMetrics(result, durationDays);
     peakLoadsKW.push(metrics.peakLoadKW);
     totalEnergiesKWh.push(metrics.totalEnergyKWh);
+    discomfortHours.push(metrics.discomfortHours);
+    if (Number.isFinite(metrics.minimumIndoorTemperatureC)) {
+      minimumIndoorTemperaturesC.push(metrics.minimumIndoorTemperatureC);
+      if (metrics.minimumIndoorTemperatureC < 20) {
+        underheatingBelow20Count += 1;
+      }
+    }
+    updateRoomRiskAccumulator(roomRiskAccumulator, metrics.roomMetrics);
     if (options.heatingThresholdKW !== undefined && metrics.peakLoadKW > options.heatingThresholdKW) {
       exceedCount += 1;
     }
@@ -195,12 +296,23 @@ async function collectThermalMonteCarloSamplesAsync(
     }
   }
 
-  return { samples, peakLoadsKW, totalEnergiesKWh, exceedCount, durationDays, varLevel };
+  return {
+    samples,
+    peakLoadsKW,
+    totalEnergiesKWh,
+    discomfortHours,
+    minimumIndoorTemperaturesC,
+    roomRiskAccumulator,
+    underheatingBelow20Count,
+    exceedCount,
+    durationDays,
+    varLevel,
+  };
 }
 
 function finalizeThermalMonteCarloResult(
   collected: MonteCarloCollected,
-  options: Pick<ThermalMonteCarloOptions, "runs" | "heatingThresholdKW" | "seed">
+  options: Pick<ThermalMonteCarloOptions, "baseOptions" | "runs" | "heatingThresholdKW" | "seed">
 ): ThermalMonteCarloResult {
   const seedUsed = options.seed ?? DEFAULT_SEED;
   /** Среднесуточная энергия за смоделированный период; «год» = 365× это значение (упрощение для сравнения прогонов). */
@@ -212,8 +324,20 @@ function finalizeThermalMonteCarloResult(
     engineeringScopeRu: MONTE_CARLO_THERMAL_SCOPE_RU,
     samples: collected.samples,
     peakLoad: summarizeDistribution(collected.peakLoadsKW, DEFAULT_BINS, collected.varLevel),
+    totalEnergy: summarizeDistribution(collected.totalEnergiesKWh, DEFAULT_BINS, collected.varLevel),
     dailyEnergy: summarizeDistribution(dailyEnergies, DEFAULT_BINS, collected.varLevel),
     annualEnergy: summarizeDistribution(annualEnergies, DEFAULT_BINS, collected.varLevel),
+    discomfort: summarizeDistribution(collected.discomfortHours, DEFAULT_BINS, collected.varLevel),
+    scenarioSeries: {
+      peakLoadKW: [...collected.peakLoadsKW],
+      totalEnergyKWh: [...collected.totalEnergiesKWh],
+      discomfortHours: [...collected.discomfortHours],
+      minimumIndoorTemperatureC: [...collected.minimumIndoorTemperaturesC],
+    },
+    underheatingBelow20CProbability:
+      options.runs > 0 ? collected.underheatingBelow20Count / options.runs : undefined,
+    sensitivity: buildSensitivityFactors(collected.samples, collected.totalEnergiesKWh, options.baseOptions),
+    roomRiskSummary: buildRoomRiskSummary(collected.roomRiskAccumulator),
     exceedanceProbability:
       options.heatingThresholdKW === undefined ? undefined : collected.exceedCount / options.runs,
     varLevel: collected.varLevel,
@@ -246,10 +370,31 @@ export async function runThermalMonteCarloAsync(
 }
 
 function extractMetrics(result: ThermalSimulationResult, durationDays: number) {
+  const roomMetrics = Object.values(result.rooms)
+    .map((room) => {
+      const temperatures = room.timeline
+        .map((point) => point.temperatureC)
+        .filter((value): value is number => Number.isFinite(value));
+      if (!temperatures.length) {
+        return null;
+      }
+      return {
+        roomId: room.roomId,
+        meanTemperatureC: average(temperatures),
+        minimumTemperatureC: Math.min(...temperatures),
+      } satisfies ExtractedRoomMetrics;
+    })
+    .filter((value): value is ExtractedRoomMetrics => value !== null);
+  const minimumIndoorTemperatureC = roomMetrics.length
+    ? Math.min(...roomMetrics.map((metric) => metric.minimumTemperatureC))
+    : Number.NaN;
   return {
     peakLoadKW: result.summary.peakLoadKW,
     totalEnergyKWh: result.summary.totalEnergyKWh,
     dailyEnergyKWh: result.summary.totalEnergyKWh / durationDays,
+    discomfortHours: result.summary.discomfortHours,
+    minimumIndoorTemperatureC,
+    roomMetrics,
   };
 }
 
@@ -270,6 +415,12 @@ function applySampleToOptions(
   sample: ThermalUncertaintySample
 ): ThermalSimulationOptions {
   const infiltration = baseOptions.infiltrationACH ?? 0.5;
+  const occupancy = baseOptions.occupancy ?? {
+    dayFraction: 1,
+    nightFraction: 0.2,
+    dayStartHour: baseOptions.setpoints.dayStartHour,
+    nightStartHour: baseOptions.setpoints.nightStartHour,
+  };
   return {
     ...baseOptions,
     outdoor: {
@@ -287,6 +438,11 @@ function applySampleToOptions(
       dayGain_W_m2: Math.max(0, baseOptions.internalGains.dayGain_W_m2 * sample.internalGainMultiplier),
       nightGain_W_m2: Math.max(0, baseOptions.internalGains.nightGain_W_m2 * sample.internalGainMultiplier),
     },
+    occupancy: {
+      ...occupancy,
+      dayFraction: clamp(occupancy.dayFraction * sample.occupancyMultiplier, 0, 1),
+      nightFraction: clamp(occupancy.nightFraction * sample.occupancyMultiplier, 0, 1),
+    },
     infiltrationACH: Math.max(0.02, infiltration * sample.infiltrationMultiplier),
   };
 }
@@ -297,7 +453,9 @@ function summarizeDistribution(values: number[], bins: number, varLevel: number)
       mean: 0,
       stdDev: 0,
       p5: 0,
+      p10: 0,
       p50: 0,
+      p90: 0,
       p95: 0,
       valueAtRisk: 0,
       conditionalValueAtRisk: 0,
@@ -311,7 +469,9 @@ function summarizeDistribution(values: number[], bins: number, varLevel: number)
   const histogram = buildHistogram(values, bins);
   const cdf = buildCdf(sorted, 80);
   const p5 = quantile(sorted, 0.05);
+  const p10 = quantile(sorted, 0.1);
   const p50 = quantile(sorted, 0.5);
+  const p90 = quantile(sorted, 0.9);
   const p95 = quantile(sorted, 0.95);
   const valueAtRisk = quantile(sorted, varLevel);
   const tailValues = sorted.filter((value) => value >= valueAtRisk);
@@ -322,13 +482,140 @@ function summarizeDistribution(values: number[], bins: number, varLevel: number)
     mean,
     stdDev,
     p5,
+    p10,
     p50,
+    p90,
     p95,
     valueAtRisk,
     conditionalValueAtRisk,
     histogram,
     cdf,
   };
+}
+
+function updateRoomRiskAccumulator(
+  accumulator: Record<string, CollectedRoomRiskAccumulator>,
+  roomMetrics: ExtractedRoomMetrics[]
+) {
+  roomMetrics.forEach((room) => {
+    const entry = accumulator[room.roomId] ?? {
+      meanTemperaturesC: [],
+      minimumTemperaturesC: [],
+      underheatingCount: 0,
+    };
+    entry.meanTemperaturesC.push(room.meanTemperatureC);
+    entry.minimumTemperaturesC.push(room.minimumTemperatureC);
+    if (room.minimumTemperatureC < 20) {
+      entry.underheatingCount += 1;
+    }
+    accumulator[room.roomId] = entry;
+  });
+}
+
+function buildRoomRiskSummary(
+  accumulator: Record<string, CollectedRoomRiskAccumulator>
+): ThermalMonteCarloRoomRiskSummary[] | undefined {
+  const rows = Object.entries(accumulator)
+    .map(([roomId, entry]) => {
+      if (!entry.meanTemperaturesC.length || !entry.minimumTemperaturesC.length) {
+        return null;
+      }
+      const meanSummary = summarizeDistribution(entry.meanTemperaturesC, DEFAULT_BINS, DEFAULT_VAR_LEVEL);
+      const minSummary = summarizeDistribution(entry.minimumTemperaturesC, DEFAULT_BINS, DEFAULT_VAR_LEVEL);
+      return {
+        roomId,
+        temperatureP50C: meanSummary.p50,
+        minimumTemperatureP10C: minSummary.p10,
+        underheatingRisk: entry.minimumTemperaturesC.length
+          ? entry.underheatingCount / entry.minimumTemperaturesC.length
+          : 0,
+      } satisfies ThermalMonteCarloRoomRiskSummary;
+    })
+    .filter((value): value is ThermalMonteCarloRoomRiskSummary => value !== null)
+    .sort((left, right) => right.underheatingRisk - left.underheatingRisk || left.roomId.localeCompare(right.roomId));
+  return rows.length ? rows : undefined;
+}
+
+function buildSensitivityFactors(
+  samples: ThermalUncertaintySample[],
+  totalEnergiesKWh: number[],
+  baseOptions: ThermalSimulationOptions
+): ThermalMonteCarloSensitivityFactor[] {
+  if (!samples.length || samples.length !== totalEnergiesKWh.length) {
+    return [];
+  }
+  const occupancy = baseOptions.occupancy ?? {
+    dayFraction: 1,
+    nightFraction: 0.2,
+  };
+  const averageInternalGains =
+    (baseOptions.internalGains.dayGain_W_m2 + baseOptions.internalGains.nightGain_W_m2) / 2;
+  const averageOccupancy = ((occupancy.dayFraction ?? 1) + (occupancy.nightFraction ?? 0.2)) / 2;
+  const infiltrationBase = baseOptions.infiltrationACH ?? 0.5;
+
+  const rows: Array<Omit<ThermalMonteCarloSensitivityFactor, "valuePercent"> & { score: number }> = [
+    {
+      id: "infiltrationACH",
+      label: "Инфильтрация",
+      score: Math.abs(
+        pearsonCorrelation(
+          samples.map((sample) => Math.max(0.02, infiltrationBase * sample.infiltrationMultiplier)),
+          totalEnergiesKWh
+        )
+      ),
+    },
+    {
+      id: "outdoorTemperatureShift",
+      label: "Наружная температура",
+      score: Math.abs(pearsonCorrelation(samples.map((sample) => sample.outdoorBiasC), totalEnergiesKWh)),
+    },
+    {
+      id: "daySetpoint",
+      label: "Дневная уставка",
+      score: Math.abs(
+        pearsonCorrelation(
+          samples.map((sample) => baseOptions.setpoints.day + sample.setpointOffsetC),
+          totalEnergiesKWh
+        )
+      ),
+    },
+    {
+      id: "nightSetpoint",
+      label: "Ночная уставка",
+      score: Math.abs(
+        pearsonCorrelation(
+          samples.map((sample) => baseOptions.setpoints.night + sample.setpointOffsetC),
+          totalEnergiesKWh
+        )
+      ),
+    },
+    {
+      id: "internalGains",
+      label: "Внутренние теплопоступления",
+      score: Math.abs(
+        pearsonCorrelation(
+          samples.map((sample) => averageInternalGains * sample.internalGainMultiplier),
+          totalEnergiesKWh
+        )
+      ),
+    },
+    {
+      id: "occupancy",
+      label: "Занятость",
+      score: Math.abs(
+        pearsonCorrelation(
+          samples.map((sample) => clamp(averageOccupancy * sample.occupancyMultiplier, 0, 1)),
+          totalEnergiesKWh
+        )
+      ),
+    },
+  ];
+  const totalScore = rows.reduce((sum, row) => sum + row.score, 0);
+  return rows.map((row) => ({
+    id: row.id,
+    label: row.label,
+    valuePercent: totalScore > 0 ? (row.score / totalScore) * 100 : 0,
+  }));
 }
 
 function buildHistogram(values: number[], bins: number): HistogramBin[] {
@@ -396,6 +683,30 @@ function standardDeviation(values: number[], mean: number): number {
   const variance =
     values.reduce((acc, value) => acc + (value - mean) ** 2, 0) / (values.length - 1);
   return Math.sqrt(variance);
+}
+
+function pearsonCorrelation(xs: number[], ys: number[]): number {
+  if (xs.length !== ys.length || xs.length <= 1) {
+    return 0;
+  }
+  const xMean = average(xs);
+  const yMean = average(ys);
+  let numerator = 0;
+  let xVariance = 0;
+  let yVariance = 0;
+
+  for (let index = 0; index < xs.length; index++) {
+    const dx = xs[index] - xMean;
+    const dy = ys[index] - yMean;
+    numerator += dx * dy;
+    xVariance += dx * dx;
+    yVariance += dy * dy;
+  }
+
+  if (xVariance <= 1e-12 || yVariance <= 1e-12) {
+    return 0;
+  }
+  return numerator / Math.sqrt(xVariance * yVariance);
 }
 
 function quantile(sortedValues: number[], probability: number): number {

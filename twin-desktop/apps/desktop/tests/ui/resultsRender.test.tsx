@@ -2,6 +2,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ResultsPanel } from "../../src/features/reports/ResultsPanel.js";
 import { MetricsResultsTab } from "../../src/features/reports/MetricsResultsTab.js";
+import ProjectDocumentationPage from "../../src/features/reports/ProjectDocumentationPage.js";
 import { createEmptyBuildingModel } from "../../src/entities/geometry/types.js";
 import { buildAdjacencyGraph } from "../../src/core/graph/adjacency.js";
 import { useTwinStore } from "../../src/entities/twin/twin.store.js";
@@ -63,5 +64,19 @@ test("ThermalSimulationPanel renders a clear empty state in the results viewport
   }
   if (markup.includes("undefined") || markup.includes("null")) {
     throw new Error("ThermalSimulationPanel empty state should not leak undefined/null.");
+  }
+});
+
+test("ProjectDocumentationPage renders expertise export controls", () => {
+  resetStores();
+  const markup = renderToStaticMarkup(<ProjectDocumentationPage projectId={null} />);
+  if (!markup.includes('data-testid="open-expertise-inputs-button"')) {
+    throw new Error("ProjectDocumentationPage should expose the expertise inputs button.");
+  }
+  if (!markup.includes('data-testid="check-export-completeness-button"')) {
+    throw new Error("ProjectDocumentationPage should expose the completeness check button.");
+  }
+  if (!markup.includes("Скачать комплект документов")) {
+    throw new Error("ProjectDocumentationPage should expose package download controls.");
   }
 });

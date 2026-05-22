@@ -39,6 +39,8 @@ export interface EngineeringMetricCard {
   valueText: string;
   unit: string;
   formula: string;
+  /** Ссылка на запись в entities/formulas/registry.ts */
+  formulaId?: string;
   engineeringSenseRu: string;
   assumptionsRu: string;
   calculationLevelRu: string;
@@ -84,6 +86,7 @@ export interface ThermalBuildingDiagnostics {
   totalWindowLossW: number;
   totalDoorLossW: number;
   totalInfiltrationLossW: number;
+  totalMechanicalVentilationLossW: number;
   totalInternalGainsW: number;
   totalHeatingW: number;
   /** Сумма по зонам чистого обмена с соседями (для всего здания близка к нулю). */
@@ -99,6 +102,7 @@ export interface ThermalBuildingDiagnostics {
     window: number;
     door: number;
     infiltration: number;
+    ventilation: number;
   };
   heatedFloorAreaM2: number;
   /** Удельная пиковая нагрузка по зданию в момент референса, Вт/м². */
@@ -128,6 +132,7 @@ export interface ThermalZoneDiagnostics {
   lossWindowW: number;
   lossDoorW: number;
   lossInfiltrationW: number;
+  lossMechanicalVentilationW: number;
   internalGainsW: number;
   internalExchangeNetW: number;
   peakSpecificLoad_W_m2: number;
@@ -334,6 +339,7 @@ function buildEngineeringMetricCards(
       valueText: peakLoadKW.toFixed(3),
       unit: "кВт",
       formula: "Q̇_ot,пик = max_t Σ_i Q̇_ot,i(t) по кадрам симуляции",
+      formulaId: "thermal_peak_load",
       engineeringSenseRu: "Одновременная нагрузка на отопительную систему в наихудшем по сумме зон шаге.",
       assumptionsRu: "Модель идеализирует отопление как неограниченный источник до уставки (см. solver); не учитывает гидравлику и реальную регулировку клапанов.",
       calculationLevelRu: level,
@@ -344,6 +350,7 @@ function buildEngineeringMetricCards(
       valueText: totalEnergyKWh.toFixed(2),
       unit: "кВт·ч",
       formula: "E = Σ_k (Σ_i Q̇_ot,i,k) Δt_k / 3,6·10⁶",
+      formulaId: "rc_lumped",
       engineeringSenseRu: "Интеграл суммарной мощности отопления по времени сценария (не нормативный годовой расход).",
       assumptionsRu: "Интегрирование по интервалам между кадрами metricFrames; последний кадр timeline не добавляет Δt.",
       calculationLevelRu: level,
@@ -353,7 +360,8 @@ function buildEngineeringMetricCards(
       title: "Остаток теплового баланса в диагностическом срезе",
       valueText: building.balanceResidualW.toFixed(0),
       unit: "Вт",
-      formula: "r = Q̇_ot + Q̇_int + Σ_j G_ij(T_j−T_i) − Σ_k G_k,ext(T_i−T_n) − G_inf(T_i−T_n)",
+      formula: "r = Q̇_ot + Q̇_int + Σ_j G_ij(T_j−T_i) − Σ_k G_k,ext(T_i−T_n) − G_inf(T_i−T_n) − G_vent(T_i−T_n)",
+      formulaId: "thermal_balance",
       engineeringSenseRu:
         "Проверка согласованности среза с дискретным уравнением RC: при квазистационаре r → 0 для алгебраических потоков (включая приток с улицы при T_n>T_i).",
       assumptionsRu:
@@ -456,8 +464,11 @@ export function buildThermalSimulationDiagnostics(input: BuildThermalDiagnostics
     const heatingW = Math.max(0, zoneHeating[zone.id] ?? 0);
     const ex = externalLossesForZone(zone.id, model.outdoorLinks, Ti, outdoorC);
     const gInf = zone.infiltrationConductance_W_K;
+    const gVent = zone.ventilationConductance_W_K;
     const lossInf = Math.max(0, gInf * (Ti - outdoorC));
+    const lossVent = Math.max(0, gVent * (Ti - outdoorC));
     const infSigned = Number.isFinite(gInf) ? gInf * (Ti - outdoorC) : 0;
+    const ventSigned = Number.isFinite(gVent) ? gVent * (Ti - outdoorC) : 0;
     const envSigned = envelopeExchangeSignedFromLinksW(zone.id, model.outdoorLinks, Ti, outdoorC);
     const { gainW } = evaluateInternalGains(gains, occupancy, timeSeconds, zone.area_m2);
     const intEx = internalExchangeNetW(zone.id, model, zoneTemps);
@@ -472,11 +483,12 @@ export function buildThermalSimulationDiagnostics(input: BuildThermalDiagnostics
       setpointC: sp,
       heatingPowerW: heatingW,
       envelopeExchangeSignedW: envSigned,
-      infiltrationExchangeSignedW: infSigned,
+      infiltrationExchangeSignedW: infSigned + ventSigned,
       lossOpaqueW: ex.opaque,
       lossWindowW: ex.window,
       lossDoorW: ex.door,
       lossInfiltrationW: lossInf,
+      lossMechanicalVentilationW: lossVent,
       internalGainsW: gainW,
       internalExchangeNetW: intEx,
       peakSpecificLoad_W_m2: zone.area_m2 > 0 ? peakW / zone.area_m2 : 0,
@@ -491,12 +503,13 @@ export function buildThermalSimulationDiagnostics(input: BuildThermalDiagnostics
   const totalWindow = zones.reduce((s, z) => s + z.lossWindowW, 0);
   const totalDoor = zones.reduce((s, z) => s + z.lossDoorW, 0);
   const totalInfil = zones.reduce((s, z) => s + z.lossInfiltrationW, 0);
+  const totalVent = zones.reduce((s, z) => s + z.lossMechanicalVentilationW, 0);
   const totalGains = zones.reduce((s, z) => s + z.internalGainsW, 0);
   const totalHeating = zones.reduce((s, z) => s + z.heatingPowerW, 0);
   const intExSum = zones.reduce((s, z) => s + z.internalExchangeNetW, 0);
   const totalEnvelopeSigned = zones.reduce((s, z) => s + z.envelopeExchangeSignedW, 0);
   const totalInfilSigned = zones.reduce((s, z) => s + z.infiltrationExchangeSignedW, 0);
-  const lossSum = totalOpaque + totalWindow + totalDoor + totalInfil;
+  const lossSum = totalOpaque + totalWindow + totalDoor + totalInfil + totalVent;
   const balanceResidual = totalHeating + totalGains + intExSum - totalEnvelopeSigned - totalInfilSigned;
   const denom = lossSum > 1 ? lossSum : 1;
 
@@ -536,6 +549,7 @@ export function buildThermalSimulationDiagnostics(input: BuildThermalDiagnostics
       totalWindowLossW: totalWindow,
       totalDoorLossW: totalDoor,
       totalInfiltrationLossW: totalInfil,
+      totalMechanicalVentilationLossW: totalVent,
       totalInternalGainsW: totalGains,
       totalHeatingW: totalHeating,
       internalExchangeNetSumW: intExSum,
@@ -545,6 +559,7 @@ export function buildThermalSimulationDiagnostics(input: BuildThermalDiagnostics
         window: (100 * totalWindow) / denom,
         door: (100 * totalDoor) / denom,
         infiltration: (100 * totalInfil) / denom,
+        ventilation: (100 * totalVent) / denom,
       },
       heatedFloorAreaM2: heatedFloorAreaM2,
       specificPeakLoad_W_m2: totalPeakHeating / floorSafe,

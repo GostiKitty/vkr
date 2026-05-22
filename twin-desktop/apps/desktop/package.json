@@ -4,9 +4,11 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently -k \"npm:dev:ui\" \"npm:dev:electron\"",
+    "dev": "concurrently -k -n ui,engine,electron -c blue,green,magenta \"npm:dev:ui\" \"npm:dev:engine\" \"npm:dev:electron\"",
     "dev:ui": "vite",
-    "dev:electron": "wait-on http://localhost:5173 && electron electron/main.cjs",
+    "dev:engine": "cd ../../engine && python -m uvicorn app:app --host 127.0.0.1 --port 8010 --reload",
+    "dev:electron": "wait-on http://127.0.0.1:5173 && electron electron/main.cjs",
+    "dev:stop": "powershell -NoProfile -Command \"@(5173,8010) | ForEach-Object { Get-NetTCPConnection -LocalPort $_ -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue } }\"",
     "build": "vite build",
     "preview": "vite preview",
     "test": "npx tsc -p tsconfig.tests.json && node --loader ./tests/esm-resolver.mjs tests-dist/tests/run-tests.js"

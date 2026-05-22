@@ -31,8 +31,22 @@ export interface ScenarioConfig {
   };
   ventilation: {
     infiltrationACH: number;
+    ventilationACH: number;
+    heatRecoveryFactor: number;
+    mechanicalVentilationEnabled: boolean;
   };
+  /** Идентификатор города из СП 131.13330.2025 (norms/sp131_2025). */
+  climateCityId?: string | null;
 }
+
+export type ScenarioRunSnapshot = {
+  id: string;
+  label: string;
+  savedAt: string;
+  peakLoadKW: number;
+  totalEnergyKWh: number;
+  discomfortHours: number;
+};
 
 interface WorkflowStoreState {
   currentStep: WorkflowStep;
@@ -40,23 +54,31 @@ interface WorkflowStoreState {
   uncertaintyConfig: UncertaintyConfig | null;
   solveCompleted: boolean;
   monteCarloResult: ThermalMonteCarloResult | null;
+  scenarioRunHistory: ScenarioRunSnapshot[];
   setCurrentStep: (step: WorkflowStep) => void;
   setScenarioConfig: (config: ScenarioConfig) => void;
   setUncertaintyConfig: (config: UncertaintyConfig | null) => void;
   markSolveCompleted: (completed: boolean) => void;
   setMonteCarloResult: (result: ThermalMonteCarloResult | null) => void;
+  pushScenarioRunSnapshot: (snapshot: Omit<ScenarioRunSnapshot, "id" | "savedAt">) => void;
   resetWorkflow: () => void;
 }
 
 const initialState: Pick<
   WorkflowStoreState,
-  "currentStep" | "scenarioConfig" | "uncertaintyConfig" | "solveCompleted" | "monteCarloResult"
+  | "currentStep"
+  | "scenarioConfig"
+  | "uncertaintyConfig"
+  | "solveCompleted"
+  | "monteCarloResult"
+  | "scenarioRunHistory"
 > = {
   currentStep: "geometry",
   scenarioConfig: null,
   uncertaintyConfig: null,
   solveCompleted: false,
   monteCarloResult: null,
+  scenarioRunHistory: [],
 };
 
 export const workflowOrder: WorkflowStep[] = ["geometry", "envelope", "scenario", "solve", "uncertainty", "results"];
@@ -72,5 +94,16 @@ export const useWorkflowStore = create<WorkflowStoreState>((set) => ({
   setUncertaintyConfig: (config) => set({ uncertaintyConfig: config, solveCompleted: false }),
   markSolveCompleted: (completed) => set({ solveCompleted: completed }),
   setMonteCarloResult: (result) => set({ monteCarloResult: result }),
+  pushScenarioRunSnapshot: (snapshot) =>
+    set((state) => ({
+      scenarioRunHistory: [
+        ...state.scenarioRunHistory.slice(-9),
+        {
+          ...snapshot,
+          id: `run_${Date.now()}`,
+          savedAt: new Date().toISOString(),
+        },
+      ],
+    })),
   resetWorkflow: () => set(initialState),
 }));

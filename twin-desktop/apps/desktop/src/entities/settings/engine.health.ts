@@ -5,10 +5,11 @@ export async function probeEngineHealth(): Promise<boolean> {
   if (!base) {
     return false;
   }
-  const targets = ["/health", "/docs"];
+  const targets = ["/health", "/ping", "/docs"];
   for (const path of targets) {
+    const url = `${base}${path}`;
     try {
-      const response = await fetch(`${base}${path}`, { method: "GET" });
+      const response = await fetch(url, { method: "GET" });
       if (response.ok) {
         return true;
       }
