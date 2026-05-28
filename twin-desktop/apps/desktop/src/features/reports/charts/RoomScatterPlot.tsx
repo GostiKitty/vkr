@@ -39,9 +39,13 @@ function RoomScatterTooltip({ active, payload }: TooltipProps<ValueType, NameTyp
         { label: "Температура", value: formatChartTemperature(row.temperatureC) },
         { label: "Требуемая мощность", value: formatChartPower(row.heatingPowerW) },
         { label: "Суммарные потери", value: formatChartPower(row.lossTotalW) },
-        ...(row.infiltrationSharePct != null
-          ? [{ label: "Доля инфильтрации", value: `${row.infiltrationSharePct.toFixed(1)} %` }]
+        ...(row.infiltrationShareOfTotalPct != null
+          ? [{ label: "Доля инфильтрации в теплопотерях", value: `${row.infiltrationShareOfTotalPct.toFixed(1)} %` }]
           : []),
+        ...(row.infiltrationShareOfAirExchangePct != null
+          ? [{ label: "Доля инфильтрации в воздухообмене", value: `${row.infiltrationShareOfAirExchangePct.toFixed(1)} %` }]
+          : []),
+        ...row.lossShareWarnings.map((warning) => ({ label: "Пояснение", value: warning })),
         ...(row.statusNote ? [{ label: "Статус", value: row.statusNote }] : []),
       ]}
     />
@@ -61,7 +65,7 @@ export function RoomScatterPlot({ rows, setpointC, selectedRoomId, onSelectRoom 
       rows
         .filter((row) => Number.isFinite(row.temperatureC) && Number.isFinite(row.heatingPowerW))
         .map((row) => {
-          const highInfiltration = row.infiltrationSharePct != null && row.infiltrationSharePct > 35;
+          const highInfiltration = row.infiltrationShareOfTotalPct != null && row.infiltrationShareOfTotalPct > 80;
           const isRisk = row.status === "risk";
           const isSelected = selectedRoomId === row.zoneId;
           return {
@@ -88,7 +92,7 @@ export function RoomScatterPlot({ rows, setpointC, selectedRoomId, onSelectRoom 
   if (data.length < 2) {
     return (
       <div className="flex h-48 items-center justify-center rounded-2xl border border-dashed border-[color:var(--border-soft)] bg-[color:var(--surface-base)] px-4 text-center text-sm text-[color:var(--text-soft)]">
-        Для scatter-диаграммы недостаточно точек с температурой и мощностью.
+        Для диаграммы рассеяния недостаточно точек с температурой и мощностью.
       </div>
     );
   }
@@ -144,7 +148,9 @@ export function RoomScatterPlot({ rows, setpointC, selectedRoomId, onSelectRoom 
         </div>
       </div>
       <p className="text-xs text-[color:var(--text-soft)]">
-        Размер пузыря — суммарные потери. Оранжевые и красные точки — повышенная инфильтрация или статус риска. Пунктир — дневная уставка RC-модели.
+        Размер пузыря — суммарные потери. Оранжевые и красные точки показывают помещения со статусом риска или с
+        инфильтрацией выше 80% от всех теплопотерь. В tooltip отдельно показаны доля инфильтрации в общих потерях и
+        внутри воздухообмена. Пунктир — дневная уставка RC-модели.
       </p>
     </div>
   );

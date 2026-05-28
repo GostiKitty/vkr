@@ -4,9 +4,28 @@ const MERGE_TOLERANCE = 0.2;
 const MIN_ROOM_AREA = 1;
 const SIGNATURE_PRECISION = 3;
 const clonePolygon = (polygon) => polygon.map((point) => ({ ...point }));
-const signature = (polygon) => polygon
-    .map((point) => `${point.x.toFixed(SIGNATURE_PRECISION)}:${point.y.toFixed(SIGNATURE_PRECISION)}`)
-    .join("|");
+function pointToken(point) {
+    return `${point.x.toFixed(SIGNATURE_PRECISION)}:${point.y.toFixed(SIGNATURE_PRECISION)}`;
+}
+function rotateTokens(tokens, startIndex) {
+    return tokens.slice(startIndex).concat(tokens.slice(0, startIndex));
+}
+function signature(polygon) {
+    const tokens = polygon.map(pointToken);
+    if (!tokens.length) {
+        return "";
+    }
+    const candidates = [];
+    for (let index = 0; index < tokens.length; index += 1) {
+        candidates.push(rotateTokens(tokens, index).join("|"));
+    }
+    const reversed = [...tokens].reverse();
+    for (let index = 0; index < reversed.length; index += 1) {
+        candidates.push(rotateTokens(reversed, index).join("|"));
+    }
+    candidates.sort();
+    return candidates[0] ?? "";
+}
 export function detectRoomsFromWalls(model) {
     const autoRooms = [];
     const problems = [];

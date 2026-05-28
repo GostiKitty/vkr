@@ -1,6 +1,8 @@
 import type { BuildingModel } from "../../entities/geometry/types";
 import type { AdjacencyResult } from "../graph/adjacency";
 import { buildAdjacencyGraph } from "../graph/adjacency";
+import type { ConfidenceInterval } from "../thermal/formulas";
+import { coefficientOfVariationPercent, meanConfidenceInterval } from "../thermal/formulas";
 import {
   runThermalSimulation,
   type ThermalSimulationOptions,
@@ -88,6 +90,10 @@ export interface DistributionSummary {
   p50: number;
   p90: number;
   p95: number;
+  spreadP10P90: number;
+  relativeSpreadPercent: number | null;
+  coefficientOfVariationPercent: number | null;
+  confidenceIntervalMean95: ConfidenceInterval | null;
   valueAtRisk: number;
   conditionalValueAtRisk: number;
   histogram: HistogramBin[];
@@ -102,10 +108,28 @@ export type ThermalMonteCarloSensitivityFactorId =
   | "internalGains"
   | "occupancy";
 
+export type ThermalMonteCarloTargetMetricId =
+  | "totalEnergyKWh"
+  | "peakLoadKW"
+  | "discomfortHours"
+  | "minimumIndoorTemperatureC"
+  | "roomUnderheatRisk";
+
 export interface ThermalMonteCarloSensitivityFactor {
   id: ThermalMonteCarloSensitivityFactorId;
   label: string;
   valuePercent: number;
+}
+
+export interface ThermalMonteCarloTargetMetricDefinition {
+  id: ThermalMonteCarloTargetMetricId;
+  label: string;
+  shortLabel: string;
+  axisLabel: string;
+  emptyStateMessage: string;
+  tooltipSeriesKey: string;
+  decimals: number;
+  unit: string;
 }
 
 export interface ThermalMonteCarloScenarioSeries {
@@ -113,6 +137,8 @@ export interface ThermalMonteCarloScenarioSeries {
   totalEnergyKWh: number[];
   discomfortHours: number[];
   minimumIndoorTemperatureC: number[];
+  /** Доля помещений с minimumTemperatureC ниже порога недогрева, %. */
+  roomUnderheatRisk: number[];
 }
 
 export interface ThermalMonteCarloRoomRiskSummary {
@@ -144,6 +170,7 @@ export interface ThermalMonteCarloResult {
   underheatingBelow20CProbability?: number;
   /** Нормированная чувствительность по влиянию на totalEnergyKWh. */
   sensitivity?: ThermalMonteCarloSensitivityFactor[];
+  sensitivityMethodLabel?: string;
   /** Агрегаты по помещениям, если удалось собрать температурные ряды по зонам. */
   roomRiskSummary?: ThermalMonteCarloRoomRiskSummary[];
   exceedanceProbability?: number;
@@ -168,6 +195,62 @@ const MONTE_CARLO_THERMAL_SCOPE_RU =
 const DEFAULT_BINS = 24;
 const DEFAULT_VAR_LEVEL = 0.95;
 const DEFAULT_SEED = 42;
+export const THERMAL_MONTE_CARLO_UNDERHEAT_THRESHOLD_C = 20;
+export const THERMAL_MONTE_CARLO_SENSITIVITY_METHOD_LABEL_RU =
+  "Нормированная абсолютная корреляция Пирсона с выбранной целевой метрикой";
+
+export const THERMAL_MONTE_CARLO_TARGET_METRICS: ThermalMonteCarloTargetMetricDefinition[] = [
+  {
+    id: "totalEnergyKWh",
+    label: "Энергия отопления, кВт·ч",
+    shortLabel: "Энергия отопления",
+    axisLabel: "Энергия отопления, кВт·ч",
+    emptyStateMessage: "Недостаточно данных для отображения энергии отопления.",
+    tooltipSeriesKey: "scenarioSeries.totalEnergyKWh",
+    decimals: 1,
+    unit: "кВт·ч",
+  },
+  {
+    id: "peakLoadKW",
+    label: "Пиковая нагрузка, кВт",
+    shortLabel: "Пиковая нагрузка",
+    axisLabel: "Пиковая нагрузка, кВт",
+    emptyStateMessage: "Недостаточно данных для отображения пиковой нагрузки.",
+    tooltipSeriesKey: "scenarioSeries.peakLoadKW",
+    decimals: 2,
+    unit: "кВт",
+  },
+  {
+    id: "discomfortHours",
+    label: "Часы дискомфорта, ч",
+    shortLabel: "Часы дискомфорта",
+    axisLabel: "Часы дискомфорта, ч",
+    emptyStateMessage: "Недостаточно данных для отображения часов дискомфорта.",
+    tooltipSeriesKey: "scenarioSeries.discomfortHours",
+    decimals: 1,
+    unit: "ч",
+  },
+  {
+    id: "minimumIndoorTemperatureC",
+    label: "Минимальная температура в помещениях, °C",
+    shortLabel: "Минимальная температура",
+    axisLabel: "Минимальная температура, °C",
+    emptyStateMessage: "Недостаточно данных для отображения минимальной температуры в помещениях.",
+    tooltipSeriesKey: "scenarioSeries.minimumIndoorTemperatureC",
+    decimals: 1,
+    unit: "°C",
+  },
+  {
+    id: "roomUnderheatRisk",
+    label: "Риск недогрева по помещениям, %",
+    shortLabel: "Риск недогрева",
+    axisLabel: "Риск недогрева, %",
+    emptyStateMessage: "Недостаточно данных для расчета риска недогрева по помещениям.",
+    tooltipSeriesKey: "scenarioSeries.roomUnderheatRisk",
+    decimals: 1,
+    unit: "%",
+  },
+] as const;
 
 interface MonteCarloCollected {
   samples: ThermalUncertaintySample[];
@@ -175,6 +258,7 @@ interface MonteCarloCollected {
   totalEnergiesKWh: number[];
   discomfortHours: number[];
   minimumIndoorTemperaturesC: number[];
+  roomUnderheatRisk: number[];
   roomRiskAccumulator: Record<string, CollectedRoomRiskAccumulator>;
   underheatingBelow20Count: number;
   exceedCount: number;
@@ -208,6 +292,7 @@ function collectThermalMonteCarloSamplesSync(
   const totalEnergiesKWh: number[] = [];
   const discomfortHours: number[] = [];
   const minimumIndoorTemperaturesC: number[] = [];
+  const roomUnderheatRisk: number[] = [];
   const roomRiskAccumulator: Record<string, CollectedRoomRiskAccumulator> = {};
   const durationDays = options.baseOptions.duration === "7d" ? 7 : 1;
   let exceedCount = 0;
@@ -223,9 +308,10 @@ function collectThermalMonteCarloSamplesSync(
     peakLoadsKW.push(metrics.peakLoadKW);
     totalEnergiesKWh.push(metrics.totalEnergyKWh);
     discomfortHours.push(metrics.discomfortHours);
+    minimumIndoorTemperaturesC.push(metrics.minimumIndoorTemperatureC);
+    roomUnderheatRisk.push(metrics.roomUnderheatRisk);
     if (Number.isFinite(metrics.minimumIndoorTemperatureC)) {
-      minimumIndoorTemperaturesC.push(metrics.minimumIndoorTemperatureC);
-      if (metrics.minimumIndoorTemperatureC < 20) {
+      if (metrics.minimumIndoorTemperatureC < THERMAL_MONTE_CARLO_UNDERHEAT_THRESHOLD_C) {
         underheatingBelow20Count += 1;
       }
     }
@@ -242,6 +328,7 @@ function collectThermalMonteCarloSamplesSync(
     totalEnergiesKWh,
     discomfortHours,
     minimumIndoorTemperaturesC,
+    roomUnderheatRisk,
     roomRiskAccumulator,
     underheatingBelow20Count,
     exceedCount,
@@ -265,6 +352,7 @@ async function collectThermalMonteCarloSamplesAsync(
   const totalEnergiesKWh: number[] = [];
   const discomfortHours: number[] = [];
   const minimumIndoorTemperaturesC: number[] = [];
+  const roomUnderheatRisk: number[] = [];
   const roomRiskAccumulator: Record<string, CollectedRoomRiskAccumulator> = {};
   const durationDays = options.baseOptions.duration === "7d" ? 7 : 1;
   let exceedCount = 0;
@@ -280,9 +368,10 @@ async function collectThermalMonteCarloSamplesAsync(
     peakLoadsKW.push(metrics.peakLoadKW);
     totalEnergiesKWh.push(metrics.totalEnergyKWh);
     discomfortHours.push(metrics.discomfortHours);
+    minimumIndoorTemperaturesC.push(metrics.minimumIndoorTemperatureC);
+    roomUnderheatRisk.push(metrics.roomUnderheatRisk);
     if (Number.isFinite(metrics.minimumIndoorTemperatureC)) {
-      minimumIndoorTemperaturesC.push(metrics.minimumIndoorTemperatureC);
-      if (metrics.minimumIndoorTemperatureC < 20) {
+      if (metrics.minimumIndoorTemperatureC < THERMAL_MONTE_CARLO_UNDERHEAT_THRESHOLD_C) {
         underheatingBelow20Count += 1;
       }
     }
@@ -302,6 +391,7 @@ async function collectThermalMonteCarloSamplesAsync(
     totalEnergiesKWh,
     discomfortHours,
     minimumIndoorTemperaturesC,
+    roomUnderheatRisk,
     roomRiskAccumulator,
     underheatingBelow20Count,
     exceedCount,
@@ -333,10 +423,17 @@ function finalizeThermalMonteCarloResult(
       totalEnergyKWh: [...collected.totalEnergiesKWh],
       discomfortHours: [...collected.discomfortHours],
       minimumIndoorTemperatureC: [...collected.minimumIndoorTemperaturesC],
+      roomUnderheatRisk: [...collected.roomUnderheatRisk],
     },
     underheatingBelow20CProbability:
       options.runs > 0 ? collected.underheatingBelow20Count / options.runs : undefined,
-    sensitivity: buildSensitivityFactors(collected.samples, collected.totalEnergiesKWh, options.baseOptions),
+    sensitivity: buildSensitivityFactors(
+      collected.samples,
+      collected.totalEnergiesKWh,
+      options.baseOptions,
+      "totalEnergyKWh"
+    ),
+    sensitivityMethodLabel: THERMAL_MONTE_CARLO_SENSITIVITY_METHOD_LABEL_RU,
     roomRiskSummary: buildRoomRiskSummary(collected.roomRiskAccumulator),
     exceedanceProbability:
       options.heatingThresholdKW === undefined ? undefined : collected.exceedCount / options.runs,
@@ -388,12 +485,18 @@ function extractMetrics(result: ThermalSimulationResult, durationDays: number) {
   const minimumIndoorTemperatureC = roomMetrics.length
     ? Math.min(...roomMetrics.map((metric) => metric.minimumTemperatureC))
     : Number.NaN;
+  const roomUnderheatRisk = roomMetrics.length
+    ? (roomMetrics.filter((metric) => metric.minimumTemperatureC < THERMAL_MONTE_CARLO_UNDERHEAT_THRESHOLD_C).length /
+        roomMetrics.length) *
+      100
+    : Number.NaN;
   return {
     peakLoadKW: result.summary.peakLoadKW,
     totalEnergyKWh: result.summary.totalEnergyKWh,
     dailyEnergyKWh: result.summary.totalEnergyKWh / durationDays,
     discomfortHours: result.summary.discomfortHours,
     minimumIndoorTemperatureC,
+    roomUnderheatRisk,
     roomMetrics,
   };
 }
@@ -457,6 +560,10 @@ function summarizeDistribution(values: number[], bins: number, varLevel: number)
       p50: 0,
       p90: 0,
       p95: 0,
+      spreadP10P90: 0,
+      relativeSpreadPercent: null,
+      coefficientOfVariationPercent: null,
+      confidenceIntervalMean95: null,
       valueAtRisk: 0,
       conditionalValueAtRisk: 0,
       histogram: [],
@@ -473,6 +580,10 @@ function summarizeDistribution(values: number[], bins: number, varLevel: number)
   const p50 = quantile(sorted, 0.5);
   const p90 = quantile(sorted, 0.9);
   const p95 = quantile(sorted, 0.95);
+  const spreadP10P90 = p90 - p10;
+  const relativeSpreadPercent = Math.abs(p50) > 1e-9 ? (spreadP10P90 / p50) * 100 : null;
+  const cvPercent = coefficientOfVariationPercent(mean, stdDev);
+  const confidenceIntervalMean95 = meanConfidenceInterval(mean, stdDev, values.length, 1.96);
   const valueAtRisk = quantile(sorted, varLevel);
   const tailValues = sorted.filter((value) => value >= valueAtRisk);
   const conditionalValueAtRisk = tailValues.length
@@ -486,6 +597,10 @@ function summarizeDistribution(values: number[], bins: number, varLevel: number)
     p50,
     p90,
     p95,
+    spreadP10P90,
+    relativeSpreadPercent,
+    coefficientOfVariationPercent: cvPercent,
+    confidenceIntervalMean95,
     valueAtRisk,
     conditionalValueAtRisk,
     histogram,
@@ -505,7 +620,7 @@ function updateRoomRiskAccumulator(
     };
     entry.meanTemperaturesC.push(room.meanTemperatureC);
     entry.minimumTemperaturesC.push(room.minimumTemperatureC);
-    if (room.minimumTemperatureC < 20) {
+    if (room.minimumTemperatureC < THERMAL_MONTE_CARLO_UNDERHEAT_THRESHOLD_C) {
       entry.underheatingCount += 1;
     }
     accumulator[room.roomId] = entry;
@@ -536,14 +651,45 @@ function buildRoomRiskSummary(
   return rows.length ? rows : undefined;
 }
 
-function buildSensitivityFactors(
+export function getThermalMonteCarloTargetMetricDefinition(
+  targetMetric: ThermalMonteCarloTargetMetricId
+): ThermalMonteCarloTargetMetricDefinition {
+  return (
+    THERMAL_MONTE_CARLO_TARGET_METRICS.find((definition) => definition.id === targetMetric) ??
+    THERMAL_MONTE_CARLO_TARGET_METRICS[0]
+  );
+}
+
+export function getThermalMonteCarloTargetMetricValues(
+  result: ThermalMonteCarloResult,
+  targetMetric: ThermalMonteCarloTargetMetricId
+): number[] {
+  switch (targetMetric) {
+    case "peakLoadKW":
+      return result.scenarioSeries.peakLoadKW;
+    case "discomfortHours":
+      return result.scenarioSeries.discomfortHours;
+    case "minimumIndoorTemperatureC":
+      return result.scenarioSeries.minimumIndoorTemperatureC;
+    case "roomUnderheatRisk":
+      return result.scenarioSeries.roomUnderheatRisk;
+    case "totalEnergyKWh":
+    default:
+      return result.scenarioSeries.totalEnergyKWh;
+  }
+}
+
+export function buildSensitivityFactors(
   samples: ThermalUncertaintySample[],
-  totalEnergiesKWh: number[],
-  baseOptions: ThermalSimulationOptions
+  metricValues: number[],
+  baseOptions: ThermalSimulationOptions,
+  targetMetric: ThermalMonteCarloTargetMetricId
 ): ThermalMonteCarloSensitivityFactor[] {
-  if (!samples.length || samples.length !== totalEnergiesKWh.length) {
+  if (!samples.length || samples.length !== metricValues.length) {
     return [];
   }
+  const normalizedMetricValues =
+    targetMetric === "roomUnderheatRisk" ? metricValues.map((value) => value / 100) : metricValues;
   const occupancy = baseOptions.occupancy ?? {
     dayFraction: 1,
     nightFraction: 0.2,
@@ -560,14 +706,14 @@ function buildSensitivityFactors(
       score: Math.abs(
         pearsonCorrelation(
           samples.map((sample) => Math.max(0.02, infiltrationBase * sample.infiltrationMultiplier)),
-          totalEnergiesKWh
+          normalizedMetricValues
         )
       ),
     },
     {
       id: "outdoorTemperatureShift",
       label: "Наружная температура",
-      score: Math.abs(pearsonCorrelation(samples.map((sample) => sample.outdoorBiasC), totalEnergiesKWh)),
+      score: Math.abs(pearsonCorrelation(samples.map((sample) => sample.outdoorBiasC), normalizedMetricValues)),
     },
     {
       id: "daySetpoint",
@@ -575,7 +721,7 @@ function buildSensitivityFactors(
       score: Math.abs(
         pearsonCorrelation(
           samples.map((sample) => baseOptions.setpoints.day + sample.setpointOffsetC),
-          totalEnergiesKWh
+          normalizedMetricValues
         )
       ),
     },
@@ -585,7 +731,7 @@ function buildSensitivityFactors(
       score: Math.abs(
         pearsonCorrelation(
           samples.map((sample) => baseOptions.setpoints.night + sample.setpointOffsetC),
-          totalEnergiesKWh
+          normalizedMetricValues
         )
       ),
     },
@@ -595,26 +741,30 @@ function buildSensitivityFactors(
       score: Math.abs(
         pearsonCorrelation(
           samples.map((sample) => averageInternalGains * sample.internalGainMultiplier),
-          totalEnergiesKWh
+          normalizedMetricValues
         )
       ),
     },
     {
       id: "occupancy",
-      label: "Занятость",
+      label: "Коэффициент занятости",
       score: Math.abs(
         pearsonCorrelation(
           samples.map((sample) => clamp(averageOccupancy * sample.occupancyMultiplier, 0, 1)),
-          totalEnergiesKWh
+          normalizedMetricValues
         )
       ),
     },
   ];
-  const totalScore = rows.reduce((sum, row) => sum + row.score, 0);
-  return rows.map((row) => ({
+  const validRows = rows.filter((row) => Number.isFinite(row.score) && row.score > 0);
+  const totalScore = validRows.reduce((sum, row) => sum + row.score, 0);
+  if (!totalScore) {
+    return [];
+  }
+  return validRows.map((row) => ({
     id: row.id,
     label: row.label,
-    valuePercent: totalScore > 0 ? (row.score / totalScore) * 100 : 0,
+    valuePercent: (row.score / totalScore) * 100,
   }));
 }
 
@@ -689,15 +839,23 @@ function pearsonCorrelation(xs: number[], ys: number[]): number {
   if (xs.length !== ys.length || xs.length <= 1) {
     return 0;
   }
-  const xMean = average(xs);
-  const yMean = average(ys);
+  const pairs = xs
+    .map((x, index) => ({ x, y: ys[index] }))
+    .filter((pair) => Number.isFinite(pair.x) && Number.isFinite(pair.y));
+  if (pairs.length <= 1) {
+    return 0;
+  }
+  const xValues = pairs.map((pair) => pair.x);
+  const yValues = pairs.map((pair) => pair.y);
+  const xMean = average(xValues);
+  const yMean = average(yValues);
   let numerator = 0;
   let xVariance = 0;
   let yVariance = 0;
 
-  for (let index = 0; index < xs.length; index++) {
-    const dx = xs[index] - xMean;
-    const dy = ys[index] - yMean;
+  for (let index = 0; index < pairs.length; index++) {
+    const dx = xValues[index] - xMean;
+    const dy = yValues[index] - yMean;
     numerator += dx * dy;
     xVariance += dx * dx;
     yVariance += dy * dy;

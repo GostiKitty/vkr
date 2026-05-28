@@ -9,6 +9,7 @@ const initialState = {
     simulationFrames: [],
     timeIndex: 0,
     lastThermalResult: null,
+    lastThermalResultBinding: null,
     simulationDataSource: null,
 };
 export const useTwinStore = create((set, get) => ({
@@ -42,10 +43,11 @@ export const useTwinStore = create((set, get) => ({
         simulationFrames: frames,
         timeIndex: frames.length ? Math.min(get().timeIndex, frames.length - 1) : 0,
     }),
-    setSimulationResult: ({ frames, graph, result, source }) => set({
+    setSimulationResult: ({ frames, graph, result, source, binding }) => set({
         simulationFrames: frames,
         thermalGraph: graph,
         lastThermalResult: result ?? null,
+        lastThermalResultBinding: result ? binding ?? null : null,
         simulationDataSource: source,
         timeIndex: frames.length ? 0 : 0,
     }),
@@ -62,6 +64,7 @@ export const useTwinStore = create((set, get) => ({
         simulationFrames: [],
         timeIndex: 0,
         lastThermalResult: null,
+        lastThermalResultBinding: null,
         simulationDataSource: null,
     }),
     reset: () => set(initialState),

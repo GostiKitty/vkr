@@ -1,3 +1,7 @@
+/**
+ * Legacy minimal SP50 fixture.
+ * Kept for tests and methodical examples; user-facing demo flows should use the canonical demo project instead.
+ */
 import { createEmptyBuildingModel } from "../entities/geometry/types";
 import { runSP50Compliance } from "../core/thermal/sp50/index";
 const DEMO_WALL_LAYERS = [

@@ -212,6 +212,30 @@ test("results tab exposes engineering loss breakdown only from available diagnos
   }
 });
 
+test("building performance section exposes source data completeness block", () => {
+  const source = readFileSync(resolve(process.cwd(), "src/features/reports/BuildingPerformanceResultsSection.tsx"), "utf8");
+  const requiredTokens = [
+    "Полнота исходных данных",
+    "Геометрия",
+    "Материалы",
+    "Климат",
+    "Эксплуатация",
+    "Воздухообмен",
+    "Влажность",
+    "Инженерные сети",
+    "Экономика",
+    "Экология",
+    "Валидация",
+    "dataRequirementsAudit",
+    "Интерфейс не рассчитывает формулы заново",
+  ];
+  for (const token of requiredTokens) {
+    if (!source.includes(token)) {
+      throw new Error(`BuildingPerformanceResultsSection should expose completeness token: ${token}`);
+    }
+  }
+});
+
 test("results and legacy report UI clearly mark separate calculation contours", () => {
   const resultsPanel = readFileSync(resolve(process.cwd(), "src/features/reports/ResultsPanel.tsx"), "utf8");
   const reportGenerator = readFileSync(resolve(process.cwd(), "src/features/reports/ReportGenerator.tsx"), "utf8");
@@ -332,5 +356,18 @@ test("thermal results panel clips horizontal overflow and wraps wide tables loca
   }
   if (!source.includes('className="mt-3 overflow-x-auto"')) {
     throw new Error("ThermalSimulationPanel should wrap wide tabular blocks in a local horizontal scroller.");
+  }
+});
+
+test("data workspace uses Russian source badges and exposes model linkage for constructions", () => {
+  const source = readFileSync(resolve(process.cwd(), "src/features/scenarios/ScenariosWorkspacePage.tsx"), "utf8");
+  const requiredTokens = ["из СП 131", "типовое значение", "Показать на модели", "межэтажное перекрытие"];
+  for (const token of requiredTokens) {
+    if (!source.includes(token)) {
+      throw new Error(`ScenariosWorkspacePage should expose token: ${token}`);
+    }
+  }
+  if (source.includes("SP 131 lookup") || source.includes("fallback/default")) {
+    throw new Error("ScenariosWorkspacePage should not expose raw fallback/source-debug labels.");
   }
 });

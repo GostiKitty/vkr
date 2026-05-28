@@ -6,7 +6,7 @@ import type { LossShareBreakdown } from "../../../core/thermal/thermalSimulation
 import type { LossCategoryKey } from "../../../core/thermal/thermalResultsChartPayload";
 import { LossCategoryLegend } from "./LossCategoryLegend";
 import { ThermalChartTooltip } from "./ThermalChartTooltip";
-import { CHART_AXIS_TICK, formatChartPercent, LOSS_CATEGORY_COLORS, LOSS_CATEGORY_LABELS } from "./thermalChartTheme";
+import { formatChartPercent, LOSS_CATEGORY_COLORS, LOSS_CATEGORY_LABELS } from "./thermalChartTheme";
 
 const ORDER: LossCategoryKey[] = ["opaque", "window", "door", "infiltration", "ventilation"];
 
@@ -24,7 +24,7 @@ function LossShareTooltip({ active, payload }: TooltipProps<ValueType, NameType>
       active
       payload={payload}
       title={LOSS_CATEGORY_LABELS[row.key]}
-      rows={[{ label: "Доля при пиковой нагрузке", value: formatChartPercent(row.percent) }]}
+      rows={[{ label: "Доля от всех теплопотерь в пиковом срезе", value: formatChartPercent(row.percent) }]}
     />
   );
 }
@@ -56,8 +56,8 @@ export function LossShareChart({ share }: LossShareChartProps) {
 
   return (
     <div className="space-y-3">
-      <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">
-        100% структура потерь (пиковый срез)
+      <p className="text-sm font-semibold text-[color:var(--text-base)]">
+        100% всех теплопотерь (пиковый срез)
       </p>
       <LossCategoryLegend />
       <div className="h-14 w-full min-w-0 rounded-xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)] p-2">

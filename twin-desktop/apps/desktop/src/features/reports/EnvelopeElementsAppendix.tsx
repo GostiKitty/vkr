@@ -1,4 +1,3 @@
-import React from "react";
 import type { ThermalProtectionAppendixEnvelopeRow } from "./buildThermalProtectionReportData";
 import ProjectDocumentSection from "./ProjectDocumentSection";
 import ProjectDocumentTable from "./ProjectDocumentTable";

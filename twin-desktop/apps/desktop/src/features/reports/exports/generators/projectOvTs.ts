@@ -1,12 +1,9 @@
-/**
- * HTML-генератор для «Раздел 5. ОВ/ТС».
- */
-
 import {
   escapeHtml,
   renderAssumptionsBlock,
   renderBibliography,
   renderDataTable,
+  renderDocumentStatusBlock,
   renderGostStamp,
   renderGostTitlePage,
   renderSignatureBlock,
@@ -17,28 +14,30 @@ import {
 import { REPORT_EXPORT_TEMPLATE_MARKER, REPORT_EXPORT_TITLE } from "../types";
 import type { ProjectOvTsData } from "../data/buildProjectOvTsData";
 
-const DOCUMENT_LABEL = "Расчётно-пояснительные материалы. Раздел 5 ОВ/ТС";
+const DOCUMENT_LABEL = "Раздел 5. Отопление, вентиляция и тепловые сети";
 
 export function generateProjectOvTsHtml(
   data: ProjectOvTsData,
   options: { appliedAssumptions?: import("../defaults/demoHouseDesignDefaults").AssumptionEntry[] } = {}
 ): string {
   const titlePage = renderGostTitlePage(data.meta, DOCUMENT_LABEL, data.subsectionTitle);
+  const showRcDisclaimer = data.preflight.generationMode !== "final";
   const toc = [
     { id: "ovts-registry", label: "Ведомость исходных данных" },
-    { id: "ovts-1", label: "1 Общие положения" },
-    { id: "ovts-2", label: "2 Основания для выполнения расчёта" },
-    { id: "ovts-3", label: "3 Исходные климатические условия" },
-    { id: "ovts-4", label: "4 Сведения об объекте и цифровой модели" },
-    { id: "ovts-5", label: "5 Сведения о системах отопления и вентиляции" },
-    { id: "ovts-6", label: "6 Расчётные тепловые нагрузки" },
-    { id: "ovts-7", label: "7 Теплотехнические характеристики ограждающих конструкций" },
-    { id: "ovts-8", label: "8 Энергетические показатели" },
-    { id: "ovts-9", label: "9 Выводы и рекомендации" },
-    { id: "ovts-10", label: "10 Перечень данных, требующих уточнения" },
-    { id: "ovts-app-a", label: "Приложение А. Ведомость ограждающих конструкций" },
-    { id: "ovts-app-b", label: "Приложение Б. Подробные расчётные таблицы" },
-    { id: "ovts-app-v", label: "Приложение В. Справочная динамическая RC-оценка" },
+    { id: "ovts-status", label: "Статус документа" },
+    { id: "ovts-1", label: "1 Общие сведения" },
+    { id: "ovts-2", label: "2 Основание для проектирования" },
+    { id: "ovts-3", label: "3 Нормативная база" },
+    { id: "ovts-4", label: "4 Исходные климатические данные" },
+    { id: "ovts-5", label: "5 Характеристика объекта" },
+    { id: "ovts-6", label: "6 Проектные решения по отоплению" },
+    { id: "ovts-7", label: "7 Проектные решения по вентиляции" },
+    { id: "ovts-8", label: "8 Расчётные тепловые нагрузки" },
+    { id: "ovts-9", label: "9 Теплотехнические характеристики оболочки" },
+    { id: "ovts-10", label: "10 Энергетические показатели" },
+    { id: "ovts-11", label: "11 Мероприятия по энергоэффективности" },
+    { id: "ovts-12", label: "12 Вывод" },
+    { id: "ovts-13", label: "13 Приложения" },
   ];
 
   const basisRows = [
@@ -63,14 +62,14 @@ export function generateProjectOvTsHtml(
       value: data.expertise.fieldMap.calculationScenario.value,
       note: data.expertise.fieldMap.calculationScenario.sourceLabel,
     },
-    {
-      key: "modelNote",
-      label: "Примечание к цифровой модели",
-      unit: "",
-      value: data.expertise.fieldMap.modelNote.value,
-      note: data.expertise.fieldMap.modelNote.sourceLabel,
-    },
-  ].filter((row) => data.expertise.showIncompleteFields || row.value !== "не заполнено пользователем");
+  ];
+
+  const heatingRows = data.heatingVentSummaryRows.filter((row) =>
+    ["daySetpoint", "nightSetpoint", "mechVent"].includes(row.key)
+  );
+  const ventilationRows = data.heatingVentSummaryRows.filter((row) =>
+    ["ventilationACH", "infiltrationACH", "heatRecovery", "mechVent"].includes(row.key)
+  );
 
   const body = `
 ${titlePage}
@@ -80,39 +79,42 @@ ${renderToc(toc)}
   <p class="rx-section-meta"><strong>Подраздел:</strong> ${escapeHtml(data.subsectionTitle)}</p>
 </section>
 ${renderInputRegisterSection("ovts-registry", "Ведомость исходных данных", data.expertise.inputRegisterRows, data.expertise.showIncompleteFields)}
-${renderTextSection("ovts-1", "1 Общие положения", data.generalProvisions)}
-${renderMetricSection("ovts-2", "2 Основания для выполнения расчёта", basisRows)}
-${renderBulletSection("ovts-software", "Сведения о программном расчёте", data.expertise.softwareInfoLines)}
-${renderMetricSection("ovts-3", "3 Исходные климатические условия", data.climateRows)}
-${renderMetricSection("ovts-4", "4 Сведения об объекте и цифровой модели", data.objectSummaryRows)}
-${renderMetricSection("ovts-5", "5 Сведения о системах отопления и вентиляции", data.heatingVentSummaryRows)}
-${renderMetricSection("ovts-6", "6 Расчётные тепловые нагрузки", data.thermalLoadRows)}
-${renderEnvelopeGroups("ovts-7", data.envelopeGroupRows)}
-${renderMetricSection("ovts-8", "8 Энергетические показатели", data.energyRows)}
-<section id="ovts-9">
-  <h3 class="rx-section-title">9 Выводы и рекомендации</h3>
+<section id="ovts-status">
+  ${renderDocumentStatusBlock(data.preflight, { includeIssues: true, includeWarnings: true })}
+</section>
+${renderTextSection("ovts-1", "1 Общие сведения", data.generalProvisions)}
+${renderMetricSection("ovts-2", "2 Основание для проектирования", basisRows)}
+${renderNormativeBaseSection("ovts-3")}
+${renderMetricSection("ovts-4", "4 Исходные климатические данные", data.climateRows)}
+${renderMetricSection("ovts-5", "5 Характеристика объекта", data.objectSummaryRows)}
+${renderHeatingSection("ovts-6", heatingRows)}
+${renderMetricSection("ovts-7", "7 Проектные решения по вентиляции", ventilationRows)}
+${renderMetricSection("ovts-8", "8 Расчётные тепловые нагрузки", data.thermalLoadRows)}
+${renderEnvelopeGroups("ovts-9", data.envelopeGroupRows)}
+${renderMetricSection("ovts-10", "10 Энергетические показатели", data.energyRows)}
+${renderEfficiencyMeasuresSection("ovts-11")}
+<section id="ovts-12">
+  <h3 class="rx-section-title">12 Вывод</h3>
   ${data.conclusions.map((line) => `<p>${escapeHtml(line)}</p>`).join("")}
-  <p class="rx-note">${escapeHtml(REPORT_EXPORT_RC_DISCLAIMER)}</p>
+  ${showRcDisclaimer ? `<p class="rx-note">${escapeHtml(REPORT_EXPORT_RC_DISCLAIMER)}</p>` : ""}
 </section>
-<section id="ovts-10">
-  <h3 class="rx-section-title">10 Перечень данных, требующих уточнения</h3>
-  ${
-    data.missingData.length
-      ? `<ul>${data.missingData.map((line) => `<li>${escapeHtml(line)}</li>`).join("")}</ul>`
-      : "<p>Критических пробелов в исходных данных не выявлено.</p>"
-  }
+<section id="ovts-13">
+  <h3 class="rx-section-title">13 Приложения</h3>
+  <p>В составе настоящего документа приведены приложения с перечнем ограждающих конструкций, подробными расчётными таблицами и справочной динамической RC-оценкой.</p>
 </section>
+${renderClarificationSection(data)}
+${renderBulletSection("ovts-software", "Сведения о программном расчёте", data.expertise.softwareInfoLines)}
 ${renderBulletSection("ovts-limitations", "Ограничения применения расчёта", data.expertise.limitations)}
 ${renderPackageSection("ovts-package", "Состав сформированного комплекта", data.expertise.packageRows)}
 ${renderEnvelopeAppendix(data.appendixEnvelopeRows)}
 ${renderDetailedAppendix(data.appendixDetailedRows)}
-${renderRcAppendix(data.rcDynamicRows, data.rcDynamicAvailable)}
+${renderRcAppendix(data.rcDynamicRows, data.rcDynamicAvailable, showRcDisclaimer)}
 ${renderAssumptionsBlock(options.appliedAssumptions, { id: "ovts-assumptions" })}
 ${renderBibliography([
-  { id: "1", label: "СП 50.13330.2024. Тепловая защита зданий." },
-  { id: "2", label: "СП 60.13330.2020. Отопление, вентиляция и кондиционирование воздуха." },
-  { id: "3", label: "СП 131.13330.2020. Строительная климатология." },
-  { id: "4", label: "Постановление Правительства РФ № 87 от 16.02.2008." },
+  { id: "1", label: "Постановление Правительства РФ № 87 от 16.02.2008." },
+  { id: "2", label: "Градостроительный кодекс Российской Федерации, статья 49." },
+  { id: "3", label: "СП 50.13330.2024. Тепловая защита зданий." },
+  { id: "4", label: "СП 60.13330. Отопление, вентиляция и кондиционирование воздуха." },
   { id: "5", label: "ГОСТ Р 21.101. Система проектной документации для строительства." },
 ])}
 ${renderSignatureBlock(data.meta)}
@@ -153,6 +155,55 @@ function renderMetricSection(
   return `
 <section id="${escapeHtml(id)}">
   <h3 class="rx-section-title">${escapeHtml(title)}</h3>
+  ${renderDataTable(
+    null,
+    [
+      { label: "Показатель", width: "48%" },
+      { label: "Ед. изм.", width: "12%", align: "center" },
+      { label: "Значение", width: "22%", align: "right" },
+      { label: "Примечание", width: "18%" },
+    ],
+    rows.map((row) => ({
+      cells: [row.label, row.unit || "—", row.value, row.note || "—"],
+    }))
+  )}
+</section>`.trim();
+}
+
+function renderNormativeBaseSection(id: string): string {
+  return `
+<section id="${escapeHtml(id)}">
+  <h3 class="rx-section-title">3 Нормативная база</h3>
+  ${renderDataTable(
+    null,
+    [
+      { label: "№", width: "8%", align: "center" },
+      { label: "Нормативный документ", width: "56%" },
+      { label: "Применение в документе", width: "36%" },
+    ],
+    [
+      { cells: ["1", "Постановление Правительства РФ № 87", "Состав текстовой части проектной документации"] },
+      { cells: ["2", "Градостроительный кодекс РФ, статья 49", "Подготовка материалов для государственной экспертизы"] },
+      { cells: ["3", "СП 50.13330.2024", "Теплотехнический расчёт и проверка оболочки"] },
+      { cells: ["4", "СП 60.13330", "Проектные решения по отоплению и вентиляции"] },
+      { cells: ["5", "ГОСТ / СПДС", "Оформление текстовой части, приложений и подписных листов"] },
+    ]
+  )}
+</section>`.trim();
+}
+
+function renderHeatingSection(
+  id: string,
+  rows: Array<{ key: string; label: string; unit: string; value: string; note?: string }>
+): string {
+  const intro = [
+    "Проектные решения по отоплению приняты на основании расчётных тепловых нагрузок, параметров тепловой оболочки и расчётных температурных условий.",
+    "Температурные уставки и режим эксплуатации учитываются в составе единого набора проектных метрик.",
+  ];
+  return `
+<section id="${escapeHtml(id)}">
+  <h3 class="rx-section-title">6 Проектные решения по отоплению</h3>
+  ${intro.map((line) => `<p>${escapeHtml(line)}</p>`).join("")}
   ${renderDataTable(
     null,
     [
@@ -217,7 +268,7 @@ function renderPackageSection(
 function renderEnvelopeGroups(id: string, rows: ProjectOvTsData["envelopeGroupRows"]): string {
   return `
 <section id="${escapeHtml(id)}">
-  <h3 class="rx-section-title">7 Теплотехнические характеристики ограждающих конструкций</h3>
+  <h3 class="rx-section-title">9 Теплотехнические характеристики оболочки</h3>
   ${renderDataTable(
     "Сводная таблица по типам конструкций",
     [
@@ -245,6 +296,30 @@ function renderEnvelopeGroups(id: string, rows: ProjectOvTsData["envelopeGroupRo
         "Полный перечень элементов наружной оболочки приведён в приложении А. В основной части документа показаны сводные группы конструкций.",
     }
   )}
+</section>`.trim();
+}
+
+function renderEfficiencyMeasuresSection(id: string): string {
+  return `
+<section id="${escapeHtml(id)}">
+  <h3 class="rx-section-title">11 Мероприятия по энергоэффективности</h3>
+  <ul>
+    <li>Поддержание требуемых сопротивлений теплопередаче ограждающих конструкций.</li>
+    <li>Назначение проектных параметров воздухообмена и инфильтрации без placeholder-допущений в финальной версии.</li>
+    <li>Контроль согласованности расчётных нагрузок, показателей kоб и qот во всех документах комплекта.</li>
+  </ul>
+</section>`.trim();
+}
+
+function renderClarificationSection(data: ProjectOvTsData): string {
+  return `
+<section id="ovts-clarifications">
+  <h3 class="rx-section-title">Перечень данных, требующих уточнения</h3>
+  ${
+    data.missingData.length
+      ? `<ul>${data.missingData.map((line) => `<li>${escapeHtml(line)}</li>`).join("")}</ul>`
+      : "<p>Критических пробелов в исходных данных не выявлено.</p>"
+  }
 </section>`.trim();
 }
 
@@ -298,8 +373,14 @@ function renderDetailedAppendix(rows: ProjectOvTsData["appendixDetailedRows"]): 
 </section>`.trim();
 }
 
-function renderRcAppendix(rows: ProjectOvTsData["rcDynamicRows"], available: boolean): string {
-  const note = `<p class="rx-note">${escapeHtml(REPORT_EXPORT_RC_DISCLAIMER)}</p>`;
+function renderRcAppendix(
+  rows: ProjectOvTsData["rcDynamicRows"],
+  available: boolean,
+  showRcDisclaimer: boolean
+): string {
+  const note = showRcDisclaimer
+    ? `<p class="rx-note">${escapeHtml(REPORT_EXPORT_RC_DISCLAIMER)}</p>`
+    : "";
   if (!available) {
     return `
 <section id="ovts-app-v">

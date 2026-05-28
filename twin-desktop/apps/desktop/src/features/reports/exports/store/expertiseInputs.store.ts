@@ -236,7 +236,7 @@ export const EXPERTISE_INPUT_SECTIONS: ExpertiseInputSectionDefinition[] = [
   },
   {
     id: "operation",
-    title: "Д. Эксплуатационный паспорт",
+    title: "Д. Паспорт проектных характеристик",
     fields: [
       { key: "operationOrg", label: "Эксплуатирующая организация", kind: "text" },
       { key: "journalName", label: "Журнал эксплуатации", kind: "text" },
@@ -248,16 +248,16 @@ export const EXPERTISE_INPUT_SECTIONS: ExpertiseInputSectionDefinition[] = [
   },
   {
     id: "mode",
-    title: "Е. Экспертный режим вывода",
+    title: "Е. Режим выпуска",
     fields: [
       {
         key: "exportMode",
         label: "Режим комплекта",
         kind: "select",
         options: [
-          { value: "strict-expertise", label: "Строгий комплект для экспертизы" },
-          { value: "demo", label: "Демонстрационный комплект" },
-          { value: "vkr-brief", label: "Краткий комплект для ВКР" },
+          { value: "strict-expertise", label: "Финальный / expert" },
+          { value: "demo", label: "Черновой / demo" },
+          { value: "vkr-brief", label: "Для проверки / ВКР" },
         ],
       },
       { key: "showAssumptionsBlock", label: "Показывать блок проектных допущений", kind: "toggle" },

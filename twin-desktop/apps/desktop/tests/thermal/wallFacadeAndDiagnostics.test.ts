@@ -171,6 +171,92 @@ test("runThermalSimulation exposes diagnostics with building loss shares", () =>
   expectApproximatelyEqual(sumPct, 100, 0.5, "доли потерь должны суммироваться около 100%");
 });
 
+test("heat recovery reduces mechanical ventilation without changing infiltration", () => {
+  const model: BuildingModel = {
+    levels: [{ id: "l1", name: "1", elevation_m: 0, height_m: 3 }],
+    rooms: [
+      {
+        id: "r1",
+        name: "Комната",
+        levelId: "l1",
+        polygon: [
+          { x: 0, y: 0 },
+          { x: 5, y: 0 },
+          { x: 5, y: 4 },
+          { x: 0, y: 4 },
+        ],
+      },
+    ],
+    walls: [
+      { id: "w1", levelId: "l1", a: { x: 0, y: 0 }, b: { x: 5, y: 0 }, height_m: 3, thickness_m: 0.3, layers: [] },
+      { id: "w2", levelId: "l1", a: { x: 5, y: 0 }, b: { x: 5, y: 4 }, height_m: 3, thickness_m: 0.3, layers: [] },
+      { id: "w3", levelId: "l1", a: { x: 5, y: 4 }, b: { x: 0, y: 4 }, height_m: 3, thickness_m: 0.3, layers: [] },
+      { id: "w4", levelId: "l1", a: { x: 0, y: 4 }, b: { x: 0, y: 0 }, height_m: 3, thickness_m: 0.3, layers: [] },
+    ],
+    roofs: [],
+    floorSlabs: [],
+    doors: [],
+    windows: [],
+    pipes: [],
+    ducts: [],
+    equipment: [],
+    sensors: [],
+    scenarios: [],
+    activeScenarioId: null,
+    events: [],
+  };
+
+  const baseOptions = {
+    duration: "24h" as const,
+    timestepMinutes: 60,
+    outdoor: { baseC: -8, amplitudeC: 0, seasonalOffsetC: 0, phaseShiftHours: 0 },
+    setpoints: { day: 21, night: 21, dayStartHour: 7, nightStartHour: 23 },
+    internalGains: { dayGain_W_m2: 0, nightGain_W_m2: 0 },
+    infiltrationACH: 0.35,
+    ventilationACH: 0.4,
+  };
+
+  const withoutRecovery = runThermalSimulation(model, {
+    ...baseOptions,
+    heatRecoveryFactor: 0,
+  });
+  const withRecovery = runThermalSimulation(model, {
+    ...baseOptions,
+    heatRecoveryFactor: 0.5,
+  });
+
+  const withoutDiagnostics = withoutRecovery.diagnostics;
+  const withDiagnostics = withRecovery.diagnostics;
+  if (!withoutDiagnostics || !withDiagnostics) {
+    throw new Error("diagnostics expected");
+  }
+
+  expectApproximatelyEqual(
+    withDiagnostics.building.totalInfiltrationLossW,
+    withoutDiagnostics.building.totalInfiltrationLossW,
+    1e-6,
+    "инфильтрация не должна меняться от рекуперации"
+  );
+
+  const withoutVent = withoutDiagnostics.building.totalMechanicalVentilationLossW;
+  const withVent = withDiagnostics.building.totalMechanicalVentilationLossW;
+  if (!(withVent > 0 && withoutVent > 0)) {
+    throw new Error("ventilation losses should stay positive in both cases");
+  }
+  if (!(withVent < withoutVent * 0.55 && withVent > withoutVent * 0.45)) {
+    throw new Error("heat recovery should reduce mechanical ventilation losses roughly in proportion to efficiency");
+  }
+
+  const withoutDerivedVent = withoutDiagnostics.derived.ventilationHeatLossCoefficient_W_K.value;
+  const withDerivedVent = withDiagnostics.derived.ventilationHeatLossCoefficient_W_K.value;
+  if (withoutDerivedVent == null || withDerivedVent == null) {
+    throw new Error("derived ventilation conductance should be present");
+  }
+  if (!(withDerivedVent < withoutDerivedVent * 0.55 && withDerivedVent > withoutDerivedVent * 0.45)) {
+    throw new Error("derived ventilation coefficient should reflect recovery in the main RC solver");
+  }
+});
+
 test("Monte Carlo VaR >= P50 and CVaR >= VaR for peak load", () => {
   const model: BuildingModel = {
     levels: [{ id: "l1", name: "1", elevation_m: 0, height_m: 3 }],

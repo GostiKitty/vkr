@@ -1,4 +1,3 @@
-import React from "react";
 import { DocumentClause, DocumentSection } from "./DocumentSection";
 import DocumentNotice from "./DocumentNotice";
 

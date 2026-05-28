@@ -1,23 +1,16 @@
-/**
- * Единый вход в систему выгрузки документов.
- *
- *   exportReportDocument(kind)
- *
- * Функция:
- *  - забирает актуальное состояние из хранилищ build/twin/workflow/project;
- *  - формирует общие базовые данные (buildReportBaseData);
- *  - вызывает специализированный builder + генератор;
- *  - открывает HTML в новом окне для просмотра/печати/сохранения PDF;
- *  - НЕ модифицирует BuildingModel, расчётный солвер, 3D и Monte Carlo.
- */
-
 import { useBuildStore } from "../../build/build.store";
 import { useTwinStore } from "../../../entities/twin/twin.store";
 import { useWorkflowStore } from "../../../entities/workflow/workflow.store";
 import { useProjectStore } from "../../../entities/project/project.store";
 import { useWorkspaceStore } from "../../../entities/workspace/workspace.store";
 import { loadReportMeta } from "../../build/reports/reportMetaPersistence";
-import { buildReportBaseData, type ReportBaseData } from "./data/buildReportBaseData";
+import {
+  buildReportBaseData,
+  type ReportBaseData,
+  type ReportGenerationMode,
+  type ReportPreflightIssue,
+  type ReportReleaseStatus,
+} from "./data/buildReportBaseData";
 import { buildProjectOvTsData } from "./data/buildProjectOvTsData";
 import { buildThermalProtectionData } from "./data/buildThermalProtectionData";
 import { buildEnergyPassportData } from "./data/buildEnergyPassportData";
@@ -35,49 +28,348 @@ import {
   REPORT_EXPORT_TITLE,
   type ReportExportKind,
 } from "./types";
+import {
+  escapeHtml,
+  renderDataTable,
+  renderGostStamp,
+  renderGostTitlePage,
+  renderSignatureBlock,
+  wrapHtmlDocument,
+} from "./helpers";
+import { getResultSyncState } from "../../../shared/utils/modelSync";
 
 export interface ExportReportOptions {
-  /** Открыть HTML в новом окне (по умолчанию true в браузере). */
   openInWindow?: boolean;
-  /** Скачать как .html файл (по умолчанию false). */
   download?: boolean;
 }
 
+export type ExportedReportKind = ReportExportKind | "release-blocker";
+
 export interface ExportReportResult {
-  kind: ReportExportKind;
+  kind: ExportedReportKind;
   html: string;
   filename: string;
   title: string;
-  /** Окно, в котором открыли документ, если openInWindow=true. */
   printableWindow: Window | null;
+  isReleaseBlocker: boolean;
 }
 
-/**
- * Чистая функция: по типу и подготовленным данным возвращает HTML-строку.
- * Не имеет побочных эффектов — может использоваться в тестах.
- */
+export interface FinalReleaseDocumentFinding {
+  kind: ReportExportKind;
+  title: string;
+  filename: string;
+  issues: string[];
+}
+
+export interface FinalReleaseAudit {
+  generationMode: ReportGenerationMode;
+  status: ReportReleaseStatus;
+  statusLabel: string;
+  summary: string;
+  readyForFinalRelease: boolean;
+  blockingIssues: ReportPreflightIssue[];
+  warningIssues: ReportPreflightIssue[];
+  documentFindings: FinalReleaseDocumentFinding[];
+  requiresReleaseBlocker: boolean;
+}
+
+interface ResolvedRenderedReport {
+  kind: ExportedReportKind;
+  html: string;
+  filename: string;
+  title: string;
+  isReleaseBlocker: boolean;
+}
+
+const FINAL_RELEASE_CONTENT_RULES = [
+  { label: "Черновик", pattern: /черновик/i },
+  { label: "demo", pattern: /\bdemo\b/i },
+  { label: "Демонстрационный", pattern: /демонстрацион/i },
+  { label: "не заполнено пользователем", pattern: /не заполнено пользователем/i },
+  { label: "не заполнено", pattern: /не заполнено/i },
+  { label: "недостаточно данных", pattern: /недостаточно данных/i },
+  { label: "placeholder", pattern: /placeholder/i },
+  { label: "требует уточнения", pattern: /требует уточнения/i },
+  { label: "не соответствует", pattern: /не соответствует/i },
+  { label: "предварительный", pattern: /предварительн/i },
+  { label: "не заменяет нормативную проверку", pattern: /не заменяет нормативную проверку/i },
+  { label: "проектный демонстрационный сценарий", pattern: /проектный демонстрационный сценарий/i },
+] as const;
+
+export const REPORT_RELEASE_BLOCKER_KIND = "release-blocker" as const;
+export const REPORT_RELEASE_BLOCKER_FILENAME = "00-komplekt-ne-gotov-k-vypusku.html";
+export const REPORT_RELEASE_BLOCKER_TITLE = "Комплект не готов к выпуску";
+
+export const REPORT_EXPORT_BUNDLE_FILENAME: Record<ReportExportKind, string> = {
+  "project-ov-ts": "01-razdel-5-ov-ts.html",
+  "thermal-protection": "02-raschet-teplovoy-zashchity.html",
+  "energy-passport": "03-energeticheskiy-pasport-proekta-zdaniya.html",
+  "operation-technical-passport": "04-pasport-proektnyh-teplotehnicheskih-harakteristik.html",
+  "engineering-summary": "05-inzhenernoe-zaklyuchenie.html",
+};
+
+export const ALL_REPORT_EXPORT_KINDS: ReadonlyArray<ReportExportKind> = [
+  "project-ov-ts",
+  "thermal-protection",
+  "energy-passport",
+  "operation-technical-passport",
+  "engineering-summary",
+];
+
 export function renderReportHtml(kind: ReportExportKind, base: ReportBaseData): string {
-  const opts = {
-    appliedAssumptions: base.expertise.showAssumptionsBlock
-      ? base.appliedAssumptions
-      : [],
+  return resolveRenderedReport(kind, base, buildFinalReleaseAudit(base)).html;
+}
+
+export function buildFinalReleaseAudit(base: ReportBaseData): FinalReleaseAudit {
+  const preflight = base.preflight;
+  if (preflight.generationMode !== "final") {
+    return {
+      generationMode: preflight.generationMode,
+      status: preflight.status,
+      statusLabel: preflight.statusLabel,
+      summary: preflight.summary,
+      readyForFinalRelease: false,
+      blockingIssues: preflight.blockingIssues,
+      warningIssues: preflight.warningIssues,
+      documentFindings: [],
+      requiresReleaseBlocker: false,
+    };
+  }
+
+  const standardDocuments = renderAllStandardDocuments(base);
+  const documentIssues = new Map<ReportExportKind, string[]>(
+    ALL_REPORT_EXPORT_KINDS.map((kind) => [kind, []])
+  );
+
+  for (const issue of preflight.blockingIssues) {
+    const affected = issue.affectedDocuments.length
+      ? issue.affectedDocuments
+      : ALL_REPORT_EXPORT_KINDS;
+    for (const kind of affected) {
+      documentIssues.get(kind)?.push(issue.message);
+    }
+  }
+
+  const contentIssues: ReportPreflightIssue[] = [];
+  for (const kind of ALL_REPORT_EXPORT_KINDS) {
+    const matches = findForbiddenContentMatches(standardDocuments[kind]);
+    if (!matches.length) {
+      continue;
+    }
+    const message = `В документе "${REPORT_EXPORT_TITLE[kind]}" обнаружены запрещённые формулировки: ${matches
+      .map((match) => `«${match}»`)
+      .join(", ")}.`;
+    contentIssues.push({
+      code: `final-content-${kind}`,
+      severity: "error",
+      message,
+      affectedDocuments: [kind],
+    });
+    documentIssues.get(kind)?.push(message);
+  }
+
+  const blockingIssues = mergeIssues([...preflight.blockingIssues, ...contentIssues]);
+  const readyForFinalRelease = blockingIssues.length === 0;
+  const documentFindings = ALL_REPORT_EXPORT_KINDS.map((kind) => {
+    const issues = uniqueStrings(documentIssues.get(kind) ?? []);
+    if (!issues.length) {
+      return null;
+    }
+    return {
+      kind,
+      title: REPORT_EXPORT_TITLE[kind],
+      filename: REPORT_EXPORT_BUNDLE_FILENAME[kind],
+      issues,
+    } satisfies FinalReleaseDocumentFinding;
+  }).filter((finding): finding is FinalReleaseDocumentFinding => Boolean(finding));
+
+  const status: ReportReleaseStatus = readyForFinalRelease ? "ready" : "not-ready";
+  return {
+    generationMode: "final",
+    status,
+    statusLabel: status === "ready" ? "Готово к выпуску" : "Не готово к выпуску",
+    summary: readyForFinalRelease
+      ? "Комплект готов к финальной выгрузке."
+      : `Финальная выгрузка заблокирована: ${blockingIssues.length} критических замечаний.`,
+    readyForFinalRelease,
+    blockingIssues,
+    warningIssues: preflight.warningIssues,
+    documentFindings,
+    requiresReleaseBlocker: !readyForFinalRelease,
+  };
+}
+
+function renderStandardReportHtml(kind: ReportExportKind, base: ReportBaseData): string {
+  const options = {
+    appliedAssumptions: base.expertise.showAssumptionsBlock ? base.appliedAssumptions : [],
   };
   switch (kind) {
     case "project-ov-ts":
-      return generateProjectOvTsHtml(buildProjectOvTsData(base), opts);
+      return generateProjectOvTsHtml(buildProjectOvTsData(base), options);
     case "thermal-protection":
-      return generateThermalProtectionHtml(buildThermalProtectionData(base), opts);
+      return generateThermalProtectionHtml(buildThermalProtectionData(base), options);
     case "energy-passport":
-      return generateEnergyPassportHtml(buildEnergyPassportData(base), opts);
+      return generateEnergyPassportHtml(buildEnergyPassportData(base), options);
     case "operation-technical-passport":
-      return generateOperationTechnicalPassportHtml(buildOperationPassportData(base), opts);
+      return generateOperationTechnicalPassportHtml(buildOperationPassportData(base), options);
     case "engineering-summary":
-      return generateEngineeringSummaryHtml(buildEngineeringSummaryData(base), opts);
+      return generateEngineeringSummaryHtml(buildEngineeringSummaryData(base), options);
     default: {
       const exhaustive: never = kind;
-      throw new Error(`Неизвестный тип выгрузки: ${String(exhaustive)}`);
+      throw new Error(`Unknown report kind: ${String(exhaustive)}`);
     }
   }
+}
+
+function renderAllStandardDocuments(base: ReportBaseData): Record<ReportExportKind, string> {
+  return {
+    "project-ov-ts": renderStandardReportHtml("project-ov-ts", base),
+    "thermal-protection": renderStandardReportHtml("thermal-protection", base),
+    "energy-passport": renderStandardReportHtml("energy-passport", base),
+    "operation-technical-passport": renderStandardReportHtml("operation-technical-passport", base),
+    "engineering-summary": renderStandardReportHtml("engineering-summary", base),
+  };
+}
+
+function resolveRenderedReport(
+  kind: ReportExportKind,
+  base: ReportBaseData,
+  audit: FinalReleaseAudit
+): ResolvedRenderedReport {
+  if (audit.requiresReleaseBlocker) {
+    return {
+      kind: REPORT_RELEASE_BLOCKER_KIND,
+      html: generateReleaseBlockerHtml(base, audit),
+      filename: REPORT_RELEASE_BLOCKER_FILENAME,
+      title: REPORT_RELEASE_BLOCKER_TITLE,
+      isReleaseBlocker: true,
+    };
+  }
+
+  return {
+    kind,
+    html: renderStandardReportHtml(kind, base),
+    filename: buildFilename(kind, base.source.generatedAt),
+    title: REPORT_EXPORT_TITLE[kind],
+    isReleaseBlocker: false,
+  };
+}
+
+function generateReleaseBlockerHtml(base: ReportBaseData, audit: FinalReleaseAudit): string {
+  const titlePage = renderGostTitlePage(
+    base.meta,
+    REPORT_RELEASE_BLOCKER_TITLE,
+    "Отчёт final-preflight"
+  );
+
+  const objectRows = [
+    ["Объект", base.expertise.fieldMap.projectName.value],
+    ["Адрес", base.expertise.fieldMap.objectAddress.value],
+    ["Шифр проекта", base.expertise.fieldMap.projectCipher.value],
+    ["Основание для проектирования", base.expertise.fieldMap.designBasis.value],
+    ["Номер договора / задания", base.expertise.fieldMap.contractNumber.value],
+    ["Статус выпуска", audit.statusLabel],
+  ];
+
+  const blockerRows =
+    audit.documentFindings.length > 0
+      ? audit.documentFindings
+      : ALL_REPORT_EXPORT_KINDS.map((kind) => ({
+          kind,
+          title: REPORT_EXPORT_TITLE[kind],
+          filename: REPORT_EXPORT_BUNDLE_FILENAME[kind],
+          issues: audit.blockingIssues.map((issue) => issue.message),
+        }));
+
+  const body = `
+${titlePage}
+<section class="rx-status-block rx-status-not-ready">
+  <h3 class="rx-section-title">Статус выпуска</h3>
+  <p><strong>Статус документа:</strong> ${escapeHtml(audit.statusLabel)}</p>
+  <p>${escapeHtml(audit.summary)}</p>
+</section>
+<section id="rb-1">
+  <h3 class="rx-section-title">1 Сведения о комплекте</h3>
+  ${renderDataTable(
+    null,
+    [
+      { label: "Параметр", width: "36%" },
+      { label: "Значение", width: "64%" },
+    ],
+    objectRows.map((row) => ({ cells: row }))
+  )}
+</section>
+<section id="rb-2">
+  <h3 class="rx-section-title">2 Критические замечания комплекта</h3>
+  <ul class="rx-status-list">${audit.blockingIssues
+    .map((issue) => `<li>${escapeHtml(issue.message)}</li>`)
+    .join("")}</ul>
+</section>
+<section id="rb-3">
+  <h3 class="rx-section-title">3 Замечания по файлам</h3>
+  ${renderDataTable(
+    null,
+    [
+      { label: "Файл", width: "22%" },
+      { label: "Документ", width: "28%" },
+      { label: "Статус", width: "16%", align: "center" },
+      { label: "Критические замечания", width: "34%" },
+    ],
+    blockerRows.map((row) => ({
+      cells: [row.filename, row.title, "не готово", row.issues.join("; ")],
+    }))
+  )}
+</section>
+${renderSignatureBlock(base.meta)}
+${renderGostStamp(base.meta, REPORT_RELEASE_BLOCKER_TITLE)}
+`;
+
+  return wrapHtmlDocument(
+    "<!-- Export template: release-blocker v1 -->",
+    REPORT_RELEASE_BLOCKER_TITLE,
+    body
+  );
+}
+
+function findForbiddenContentMatches(html: string): string[] {
+  const text = html
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return uniqueStrings(
+    FINAL_RELEASE_CONTENT_RULES.filter((rule) => rule.pattern.test(text)).map(
+      (rule) => rule.label
+    )
+  );
+}
+
+function mergeIssues(issues: ReportPreflightIssue[]): ReportPreflightIssue[] {
+  const result = new Map<string, ReportPreflightIssue>();
+  for (const issue of issues) {
+    const key = `${issue.code}:${issue.message}:${issue.affectedDocuments.join("|")}`;
+    if (!result.has(key)) {
+      result.set(key, issue);
+    }
+  }
+  return Array.from(result.values());
+}
+
+function uniqueStrings(values: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    if (!value || seen.has(value)) {
+      continue;
+    }
+    seen.add(value);
+    result.push(value);
+  }
+  return result;
 }
 
 function buildBaseFromStores(): ReportBaseData {
@@ -89,13 +381,25 @@ function buildBaseFromStores(): ReportBaseData {
 
   const projectId = projectState.projectId ?? null;
   const projectKey = buildState.projectKey || projectId || "local-project";
+  const thermalResultState = getResultSyncState(
+    Boolean(twinState.lastThermalResult),
+    twinState.lastThermalResultBinding,
+    buildState.projectKey,
+    buildState.modelRevision
+  );
+  const monteCarloResultState = getResultSyncState(
+    Boolean(workflowState.monteCarloResult),
+    workflowState.monteCarloResultBinding,
+    buildState.projectKey,
+    buildState.modelRevision
+  );
 
   const rawInput = {
     model: buildState.model,
     projectId,
     scenarioConfig: workflowState.scenarioConfig ?? null,
-    thermalResult: twinState.lastThermalResult ?? null,
-    monteCarloResult: workflowState.monteCarloResult ?? null,
+    thermalResult: thermalResultState === "current" ? twinState.lastThermalResult ?? null : null,
+    monteCarloResult: monteCarloResultState === "current" ? workflowState.monteCarloResult ?? null : null,
     reportMeta: loadReportMeta(projectKey),
     generatedAt: new Date(),
     expertiseInputs: loadExpertiseInputs(projectKey),
@@ -114,44 +418,16 @@ function buildFilename(kind: ReportExportKind, generatedAt: Date): string {
   const year = generatedAt.getFullYear();
   const month = String(generatedAt.getMonth() + 1).padStart(2, "0");
   const day = String(generatedAt.getDate()).padStart(2, "0");
-  const prefix = REPORT_EXPORT_FILE_PREFIX[kind];
-  return `${prefix}-${year}${month}${day}.html`;
+  return `${REPORT_EXPORT_FILE_PREFIX[kind]}-${year}${month}${day}.html`;
 }
 
-/**
- * Имена файлов «01-…», «02-…», …, как в ТЗ для пакета «Скачать все».
- * Используются и при отдельном «Скачать HTML», чтобы имя совпадало.
- */
-export const REPORT_EXPORT_BUNDLE_FILENAME: Record<ReportExportKind, string> = {
-  "project-ov-ts": "01-razdel-5-ov-ts.html",
-  "thermal-protection": "02-raschet-teplovoy-zashchity.html",
-  "energy-passport": "03-energeticheskiy-pasport.html",
-  "operation-technical-passport": "04-ekspluatacionno-tehnicheskiy-pasport.html",
-  "engineering-summary": "05-inzhenernoe-zaklyuchenie.html",
-};
-
-/**
- * Все 5 типов выгрузки в порядке нумерации пакета.
- */
-export const ALL_REPORT_EXPORT_KINDS: ReadonlyArray<ReportExportKind> = [
-  "project-ov-ts",
-  "thermal-protection",
-  "energy-passport",
-  "operation-technical-passport",
-  "engineering-summary",
-];
-
-/**
- * Главный вход. Готовит данные, рендерит HTML и (по умолчанию) открывает в новом окне.
- */
 export function exportReportDocument(
   kind: ReportExportKind,
   options: ExportReportOptions = {}
 ): ExportReportResult {
   const base = buildBaseFromStores();
-  const html = renderReportHtml(kind, base);
-  const filename = buildFilename(kind, base.source.generatedAt);
-  const title = REPORT_EXPORT_TITLE[kind];
+  const audit = buildFinalReleaseAudit(base);
+  const rendered = resolveRenderedReport(kind, base, audit);
 
   const openInWindow = options.openInWindow ?? true;
   const shouldDownload = options.download ?? false;
@@ -159,57 +435,66 @@ export function exportReportDocument(
 
   if (typeof window !== "undefined" && openInWindow) {
     try {
-      const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+      const blob = new Blob([rendered.html], { type: "text/html;charset=utf-8" });
       const url = URL.createObjectURL(blob);
       printableWindow = window.open(url, "_blank", "noopener,noreferrer");
       window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
     } catch (error) {
-      console.error("Не удалось открыть документ в новом окне", error);
+      console.error("Failed to open report export window", error);
     }
   }
 
   if (typeof window !== "undefined" && shouldDownload) {
     try {
-      const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+      const blob = new Blob([rendered.html], { type: "text/html;charset=utf-8" });
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
-      anchor.download = filename;
+      anchor.download = rendered.filename;
       document.body.appendChild(anchor);
       anchor.click();
       document.body.removeChild(anchor);
       window.setTimeout(() => URL.revokeObjectURL(url), 5_000);
     } catch (error) {
-      console.error("Не удалось скачать документ", error);
+      console.error("Failed to download report export", error);
     }
   }
 
-  return { kind, html, filename, title, printableWindow };
+  return {
+    kind: rendered.kind,
+    html: rendered.html,
+    filename: rendered.filename,
+    title: rendered.title,
+    printableWindow,
+    isReleaseBlocker: rendered.isReleaseBlocker,
+  };
 }
 
-/**
- * Последовательное скачивание всех 5 типов выгрузки одним пакетом.
- *
- * Каждый файл получает имя из `REPORT_EXPORT_BUNDLE_FILENAME` (01-…, 02-…).
- * Архивы намеренно не используем, чтобы не тащить новую зависимость; вместо
- * этого браузер последовательно сохраняет 5 HTML-файлов.
- *
- * Возвращает массив подготовленных выгрузок (включая HTML и имя файла),
- * пригодный и для тестов: тесту не нужен реальный браузерный download.
- */
 export function downloadAllReportDocuments(
   options: { trigger?: boolean } = {}
-): Array<{ kind: ReportExportKind; html: string; filename: string; title: string }> {
+): Array<{ kind: ExportedReportKind; html: string; filename: string; title: string; isReleaseBlocker: boolean }> {
   const base = buildBaseFromStores();
-  const items = ALL_REPORT_EXPORT_KINDS.map((kind) => {
-    const html = renderReportHtml(kind, base);
-    return {
-      kind,
-      html,
-      filename: REPORT_EXPORT_BUNDLE_FILENAME[kind],
-      title: REPORT_EXPORT_TITLE[kind],
-    };
-  });
+  const audit = buildFinalReleaseAudit(base);
+  const items = audit.requiresReleaseBlocker
+    ? [
+        {
+          kind: REPORT_RELEASE_BLOCKER_KIND,
+          html: generateReleaseBlockerHtml(base, audit),
+          filename: REPORT_RELEASE_BLOCKER_FILENAME,
+          title: REPORT_RELEASE_BLOCKER_TITLE,
+          isReleaseBlocker: true,
+        },
+      ]
+    : ALL_REPORT_EXPORT_KINDS.map((kind) => {
+        const rendered = resolveRenderedReport(kind, base, audit);
+        return {
+          kind: rendered.kind,
+          html: rendered.html,
+          filename: REPORT_EXPORT_BUNDLE_FILENAME[kind],
+          title: rendered.title,
+          isReleaseBlocker: false,
+        };
+      });
 
   const shouldTrigger = options.trigger ?? true;
   if (shouldTrigger && typeof window !== "undefined") {
@@ -221,17 +506,16 @@ export function downloadAllReportDocuments(
         anchor.href = url;
         anchor.download = item.filename;
         document.body.appendChild(anchor);
-        // Небольшая задержка между скачиваниями, чтобы браузер
-        // не схлопнул их в один pop-up.
         window.setTimeout(() => {
           anchor.click();
           document.body.removeChild(anchor);
           window.setTimeout(() => URL.revokeObjectURL(url), 5_000);
         }, index * 250);
       } catch (error) {
-        console.error(`Не удалось скачать ${item.filename}`, error);
+        console.error(`Failed to download ${item.filename}`, error);
       }
     });
   }
+
   return items;
 }

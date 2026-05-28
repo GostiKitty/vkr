@@ -1,5 +1,3 @@
-import React from "react";
-
 export type ProjectDocumentViewMode = "report" | "reference";
 
 interface ProjectDocumentToolbarProps {

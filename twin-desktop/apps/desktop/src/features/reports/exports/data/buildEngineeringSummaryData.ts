@@ -1,12 +1,6 @@
-/**
- * Данные для «Краткого инженерного заключения» — 1–3 страницы для демонстрации.
- */
-
 import { sanitizeDisplayText } from "../../../../shared/utils/displayText";
 import type { ReportBaseData } from "./buildReportBaseData";
 import type { ReportExportDocumentMeta } from "../types";
-import { buildExportEnvelopeView } from "./buildExportEnvelopeView";
-import { formatDynamicMetricValue } from "../helpers";
 import { humanizeProjectText } from "./exportText";
 
 const NO_DATA = "недостаточно данных";
@@ -17,119 +11,151 @@ export interface EngineeringSummaryRow {
   value: string;
 }
 
+export type EngineeringSummaryVariant =
+  | "auditSummary"
+  | "finalConclusion"
+  | "incompleteDataConclusion";
+
 export interface EngineeringSummaryData {
   meta: ReportExportDocumentMeta;
+  preflight: ReportBaseData["preflight"];
+  variant: EngineeringSummaryVariant;
+  title: string;
   objectRows: EngineeringSummaryRow[];
   sourceRows: EngineeringSummaryRow[];
   resultRows: EngineeringSummaryRow[];
-  complianceLines: string[];
+  conclusionLines: string[];
   riskLines: string[];
   recommendationLines: string[];
 }
 
 export function buildEngineeringSummaryData(base: ReportBaseData): EngineeringSummaryData {
-  const { passport, sp50Report, meta, expertise } = base;
-  const climate = passport.climate;
-  const summary = passport.summary;
-  const dynamics = passport.thermalResults;
-  const energy = sp50Report?.energy ?? null;
-  const dynamicState = base.source.dynamicResultState;
-  const envelopeView = buildExportEnvelopeView({
-    model: base.source.model,
-    constructions: sp50Report?.constructions ?? [],
-    heatedVolumeM3: summary.totalVolumeM3,
-    kobNorm: sp50Report?.building.kobNorm_W_m3K ?? null,
-    outdoorDesignTemperatureC: climate.outdoorDesignTemperatureC,
-  });
+  const { meta, passport, reportMetrics, preflight, expertise } = base;
+  const failedElements = reportMetrics.envelopeElementFailures;
+  const integralPass =
+    reportMetrics.kobStatus === "соответствует" &&
+    reportMetrics.qHeatingStatus === "соответствует";
 
   const objectRows: EngineeringSummaryRow[] = [
-    row("name", "Объект", passport.projectName),
-    row("address", "Адрес", meta.address),
-    row("customer", "Заказчик", meta.customer),
-    row("developer", "Разработчик", meta.organization),
+    row("name", "Объект", expertise.fieldMap.projectName.value),
+    row("address", "Адрес", expertise.fieldMap.objectAddress.value),
+    row("customer", "Заказчик", expertise.fieldMap.customerOrg.value),
+    row("developer", "Проектная организация", expertise.fieldMap.developerOrg.value),
     row("generated", "Дата формирования", meta.generatedAtLabel),
+    row("status", "Статус документа", preflight.statusLabel),
   ];
 
   const sourceRows: EngineeringSummaryRow[] = [
-    row("city", "Город / климат", textOrNoData(climate.city)),
-    row("indoor", "Внутренняя температура, °C", valueOrNoData(climate.indoorTemperatureC, 1)),
-    row("outdoor", "Расчётная наружная температура, °C", valueOrNoData(climate.outdoorDesignTemperatureC, 1)),
-    row("area", "Отапливаемая площадь, м²", valueOrNoData(summary.totalAreaM2, 2)),
-    row("volume", "Отапливаемый объём, м³", valueOrNoData(summary.totalVolumeM3, 2)),
+    row("city", "Город / климатическая база", reportMetrics.climateCity ?? NO_DATA),
+    row("indoor", "Внутренняя температура, °C", valueOrNoData(reportMetrics.indoorDesignTemperatureC, 1)),
+    row("outdoor", "Наружная температура, °C", valueOrNoData(reportMetrics.outdoorDesignTemperatureC, 1)),
+    row("area", "Отапливаемая площадь, м²", valueOrNoData(reportMetrics.heatedAreaM2, 2)),
+    row("volume", "Отапливаемый объём, м³", valueOrNoData(reportMetrics.heatedVolumeM3, 2)),
+    row("ventilation", "Кратность вентиляции, 1/ч", valueOrNoData(reportMetrics.ventilationAch, 3)),
+    row("infiltration", "Кратность инфильтрации, 1/ч", valueOrNoData(reportMetrics.infiltrationAch, 3)),
   ];
-
-  objectRows[0].value = expertise.fieldMap.projectName.value;
-  sourceRows[0].value = expertise.fieldMap.climateCity.value;
-  sourceRows[1].value = expertise.fieldMap.indoorDesignTemperatureC.value;
-  sourceRows[2].value = expertise.fieldMap.outdoorDesignTemperatureC.value;
-  sourceRows[3].value = expertise.fieldMap.heatedArea.value;
-  sourceRows[4].value = expertise.fieldMap.heatedVolume.value;
 
   const resultRows: EngineeringSummaryRow[] = [
-    row("kob", "kоб расчётное, Вт/(м³·К)", valueOrNoData(envelopeView.kobActual, 3)),
-    row("kobNorm", "kоб нормативное, Вт/(м³·К)", valueOrNoData(envelopeView.kobNorm, 3)),
-    row(
-      "qHeating",
-      "qот расчётное, Вт/(м³·К)",
-      valueOrNoData(energy?.qHeatingCharacteristic_W_m3K, 3)
-    ),
-    row("peakLoad", "Расчётная пиковая нагрузка, кВт", formatDynamicMetricValue(dynamics.peakLoadKW, dynamicState, { digits: 2 })),
-    row("totalEnergy", "Тепловая энергия за период, кВт·ч", formatDynamicMetricValue(dynamics.totalEnergyKWh, dynamicState, { digits: 1 })),
+    row("kob", "kоб расчётное, Вт/(м³·К)", valueOrNoData(reportMetrics.kobActual_W_m3K, 3)),
+    row("kobNorm", "kоб нормативное, Вт/(м³·К)", valueOrNoData(reportMetrics.kobNorm_W_m3K, 3)),
+    row("qHeating", "qот расчётное, Вт/(м³·К)", valueOrNoData(reportMetrics.qHeatingCharacteristic_W_m3K, 3)),
+    row("peakLoad", "Расчётная пиковая нагрузка, кВт", valueOrNoData(reportMetrics.peakHeatLoadKW, 2)),
+    row("annualHeating", "Годовой расход тепловой энергии, кВт·ч", valueOrNoData(reportMetrics.annualHeatingEnergy_kWh, 1)),
   ];
 
-  const complianceLines: string[] = [];
-  if (envelopeView.kobStatus === "соответствует") {
-    complianceLines.push("Удельная теплозащитная характеристика kоб не превышает нормативное значение.");
-  } else if (envelopeView.kobStatus === "не соответствует") {
-    complianceLines.push("Удельная теплозащитная характеристика kоб превышает нормативное значение.");
+  let variant: EngineeringSummaryVariant = "auditSummary";
+  let title = "Инженерное заключение";
+  const conclusionLines: string[] = [];
+  const recommendationLines: string[] = [];
+
+  if (preflight.readyForFinalRelease) {
+    variant = "finalConclusion";
+    if (integralPass && failedElements.length === 0) {
+      conclusionLines.push(
+        "Проектные решения по тепловой защите здания и расчётные энергетические показатели соответствуют установленным нормативным требованиям."
+      );
+    } else if (integralPass && failedElements.length > 0) {
+      conclusionLines.push(
+        `Соответствует по интегральным показателям. Требуется устранить несоответствие поэлементной проверки: ${failedElements
+          .map((entry) => `${entry.designation} (${entry.typeLabel})`)
+          .join(", ")}.`
+      );
+    } else {
+      conclusionLines.push(
+        "До корректировки проектных решений по оболочке и инженерным параметрам нормативное соответствие не подтверждено."
+      );
+    }
+    conclusionLines.push(
+      "Документ может быть использован как итоговое инженерное заключение в составе расчётно-пояснительных материалов."
+    );
+  } else if (preflight.blockingIssues.length > 0) {
+    variant = "incompleteDataConclusion";
+    title = "Заключение о неполноте исходных данных";
+    conclusionLines.push(
+      "Финальное инженерное заключение не может быть выдано, поскольку обязательные исходные данные и проверки не завершены."
+    );
+    conclusionLines.push(
+      `Выявлены критические замечания: ${preflight.blockingIssues
+        .map((issue) => issue.message)
+        .join(" ")}`
+    );
   } else {
-    complianceLines.push("Сводная проверка теплозащиты сформирована частично.");
-  }
-  if (energy?.status === "pass") {
-    complianceLines.push("Удельный расход тепловой энергии qот находится в пределах нормативных требований.");
-  } else if (energy?.status === "fail" || energy?.complies === false) {
-    complianceLines.push("Удельный расход тепловой энергии qот требует оптимизации.");
-  } else {
-    complianceLines.push("Окончательная проверка qот требует уточнения исходных данных.");
+    conclusionLines.push(
+      "Документ сформирован как audit summary и предназначен для проверки полноты исходных данных и промежуточной оценки проектных решений."
+    );
   }
 
   const riskLines = buildRiskLines(passport.problemZones, base.source.model);
-  if (energy?.usesPlaceholderInputs) {
-    riskLines.push("Использованы предварительные параметры воздухообмена; точность результата снижена.");
-  }
-  if (!dynamics.available) {
+  if (reportMetrics.usesPlaceholderInputs) {
     riskLines.push(
-      dynamicState === "failed-auto-demo"
-        ? "Динамическая RC-оценка не сформирована автоматически; требуется запуск динамического расчёта."
-        : "Не выполнена динамическая RC-оценка; интерпретация результатов ограничена."
+      "Энергетические показатели опираются на placeholder-данные по воздухообмену и требуют актуализации."
+    );
+  }
+  if (!passport.thermalResults.available) {
+    riskLines.push("Динамический расчёт теплового режима отсутствует.");
+    riskLines.push("Инженерная оценка выполнена без RC-диагностики.");
+  }
+  if (preflight.blockingIssues.length > 0) {
+    riskLines.push(
+      ...preflight.blockingIssues.map((issue) => issue.message)
     );
   }
   if (!riskLines.length) {
-    riskLines.push("Критические зоны по результатам расчётного сценария не выявлены.");
+    riskLines.push("Критические риски по исходным данным и расчётным показателям не выявлены.");
   }
 
-  const recommendationLines: string[] = [];
-  if (envelopeView.kobStatus === "не соответствует") {
-    recommendationLines.push("Усилить теплозащиту наружных ограждающих конструкций для приведения kоб в норматив.");
+  if (failedElements.length > 0) {
+    recommendationLines.push(
+      `Устранить несоответствия по оболочке: ${failedElements
+        .map((entry) => entry.designation)
+        .join(", ")}.`
+    );
   }
-  if (energy?.usesPlaceholderInputs) {
-    recommendationLines.push("Задать проектные параметры вентиляции и инфильтрации для окончательной проверки qот.");
+  if (reportMetrics.usesPlaceholderInputs) {
+    recommendationLines.push(
+      "Задать подтверждённые проектные параметры вентиляции и инфильтрации для окончательной энергетической оценки."
+    );
   }
-  if (passport.problemZones.length > 0) {
-    recommendationLines.push("Проверить тепловой режим в выделенных зонах при пиковых нагрузках.");
+  if (preflight.blockingIssues.length > 0) {
+    recommendationLines.push(
+      "Устранить критические замечания preflight-проверки перед финальной выгрузкой комплекта."
+    );
   }
   if (!recommendationLines.length) {
     recommendationLines.push(
-      "Использовать документ как сводку расчётной модели для демонстрационных или защитных целей."
+      "Поддерживать согласованность цифровой модели, расчётных параметров и реквизитов проекта при выпуске итогового комплекта."
     );
   }
 
   return {
     meta,
+    preflight,
+    variant,
+    title,
     objectRows,
     sourceRows,
     resultRows,
-    complianceLines,
+    conclusionLines,
     riskLines,
     recommendationLines,
   };
@@ -147,11 +173,6 @@ function valueOrNoData(value: number | null | undefined, digits: number): string
     minimumFractionDigits: 0,
     maximumFractionDigits: digits,
   }).format(value);
-}
-
-function textOrNoData(value: string | null | undefined): string {
-  const sanitized = sanitizeDisplayText(value, "", { allowInternalId: false });
-  return sanitized || NO_DATA;
 }
 
 function buildRiskLines(
@@ -174,11 +195,11 @@ function buildRiskLines(
 }
 
 function normalizeRiskLine(value: string): string {
-  const trimmed = value
-    .replace(/\s+:/g, ":")
-    .replace(/:\s*:/g, ": ")
-    .replace(/\.\.+/g, ".")
-    .trim();
+  const trimmed = sanitizeDisplayText(
+    value.replace(/\s+:/g, ":").replace(/:\s*:/g, ": ").replace(/\.\.+/g, "."),
+    "",
+    { allowInternalId: false }
+  ).trim();
   if (!trimmed) {
     return "";
   }

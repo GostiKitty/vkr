@@ -14,13 +14,38 @@ export type EditorTool =
   | "pipe"
   | "duct"
   | "equipment"
-  | "sensor";
+  | "sensor"
+  | "engineeringEquipment"
+  | "engineeringPipe";
 
 export type View3DWorkflowMode = "navigation" | "edit" | "draw";
 
 const ARCHITECTURE_TOOLS: readonly EditorTool[] = ["select", "roomRect", "room", "wall", "roof", "slab", "door", "window", "erase"];
-const NETWORK_TOOLS: readonly EditorTool[] = ["select", "pipe", "duct", "equipment", "sensor", "erase"];
-const DRAW_TOOLS: readonly EditorTool[] = ["roomRect", "room", "wall", "roof", "slab", "door", "window", "pipe", "duct", "equipment", "sensor"];
+const NETWORK_TOOLS: readonly EditorTool[] = [
+  "select",
+  "pipe",
+  "duct",
+  "equipment",
+  "sensor",
+  "engineeringEquipment",
+  "engineeringPipe",
+  "erase",
+];
+const DRAW_TOOLS: readonly EditorTool[] = [
+  "roomRect",
+  "room",
+  "wall",
+  "roof",
+  "slab",
+  "door",
+  "window",
+  "pipe",
+  "duct",
+  "equipment",
+  "sensor",
+  "engineeringEquipment",
+  "engineeringPipe",
+];
 
 export function modeFromViewport(viewport: EditorViewport): EditorMode {
   if (viewport === "view3d") {

@@ -6,6 +6,8 @@ import type {
   PipeNetwork,
   SensorDevice,
 } from "../networks/types";
+import type { EngineeringSystemsModel } from "../engineering/types";
+import { createEmptyEngineeringSystems } from "../engineering/types";
 
 export interface Vec2 {
   x: number;
@@ -35,6 +37,17 @@ export interface Room {
   source?: RoomSource;
 }
 
+export interface EnvelopePresetMetadata {
+  presetId?: string;
+  presetLabel?: string;
+  sourceNote?: string;
+  sourceType?: "preset" | "manual";
+  /** Явный U для runtime-контура (окна/двери). */
+  runtimeU_W_m2K?: number;
+}
+
+export type Sp50EnvelopeFragmentMetadata = EnvelopePresetMetadata;
+
 export interface Wall {
   id: string;
   levelId: string;
@@ -43,6 +56,7 @@ export interface Wall {
   thickness_m: number;
   height_m: number;
   wallAssemblyId?: string;
+  envelopePresetId?: string;
   layers?: WallLayer[];
 }
 
@@ -64,6 +78,7 @@ export interface Roof {
   slope?: { directionDeg: number; risePerMeter: number };
   layers?: ConstructionLayer[];
   assemblyId?: string | null;
+  envelopePresetId?: string;
   heatedSide?: "below" | "above";
 }
 
@@ -77,6 +92,7 @@ export interface FloorSlab {
   thickness_m: number;
   layers?: ConstructionLayer[];
   assemblyId?: string | null;
+  envelopePresetId?: string;
   heatedSide?: "below" | "above";
 }
 
@@ -109,13 +125,24 @@ export interface OpeningBase {
   width_m: number;
   height_m: number;
   sill_m?: number;
+  envelopePresetId?: string;
+  /** Явный U для runtime-расчёта (гибридная модель проёмов). */
+  runtimeU_W_m2K?: number;
+  /** Эквивалентные слои для отчётов и раздела «Данные». */
+  reportLayers?: ConstructionLayer[];
   /**
    * true — стена-носитель удалена и проём требует перепривязки.
    */
   lost?: boolean;
 }
 
-export type Door = OpeningBase;
+export type DoorSwingDirection = "left" | "right";
+export type DoorOpeningDirection = "inward" | "outward";
+
+export interface Door extends OpeningBase {
+  swingDirection?: DoorSwingDirection;
+  openingDirection?: DoorOpeningDirection;
+}
 export type Window = OpeningBase;
 
 export type Sp50BuildingCategory =
@@ -174,6 +201,7 @@ export interface Sp50EnvelopeFragmentInput {
   outdoorTemperatureC?: number;
   multiplierMp?: number;
   layers?: WallLayer[];
+  metadata?: Sp50EnvelopeFragmentMetadata;
   operationCondition?: Sp50OperationCondition;
   heterogeneity?: {
     planar?: Array<{ areaM2: number; resistance_m2K_W: number; label?: string }>;
@@ -224,6 +252,7 @@ export interface BuildingModel {
   events: BuildingEvent[];
   meta?: Record<string, unknown>;
   thermalProtection?: Sp50BuildingMetadata;
+  engineeringSystems?: EngineeringSystemsModel;
 }
 
 export type SelectionKind = "room" | "wall" | "door" | "window" | "level";
@@ -245,4 +274,5 @@ export const createEmptyBuildingModel = (): BuildingModel => ({
   events: [],
   meta: {},
   thermalProtection: undefined,
+  engineeringSystems: createEmptyEngineeringSystems(),
 });

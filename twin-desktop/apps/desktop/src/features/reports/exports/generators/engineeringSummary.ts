@@ -1,40 +1,34 @@
-/**
- * HTML-генератор для «Краткого инженерного заключения».
- *
- * 1–3 страницы, без тяжёлого штампа.
- */
-
 import {
   escapeHtml,
   renderAssumptionsBlock,
   renderDataTable,
-  REPORT_EXPORT_RC_DISCLAIMER,
+  renderDocumentStatusBlock,
+  renderGostStamp,
+  renderGostTitlePage,
+  renderSignatureBlock,
   wrapHtmlDocument,
 } from "../helpers";
 import { REPORT_EXPORT_TEMPLATE_MARKER, REPORT_EXPORT_TITLE } from "../types";
 import type { EngineeringSummaryData } from "../data/buildEngineeringSummaryData";
 import type { AssumptionEntry } from "../defaults/demoHouseDesignDefaults";
 
-const DOCUMENT_LABEL = "Краткое инженерное заключение";
-
 export function generateEngineeringSummaryHtml(
   data: EngineeringSummaryData,
   options: { appliedAssumptions?: AssumptionEntry[] } = {}
 ): string {
+  const titlePage = renderGostTitlePage(data.meta, data.title);
   const body = `
-<section>
-  <h1>${escapeHtml(DOCUMENT_LABEL)}</h1>
-  <p>${escapeHtml(data.meta.documentStage)} · Дата формирования: ${escapeHtml(data.meta.generatedAtLabel)}</p>
-</section>
+${titlePage}
+${renderDocumentStatusBlock(data.preflight, { includeIssues: true, includeWarnings: true })}
 <section id="es-1">
   <h3 class="rx-section-title">1 Объект</h3>
   ${renderDataTable(
     null,
     [
-      { label: "Показатель", width: "30%" },
-      { label: "Значение", width: "70%" },
+      { label: "Показатель", width: "36%" },
+      { label: "Значение", width: "64%" },
     ],
-    data.objectRows.map((r) => ({ cells: [r.label, r.value] }))
+    data.objectRows.map((row) => ({ cells: [row.label, row.value] }))
   )}
 </section>
 <section id="es-2">
@@ -45,7 +39,7 @@ export function generateEngineeringSummaryHtml(
       { label: "Показатель", width: "55%" },
       { label: "Значение", align: "right" },
     ],
-    data.sourceRows.map((r) => ({ cells: [r.label, r.value] }))
+    data.sourceRows.map((row) => ({ cells: [row.label, row.value] }))
   )}
 </section>
 <section id="es-3">
@@ -56,26 +50,24 @@ export function generateEngineeringSummaryHtml(
       { label: "Показатель", width: "55%" },
       { label: "Значение", align: "right" },
     ],
-    data.resultRows.map((r) => ({ cells: [r.label, r.value] }))
+    data.resultRows.map((row) => ({ cells: [row.label, row.value] }))
   )}
 </section>
 <section id="es-4">
-  <h3 class="rx-section-title">4 Соответствие требованиям</h3>
-  ${data.complianceLines.map((line) => `<p>${escapeHtml(line)}</p>`).join("")}
+  <h3 class="rx-section-title">4 Заключение</h3>
+  ${data.conclusionLines.map((line) => `<p>${escapeHtml(line)}</p>`).join("")}
 </section>
 <section id="es-5">
-  <h3 class="rx-section-title">5 Риски</h3>
+  <h3 class="rx-section-title">5 Риски и замечания</h3>
   <ul>${data.riskLines.map((line) => `<li>${escapeHtml(line)}</li>`).join("")}</ul>
 </section>
 <section id="es-6">
   <h3 class="rx-section-title">6 Рекомендации</h3>
   <ul>${data.recommendationLines.map((line) => `<li>${escapeHtml(line)}</li>`).join("")}</ul>
 </section>
-<section>
-  <p class="rx-note">${escapeHtml(REPORT_EXPORT_RC_DISCLAIMER)}</p>
-  <p>Разработал: ${escapeHtml(data.meta.developedBy)} · Проверил: ${escapeHtml(data.meta.checkedBy)}</p>
-</section>
 ${renderAssumptionsBlock(options.appliedAssumptions, { id: "es-assumptions" })}
+${renderSignatureBlock(data.meta)}
+${renderGostStamp(data.meta, data.title)}
 `;
   return wrapHtmlDocument(
     REPORT_EXPORT_TEMPLATE_MARKER["engineering-summary"],

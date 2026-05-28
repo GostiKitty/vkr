@@ -22,6 +22,7 @@ export interface OpeningCutDescriptor {
   widthM: number;
   heightM: number;
   sillM?: number;
+  uValue_W_m2K?: number;
 }
 
 export interface WallRenderDescriptor {
@@ -282,6 +283,7 @@ function attachOpeningDescriptor(
     widthM: opening.width_m,
     heightM: opening.height_m,
     sillM: type === "window" ? (opening as Window).sill_m : undefined,
+    uValue_W_m2K: opening.runtimeU_W_m2K,
   });
   openingsByWall.set(wall.id, list);
 }

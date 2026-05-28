@@ -1,4 +1,3 @@
-import React from "react";
 import type { ThermalProtectionMetricRow } from "./buildThermalProtectionReportData";
 import ProjectDocumentSection from "./ProjectDocumentSection";
 import ProjectDocumentTable from "./ProjectDocumentTable";

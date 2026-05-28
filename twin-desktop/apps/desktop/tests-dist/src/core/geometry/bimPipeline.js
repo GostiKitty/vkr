@@ -206,6 +206,7 @@ function attachOpeningDescriptor(openingsByWall, wallsById, opening, type) {
         widthM: opening.width_m,
         heightM: opening.height_m,
         sillM: type === "window" ? opening.sill_m : undefined,
+        uValue_W_m2K: opening.runtimeU_W_m2K,
     });
     openingsByWall.set(wall.id, list);
 }

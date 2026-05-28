@@ -127,7 +127,7 @@ export function ModelPage() {
       const data = await importModel(file, { projectName: desiredName });
       setProjectId(data.project_id, "engine");
       notifyInfo(`Проект ${data.project_id} выбран. Помещений: ${data.spaces_count}.`);
-      navigate("/");
+      navigate("/model");
       setFile(null);
       setProjectName("");
       if (fileInputRef.current) {
@@ -139,7 +139,7 @@ export function ModelPage() {
     } finally {
       setUploadingFileName(null);
     }
-  }, [engineBase, engineConfigured, file, importModel, isLoading, navigate, projectName, setProjectId]);
+  }, [engineBase, engineConfigured, file, importModel, isLoading, projectName, setProjectId]);
 
   const disabled = !file || isLoading || blocked;
 
@@ -282,7 +282,7 @@ export function ModelPage() {
 
         <div className="space-y-4">
           <div className="ui-panel-muted p-5 shadow-sm">
-            <h3 className="text-sm font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">Последний результат</h3>
+            <h3 className="text-sm font-semibold text-[color:var(--text-base)]">Последний результат</h3>
             {result ? (
               <div className="mt-3 space-y-2 text-base text-[color:var(--text-muted)]">
                 <p>
@@ -307,8 +307,8 @@ export function ModelPage() {
           <div className="ui-panel-muted p-5 shadow-sm">
             <div className="flex items-center justify-between">
               <div>
-                <h3 className="text-sm font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">История импортов</h3>
-                <p className="text-xs text-[color:var(--text-soft)]">Последние {HISTORY_LIMIT} попыток</p>
+                <h3 className="text-sm font-semibold text-[color:var(--text-base)]">История импортов</h3>
+                <p className="text-sm text-[color:var(--text-soft)]">Последние {HISTORY_LIMIT} попыток</p>
               </div>
               {latestHistory.length > 0 && (
                 <button
@@ -373,33 +373,33 @@ function ModelDebugDrawer({ open, onClose, info }: { open: boolean; onClose: () 
       >
         <div className="flex items-center justify-between border-b border-[color:var(--border-soft)] px-6 py-4">
           <div>
-            <p className="ui-kicker">Отладка запроса</p>
-            <p className="text-xs text-[color:var(--text-soft)]">Последняя попытка импорта IFC</p>
+            <p className="text-sm font-semibold text-[color:var(--text-base)]">Отладка запроса</p>
+            <p className="text-sm text-[color:var(--text-soft)]">Последняя попытка импорта IFC</p>
           </div>
-          <button type="button" onClick={onClose} className="ui-control rounded-full px-4 py-1 text-xs font-semibold">
+          <button type="button" onClick={onClose} className="ui-control rounded-full px-4 py-1.5 text-sm font-semibold">
             Закрыть
           </button>
         </div>
         {info ? (
           <div className="space-y-3 px-6 py-4 text-sm text-[color:var(--text-muted)]">
-            <div className="flex flex-wrap items-center gap-4 text-xs text-[color:var(--text-soft)]">
+            <div className="flex flex-wrap items-center gap-4 text-sm text-[color:var(--text-soft)]">
               <span>{new Date(info.timestamp).toLocaleString()}</span>
               <span>Статус: {info.status ?? "—"}</span>
             </div>
             <div>
-              <p className="text-xs uppercase tracking-wide text-[color:var(--text-soft)]">Запрос</p>
+              <p className="text-sm font-semibold text-[color:var(--text-base)]">Запрос</p>
               <p className="font-mono text-sm text-[color:var(--text-base)]">
                 {info.method} {info.url}
               </p>
             </div>
             <div>
-              <p className="text-xs uppercase tracking-wide text-[color:var(--text-soft)]">Заголовки</p>
+              <p className="text-sm font-semibold text-[color:var(--text-base)]">Заголовки</p>
               <pre className="mt-1 max-h-32 overflow-auto rounded-xl border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] p-3 text-xs">
                 {JSON.stringify(info.headers, null, 2)}
               </pre>
             </div>
             <div>
-              <p className="text-xs uppercase tracking-wide text-[color:var(--text-soft)]">Ответ</p>
+              <p className="text-sm font-semibold text-[color:var(--text-base)]">Ответ</p>
               <pre className="mt-1 max-h-40 overflow-auto rounded-xl border border-[color:var(--border-base)] bg-[color:var(--surface-subtle)] p-3 font-mono text-xs text-[color:var(--text-base)]">
                 {info.responseSnippet ?? "—"}
               </pre>

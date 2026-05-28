@@ -1,26 +1,19 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { buildAdjacencyGraph } from "../../core/graph/adjacency";
-import { runThermalMonteCarlo, THERMAL_MONTE_CARLO_MAX_RUNS } from "../../core/uncertainty/thermalMonteCarlo";
+import { THERMAL_MONTE_CARLO_MAX_RUNS } from "../../core/uncertainty/thermalMonteCarlo";
 import { useBuildStore } from "../build/build.store";
-import { buildThermalOptionsFromWorkflow } from "../build/thermal/workflowThermalOptions";
 import { useWorkflowStore } from "../../entities/workflow/workflow.store";
 import { EngineeringCallout, EngineeringSectionHeader } from "../../shared/ui";
-
-const DEFAULT_MONTE_CARLO_RUNS = 200;
-const DEFAULT_MONTE_CARLO_MODE = "full-physics" as const;
-
-const clampMonteCarloRuns = (value: number): number => {
-  if (!Number.isFinite(value)) {
-    return DEFAULT_MONTE_CARLO_RUNS;
-  }
-  return Math.min(THERMAL_MONTE_CARLO_MAX_RUNS, Math.max(1, Math.round(value)));
-};
+import {
+  DEFAULT_MONTE_CARLO_MODE,
+  DEFAULT_MONTE_CARLO_RUNS,
+  clampMonteCarloRuns,
+  runThermalMonteCarloAnalysis,
+} from "./runThermalMonteCarloAnalysis";
 
 export function UncertaintyPanel() {
   const config = useWorkflowStore((state) => state.uncertaintyConfig);
-  const scenarioConfig = useWorkflowStore((state) => state.scenarioConfig);
   const setConfig = useWorkflowStore((state) => state.setUncertaintyConfig);
-  const setMonteCarloResult = useWorkflowStore((state) => state.setMonteCarloResult);
+  const setCurrentStep = useWorkflowStore((state) => state.setCurrentStep);
   const buildModel = useBuildStore((state) => state.model);
   const [runs, setRuns] = useState(config?.runs ?? DEFAULT_MONTE_CARLO_RUNS);
   const [mcRunning, setMcRunning] = useState(false);
@@ -59,23 +52,17 @@ export function UncertaintyPanel() {
     setMcRunning(true);
     setMcError(null);
     try {
-      const adjacency = buildAdjacencyGraph(buildModel);
       const nextRuns = clampMonteCarloRuns(runs);
       setRuns(nextRuns);
-      const result = runThermalMonteCarlo({
-        model: buildModel,
-        baseOptions: buildThermalOptionsFromWorkflow(scenarioConfig),
-        runs: nextRuns,
-        adjacency,
-      });
-      setMonteCarloResult(result);
       setConfig({ runs: nextRuns, evaluationMode });
+      runThermalMonteCarloAnalysis();
+      setCurrentStep("results");
     } catch (error) {
       setMcError(error instanceof Error ? error.message : "Не удалось выполнить Monte Carlo.");
     } finally {
       setMcRunning(false);
     }
-  }, [buildModel, evaluationMode, runs, scenarioConfig, setConfig, setMonteCarloResult]);
+  }, [buildModel.rooms.length, evaluationMode, runs, setConfig, setCurrentStep]);
 
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
@@ -88,7 +75,7 @@ export function UncertaintyPanel() {
 
         <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.95fr)]">
           <div className="space-y-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">Параметры прогона</p>
+            <p className="text-sm font-semibold text-[color:var(--text-base)]">Параметры прогона</p>
             <EngineeringCallout variant="assumption" title="Изменения применяются к следующему прогону">
               <p>
                 Число прогонов и режим оценки меняют только следующий запуск вероятностного анализа. Уже сохранённые распределения, гистограммы и CDF не
@@ -107,7 +94,7 @@ export function UncertaintyPanel() {
                   <button
                     type="button"
                     onClick={() => setRuns(DEFAULT_MONTE_CARLO_RUNS)}
-                    className="rounded-full border border-[color:var(--border-soft)] px-3 py-1 text-[11px] font-semibold text-[color:var(--text-muted)] transition hover:bg-[color:var(--surface-elevated)]"
+                    className="rounded-full border border-[color:var(--border-soft)] px-3 py-1.5 text-sm font-semibold text-[color:var(--text-muted)] transition hover:bg-[color:var(--surface-elevated)]"
                   >
                     Сбросить
                   </button>
@@ -136,7 +123,7 @@ export function UncertaintyPanel() {
                   <button
                     type="button"
                     onClick={() => setEvaluationMode(DEFAULT_MONTE_CARLO_MODE)}
-                    className="rounded-full border border-[color:var(--border-soft)] px-3 py-1 text-[11px] font-semibold text-[color:var(--text-muted)] transition hover:bg-[color:var(--surface-elevated)]"
+                    className="rounded-full border border-[color:var(--border-soft)] px-3 py-1.5 text-sm font-semibold text-[color:var(--text-muted)] transition hover:bg-[color:var(--surface-elevated)]"
                   >
                     Сбросить
                   </button>
@@ -184,9 +171,13 @@ export function UncertaintyPanel() {
 
             {hasSaved && (
               <EngineeringCallout variant="success" title="Сохранено" className="mt-2">
-                <p>Параметры учтены. Гистограммы и CDF доступны на шаге «Результаты» во вкладке «Показатели».</p>
+                <p>Параметры учтены. После запуска Monte Carlo новый инженерный экран откроется на шаге «Результаты» во вкладке «Вероятностный анализ».</p>
               </EngineeringCallout>
             )}
+
+            <EngineeringCallout variant="success" title="Что произойдёт после запуска" className="mt-2">
+              <p>После успешного Monte Carlo приложение автоматически переведёт вас на шаг «Результаты» и откроет вкладку «Вероятностный анализ» с новым инженерным экраном.</p>
+            </EngineeringCallout>
 
             <EngineeringCallout variant="info" title="Пока не вынесено в настройки" className="mt-2">
               <p>
@@ -197,7 +188,7 @@ export function UncertaintyPanel() {
           </div>
 
           <div className="space-y-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">Что означают числа</p>
+            <p className="text-sm font-semibold text-[color:var(--text-base)]">Что означают числа</p>
             <EngineeringCallout variant="info" title="Гистограмма, CDF, P5 / P50 / P95">
               <p>
                 <strong>Гистограмма</strong> показывает частоту значений метрики по прогонам, <strong>CDF</strong> — накопленную долю до заданного уровня.{" "}

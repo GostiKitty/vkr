@@ -67,16 +67,21 @@ test("ThermalSimulationPanel renders a clear empty state in the results viewport
   }
 });
 
-test("ProjectDocumentationPage renders expertise export controls", () => {
+// Temporarily hidden from UI. Will be restored after project documentation export redesign.
+// Раньше тест проверял, что страница экспертных документов содержит управляющие кнопки.
+// Сейчас компонент сознательно рендерит нейтральную заглушку, и тест проверяет именно её.
+// При восстановлении исходной реализации нужно вернуть прежние asserts.
+test("ProjectDocumentationPage renders neutral hidden-section placeholder", () => {
   resetStores();
   const markup = renderToStaticMarkup(<ProjectDocumentationPage projectId={null} />);
-  if (!markup.includes('data-testid="open-expertise-inputs-button"')) {
-    throw new Error("ProjectDocumentationPage should expose the expertise inputs button.");
+  if (!markup.includes("Раздел временно скрыт")) {
+    throw new Error("ProjectDocumentationPage placeholder should announce that the section is temporarily hidden.");
   }
-  if (!markup.includes('data-testid="check-export-completeness-button"')) {
-    throw new Error("ProjectDocumentationPage should expose the completeness check button.");
-  }
-  if (!markup.includes("Скачать комплект документов")) {
-    throw new Error("ProjectDocumentationPage should expose package download controls.");
+  if (
+    markup.includes('data-testid="open-expertise-inputs-button"') ||
+    markup.includes('data-testid="check-export-completeness-button"') ||
+    markup.includes("Скачать комплект документов")
+  ) {
+    throw new Error("ProjectDocumentationPage placeholder must not expose any hidden expertise controls.");
   }
 });

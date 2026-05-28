@@ -22,8 +22,11 @@ export type ZoneChartSeriesRow = {
   lossDoorW: number | null;
   lossInfiltrationW: number | null;
   lossMechanicalVentilationW: number | null;
+  airExchangeLossW: number;
   lossTotalW: number;
-  infiltrationSharePct: number | null;
+  infiltrationShareOfTotalPct: number | null;
+  infiltrationShareOfAirExchangePct: number | null;
+  lossShareWarnings: string[];
   status: ZoneDiagnosticStatus | null;
   statusNote: string | null;
 };
@@ -52,6 +55,9 @@ export type Zone3DOverlayMetric = {
 
 const asFinite = (value: unknown): number | null =>
   typeof value === "number" && Number.isFinite(value) ? value : null;
+
+const asStringArray = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0) : [];
 
 const normalizeZoneName = (value?: string | null) => (value ?? "").trim() || "Без названия";
 
@@ -98,12 +104,14 @@ export function buildBuildingLossSeries(result: ThermalSimulationResult): Buildi
   ];
 
   const present = rows.filter((row) => row.valueW !== null);
-  const totalW = present.reduce((acc, row) => acc + (row.valueW ?? 0), 0);
+  const totalW = asFinite(building.totalLossW) ?? present.reduce((acc, row) => acc + (row.valueW ?? 0), 0);
 
   return present.map((row) => ({
     ...row,
     sharePercent:
-      asFinite(building.lossSharePercent[row.key]) ??
+      (row.key === "infiltration"
+        ? asFinite(building.infiltrationShareOfTotalPct)
+        : asFinite(building.lossSharePercent[row.key])) ??
       (totalW > 0 ? ((row.valueW ?? 0) / totalW) * 100 : null),
   }));
 }
@@ -117,12 +125,22 @@ export function buildZoneSeries(result: ThermalSimulationResult): ZoneChartSerie
       const lossDoorW = asFinite(zone.lossDoorW);
       const lossInfiltrationW = asFinite(zone.lossInfiltrationW);
       const lossMechanicalVentilationW = asFinite(zone.lossMechanicalVentilationW);
+      const airExchangeLossW =
+        asFinite((zone as { airExchangeLossW?: number }).airExchangeLossW) ??
+        (lossInfiltrationW ?? 0) +
+          (lossMechanicalVentilationW ?? 0);
       const lossTotalW =
+        asFinite((zone as { totalLossW?: number }).totalLossW) ??
         (lossOpaqueW ?? 0) +
         (lossWindowW ?? 0) +
         (lossDoorW ?? 0) +
-        (lossInfiltrationW ?? 0) +
-        (lossMechanicalVentilationW ?? 0);
+        airExchangeLossW;
+      const infiltrationShareOfTotalPct =
+        asFinite((zone as { infiltrationShareOfTotalPct?: number }).infiltrationShareOfTotalPct) ??
+        (lossTotalW > 0 && lossInfiltrationW != null ? (lossInfiltrationW / lossTotalW) * 100 : null);
+      const infiltrationShareOfAirExchangePct =
+        asFinite((zone as { infiltrationShareOfAirExchangePct?: number }).infiltrationShareOfAirExchangePct) ??
+        (airExchangeLossW > 0 && lossInfiltrationW != null ? (lossInfiltrationW / airExchangeLossW) * 100 : null);
 
       return {
         zoneId: zone.zoneId,
@@ -134,9 +152,11 @@ export function buildZoneSeries(result: ThermalSimulationResult): ZoneChartSerie
         lossDoorW,
         lossInfiltrationW,
         lossMechanicalVentilationW,
+        airExchangeLossW,
         lossTotalW,
-        infiltrationSharePct:
-          lossTotalW > 0 && lossInfiltrationW != null ? (lossInfiltrationW / lossTotalW) * 100 : null,
+        infiltrationShareOfTotalPct,
+        infiltrationShareOfAirExchangePct,
+        lossShareWarnings: asStringArray((zone as { lossShareWarnings?: string[] }).lossShareWarnings),
         status: zone.status ?? null,
         statusNote: zone.statusNote?.trim() || null,
       };

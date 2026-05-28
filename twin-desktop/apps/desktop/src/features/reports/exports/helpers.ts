@@ -7,7 +7,10 @@
 
 import type { AssumptionEntry } from "./defaults/demoHouseDesignDefaults";
 import { DEMO_DEFAULT_FOOTNOTE, ASSUMPTIONS_SECTION_TITLE } from "./defaults/demoHouseDesignDefaults";
-import type { ReportDynamicResultState } from "./data/buildReportBaseData";
+import type {
+  ReportDynamicResultState,
+  ReportPreflightResult,
+} from "./data/buildReportBaseData";
 import type { ReportExportDocumentMeta } from "./types";
 
 export const REPORT_EXPORT_NOT_SET = "не задано";
@@ -308,6 +311,44 @@ export function renderToc(items: ReportTocItem[]): string {
 </section>`.trim();
 }
 
+export function renderDocumentStatusBlock(
+  preflight: ReportPreflightResult,
+  options: {
+    title?: string;
+    includeIssues?: boolean;
+    includeWarnings?: boolean;
+  } = {}
+): string {
+  const title = options.title ?? "Статус документа";
+  const issueRows: string[] = [];
+  if (options.includeIssues !== false) {
+    issueRows.push(
+      ...preflight.blockingIssues.map(
+        (issue) => `<li>${escapeHtml(issue.message)}</li>`
+      )
+    );
+  }
+  if (options.includeWarnings) {
+    issueRows.push(
+      ...preflight.warningIssues.map(
+        (issue) => `<li>${escapeHtml(issue.message)}</li>`
+      )
+    );
+  }
+
+  return `
+<section class="rx-status-block rx-status-${escapeHtml(preflight.status)}">
+  <h3 class="rx-section-title">${escapeHtml(title)}</h3>
+  <p><strong>Статус документа:</strong> ${escapeHtml(preflight.statusLabel)}</p>
+  <p>${escapeHtml(preflight.summary)}</p>
+  ${
+    issueRows.length
+      ? `<ul class="rx-status-list">${issueRows.join("")}</ul>`
+      : ""
+  }
+</section>`.trim();
+}
+
 /**
  * Блок подписей в конце документа.
  */
@@ -561,6 +602,27 @@ body.rx-document {
   margin: 8pt 0;
   font-style: italic;
 }
+.rx-status-block {
+  border: 0.8pt solid #000;
+  padding: 6pt 10pt;
+  margin-bottom: 10pt;
+}
+.rx-status-ready {
+  background: #f6fbf6;
+}
+.rx-status-not-ready {
+  background: #fff2f2;
+}
+.rx-status-for-review {
+  background: #fff8ec;
+}
+.rx-status-draft {
+  background: #f7f7f7;
+}
+.rx-status-list {
+  margin: 6pt 0 0;
+  padding-left: 16pt;
+}
 .rx-draft-banner {
   display: inline-block;
   padding: 3pt 10pt;
@@ -591,4 +653,4 @@ body.rx-document {
 `;
 
 /** Сохранён для совместимости с уже существующими импортами. */
-const BASE_REPORT_EXPORT_CSS = BASE_GOST_REPORT_CSS;
+export const BASE_REPORT_EXPORT_CSS = BASE_GOST_REPORT_CSS;

@@ -1,11 +1,8 @@
-/**
- * HTML-генератор для «Энергетического паспорта здания».
- */
-
 import {
   escapeHtml,
   renderAssumptionsBlock,
   renderDataTable,
+  renderDocumentStatusBlock,
   renderGostStamp,
   renderGostTitlePage,
   renderSignatureBlock,
@@ -19,12 +16,11 @@ import type {
 } from "../data/buildEnergyPassportData";
 import type { AssumptionEntry } from "../defaults/demoHouseDesignDefaults";
 
-const DOCUMENT_LABEL = "Энергетический паспорт здания";
+const DOCUMENT_LABEL = "Энергетический паспорт проекта здания";
 
 const ROW_KEY_TO_ASSUMPTION: Record<string, string> = {
   "ep-1-object": "meta.name",
   "ep-1-purpose": "thermalProtection.buildingCategory",
-  "ep-1-stage": "reportMeta.documentStage",
   "ep-2-city": "climate.city",
   "ep-2-indoor": "climate.indoorTemperatureC",
   "ep-2-humidity": "climate.indoorRelativeHumidityPercent",
@@ -52,16 +48,18 @@ export function generateEnergyPassportHtml(
     data.complexIndicators,
     data.energyLoads,
   ]
-    .map((section) => renderSection(section, appliedKeys))
+    .map((section) => renderSection(section, data.showFactColumn, appliedKeys))
     .join("\n");
 
   const body = `
 ${titlePage}
+${renderDocumentStatusBlock(data.preflight, { includeIssues: true, includeWarnings: true })}
 ${renderInfoSection("ep-doc", "Сведения о документе", data.documentInfo)}
 ${renderInfoSection("ep-source", "Источник заполнения данных", data.sourceInfo)}
+${renderInfoSection("ep-basis", "Основание заполнения", data.basisInfo)}
 ${renderInputRegisterSection("ep-registry", "Ведомость исходных данных", data.expertise.inputRegisterRows, data.expertise.showIncompleteFields)}
 <section>
-  <p>Энергетический паспорт здания сформирован в структуре текстовой части проектной документации и предназначен для представления расчётно-пояснительных материалов. Колонка «Фактическое значение» оставлена «—», так как проектная стадия не предполагает автоматического заполнения данных обследования.</p>
+  <p>${escapeHtml(data.factColumnNote)}</p>
 </section>
 ${sections}
 ${renderBulletSection("ep-software", "Сведения о программном расчёте", data.expertise.softwareInfoLines)}
@@ -143,27 +141,42 @@ function markValueIfAssumed(rowKey: string, value: string, appliedKeys: Set<stri
   return `${value}${DEMO_DEFAULT_VALUE_MARK}`;
 }
 
-function renderSection(section: EnergyPassportSection, appliedKeys: Set<string>): string {
+function renderSection(
+  section: EnergyPassportSection,
+  showFactColumn: boolean,
+  appliedKeys: Set<string>
+): string {
+  const columns = [
+    { label: "Показатель", width: showFactColumn ? "34%" : "40%" },
+    { label: "Ед. изм.", width: "10%", align: "center" as const },
+    { label: "Нормируемое значение", align: "right" as const },
+    { label: "Расчётное проектное значение", align: "right" as const },
+  ];
+  if (showFactColumn) {
+    columns.push({ label: "Фактическое значение", align: "right" as const });
+  }
+
   return `
 <section id="${escapeHtml(section.id)}">
   <h3 class="rx-section-title">${escapeHtml(section.title)}</h3>
   ${renderDataTable(
     null,
-    [
-      { label: "Показатель", width: "40%" },
-      { label: "Ед. изм.", width: "10%", align: "center" },
-      { label: "Нормируемое значение", align: "right" },
-      { label: "Расчётное проектное значение", align: "right" },
-      { label: "Фактическое значение", align: "right" },
-    ],
+    columns,
     section.rows.map((row) => ({
-      cells: [
-        row.label,
-        row.unit || "—",
-        row.normValue,
-        markValueIfAssumed(row.key, row.designValue, appliedKeys),
-        row.factValue,
-      ],
+      cells: showFactColumn
+        ? [
+            row.label,
+            row.unit || "—",
+            row.normValue,
+            markValueIfAssumed(row.key, row.designValue, appliedKeys),
+            row.factValue,
+          ]
+        : [
+            row.label,
+            row.unit || "—",
+            row.normValue,
+            markValueIfAssumed(row.key, row.designValue, appliedKeys),
+          ],
     }))
   )}
 </section>`.trim();

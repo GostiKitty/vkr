@@ -292,8 +292,8 @@ export function SpaceViewer3D({
     <div className="ui-panel p-4 sm:p-5">
       <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h3 className="text-sm font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">{caption}</h3>
-          <p className="mt-1 max-w-xl text-xs leading-relaxed text-[color:var(--text-muted)]">
+          <h3 className="text-sm font-semibold text-[color:var(--text-base)]">{caption}</h3>
+          <p className="mt-1 max-w-xl text-sm leading-relaxed text-[color:var(--text-muted)]">
             Колёсико мыши — масштаб; перетаскивание — обзор. Клик по объёму выбирает зону в списке свойств.
           </p>
         </div>
@@ -332,7 +332,7 @@ export function SpaceViewer3D({
               showFitControl && spaceInstances.length > 0 ? "bottom-14" : "bottom-4"
             }`}
           >
-            <div className="mb-1 flex items-center justify-between text-[11px] font-semibold text-[color:var(--text-soft)]">
+            <div className="mb-1 flex items-center justify-between text-sm font-semibold text-[color:var(--text-soft)]">
               <span>Момент времени</span>
               <span>{formatTimeLabel(frames[timeIndex]?.time ?? 0)}</span>
             </div>

@@ -84,6 +84,7 @@ export const MATERIAL_LIBRARY: Record<string, Material> = {
   gypsum: buildMaterialEntry("gypsum", 0.0125),
   glass: buildMaterialEntry("glass", 0.006),
   window_block: buildMaterialEntry("window_block", 0.02),
+  pvc_double_glazed_unit_equivalent: buildMaterialEntry("pvc_double_glazed_unit_equivalent", 0.07),
 };
 
 export const WALL_ASSEMBLIES: Record<string, WallAssembly> = {

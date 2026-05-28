@@ -1,7 +1,8 @@
 import type { BuildingModel } from "../../entities/geometry/types";
-import type { AdjacencyResult } from "../graph/adjacency";
+import { buildAdjacencyGraph, type AdjacencyResult } from "../graph/adjacency";
 import { buildThermalModel, type ThermalModel, type ThermalZone, type ThermalLink } from "./model";
 import type { EngineeringOptions } from "./engineering/types";
+import { resolveBuildingInfiltration, type ThermalInfiltrationInput } from "./infiltration";
 import { createSinusoidalWeatherProfile, type WeatherProfile, type SinusoidalWeatherParams } from "./weather";
 import {
   evaluateInternalGains,
@@ -20,13 +21,20 @@ const ABS_ZERO_OFFSET = 273.15;
 export interface ThermalSimulationOptions {
   duration: "24h" | "7d";
   timestepMinutes?: number;
-  heatingMode?: "ideal" | "hydronic_cap";
+  heatingMode?: "ideal" | "capacityLimited" | "hydronic_cap";
+  heatingCapacityW?: number | null;
+  heatingCapacityByRoomW?: Record<string, number> | null;
   outdoor: SinusoidalWeatherParams;
   setpoints: {
     day: number;
     night: number;
     dayStartHour: number;
     nightStartHour: number;
+    /**
+     * Продолжительность линейного разгона уставки (мин).
+     * 0 / undefined = ступенчатый переход. 60 = плавный прогрев за 1 ч.
+     */
+    setpointRampMinutes?: number;
   };
   internalGains: {
     dayGain_W_m2: number;
@@ -36,8 +44,11 @@ export interface ThermalSimulationOptions {
   };
   occupancy?: OccupancySchedule;
   infiltrationACH?: number;
+  infiltration?: ThermalInfiltrationInput;
   /** Кратность механической вентиляции (отдельный канал G_vent в RC). */
   ventilationACH?: number;
+  mechanicalVentilationEnabled?: boolean;
+  heatRecoveryFactor?: number;
   initialTemperatureC?: number;
   engineering?: EngineeringOptions;
 }
@@ -51,19 +62,27 @@ export interface ThermalTimelinePoint {
       temperatureC: number;
       heatingPowerW: number;
       setpointC: number;
+      unmetLoadW?: number;
     }
   >;
 }
 
 export interface RoomThermalResult {
   roomId: string;
-  timeline: Array<{ timeHours: number; temperatureC: number; heatingPowerW: number }>;
+  /**
+   * Временной ряд по помещению. Каждая точка соответствует шагу RC-расчёта.
+   * `setpointC` — уставка в этот момент времени, нужна для графика температур.
+   */
+  timeline: Array<{ timeHours: number; temperatureC: number; heatingPowerW: number; setpointC?: number; unmetLoadW?: number }>;
   /**
    * Тепловая энергия отопления за весь смоделированный период (24 ч или 7 суток), кВт·ч.
    * Не «суточная» в календарном смысле при длине сценария 7 d — это интеграл мощности за весь период.
    */
   dailyEnergyKWh: number;
   discomfortHours: number;
+  underheatingHours?: number;
+  overheatingHours?: number;
+  totalDiscomfortHours?: number;
 }
 
 export interface ThermalSimulationResult {
@@ -76,6 +95,11 @@ export interface ThermalSimulationResult {
     totalEnergyKWh: number;
     /** Сумма по зонам часов с температурой ниже уставки (>0,05 °C); может превышать длительность периода. */
     discomfortHours: number;
+    underheatingHours?: number;
+    overheatingHours?: number;
+    totalDiscomfortHours?: number;
+    peakUnmetLoadKW?: number;
+    unmetEnergyKWh?: number;
   };
   /** Предупреждения тепловой модели здания (геометрия, запасные допущения). */
   modelWarnings?: string[];
@@ -86,6 +110,9 @@ export interface ThermalSimulationResult {
 export interface SimulationScenario {
   durationHours: number;
   timestepSeconds: number;
+  heatingMode?: "ideal" | "capacityLimited" | "hydronic_cap";
+  heatingCapacityW?: number | null;
+  heatingCapacityByRoomW?: Record<string, number> | null;
   weather: WeatherProfile;
   setpoints: SetpointSchedule;
   gains: GainSchedule;
@@ -106,21 +133,45 @@ export function runThermalSimulation(
 ): ThermalSimulationResult {
   const durationHours = options.duration === "7d" ? 24 * 7 : 24;
   const timestepSeconds = Math.max(60, Math.round((options.timestepMinutes ?? 10) * 60));
+  const resolvedAdjacency = adjacency ?? buildAdjacencyGraph(building);
+  const resolvedIndoorTemperatureC = options.initialTemperatureC ?? (options.setpoints.day + options.setpoints.night) / 2;
+  const resolvedOutdoorTemperatureC = options.outdoor.baseC + (options.outdoor.seasonalOffsetC ?? 0);
+  const resolvedVentilationAch = options.ventilationACH ?? 0;
+  const resolvedMechanicalVentilationEnabled = options.mechanicalVentilationEnabled ?? resolvedVentilationAch > 0;
+  const infiltrationCalculation = resolveBuildingInfiltration(
+    building,
+    options.infiltration ?? {
+      infiltrationMode: "manualAch",
+      infiltrationACH: options.infiltrationACH,
+    },
+    {
+      indoorTemperatureC: resolvedIndoorTemperatureC,
+      outdoorTemperatureC: resolvedOutdoorTemperatureC,
+      mechanicalVentilationACH: resolvedVentilationAch,
+      mechanicalVentilationEnabled: resolvedMechanicalVentilationEnabled,
+    }
+  );
   const { model: thermalModel, warnings: thermalModelWarnings } = buildThermalModel(building, {
-    adjacency,
-    infiltrationACH: options.infiltrationACH,
-    ventilationACH: options.ventilationACH,
+    adjacency: resolvedAdjacency,
+    infiltrationACH: infiltrationCalculation.calculatedACH,
+    infiltrationCalculation,
+    ventilationACH: resolvedVentilationAch,
+    heatRecoveryFactor: options.heatRecoveryFactor,
     effectiveMassFactor: options.engineering?.effectiveMassFactor ?? 1,
   });
   const scenario: SimulationScenario = {
     durationHours,
     timestepSeconds,
+    heatingMode: options.heatingMode,
+    heatingCapacityW: options.heatingCapacityW ?? null,
+    heatingCapacityByRoomW: options.heatingCapacityByRoomW ?? null,
     weather: createSinusoidalWeatherProfile(options.outdoor),
     setpoints: {
       dayC: options.setpoints.day,
       nightC: options.setpoints.night,
       dayStartHour: options.setpoints.dayStartHour,
       nightStartHour: options.setpoints.nightStartHour,
+      rampMinutes: options.setpoints.setpointRampMinutes ?? 0,
     },
     gains: {
       dayGain_W_m2: options.internalGains.dayGain_W_m2,
@@ -143,6 +194,7 @@ export function runThermalSimulation(
   const diagnostics = buildThermalSimulationDiagnostics({
     building,
     model: thermalModel,
+    options,
     frames: run.frames,
     metricFrames: run.metricFrames,
     setpoints: scenario.setpoints,
@@ -152,6 +204,7 @@ export function runThermalSimulation(
     zoneSummary: metrics.zones,
     totalEnergyKWh: metrics.totalEnergyJ / 3_600_000,
     peakLoadKW: metrics.peakHeatingW / 1000,
+    adjacency: resolvedAdjacency,
   });
 
   const rooms: Record<string, RoomThermalResult> = {};
@@ -162,6 +215,9 @@ export function runThermalSimulation(
       timeline: history.timeline,
       dailyEnergyKWh: zoneMetrics ? zoneMetrics.energyJ / 3_600_000 : 0,
       discomfortHours: zoneMetrics ? zoneMetrics.discomfortSeconds / 3600 : 0,
+      underheatingHours: zoneMetrics ? zoneMetrics.underheatingSeconds / 3600 : 0,
+      overheatingHours: zoneMetrics ? zoneMetrics.overheatingSeconds / 3600 : 0,
+      totalDiscomfortHours: zoneMetrics ? zoneMetrics.totalDiscomfortSeconds / 3600 : 0,
     };
   });
 
@@ -172,6 +228,11 @@ export function runThermalSimulation(
       peakLoadKW: metrics.peakHeatingW / 1000,
       totalEnergyKWh: metrics.totalEnergyJ / 3_600_000,
       discomfortHours: metrics.discomfortSeconds / 3600,
+      underheatingHours: metrics.underheatingSeconds / 3600,
+      overheatingHours: metrics.overheatingSeconds / 3600,
+      totalDiscomfortHours: metrics.totalDiscomfortSeconds / 3600,
+      peakUnmetLoadKW: metrics.peakUnmetLoadW / 1000,
+      unmetEnergyKWh: metrics.totalUnmetEnergyJ / 3_600_000,
     },
     modelWarnings: thermalModelWarnings.length ? thermalModelWarnings : undefined,
     diagnostics,
@@ -262,14 +323,28 @@ export function simulateThermalNetwork(model: ThermalModel, scenario: Simulation
 
       const predictedK = currentTempK + (netPowerW / zone.capacitance_J_K) * timestepSeconds;
       let heatingPowerW = 0;
+      let unmetLoadW = 0;
       let nextTempK = predictedK;
       if (predictedK < setpointK) {
-        const deltaK = setpointK - predictedK;
-        heatingPowerW = (deltaK * zone.capacitance_J_K) / timestepSeconds;
-        nextTempK = setpointK;
+        const requiredHeatingW = ((setpointK - predictedK) * zone.capacitance_J_K) / timestepSeconds;
+        if ((scenario.heatingMode ?? "ideal") === "ideal") {
+          heatingPowerW = requiredHeatingW;
+          nextTempK = setpointK;
+        } else {
+          const availableHeatingW = Math.max(
+            0,
+            scenario.heatingCapacityByRoomW?.[zone.id] ?? scenario.heatingCapacityW ?? 0
+          );
+          heatingPowerW = Math.min(requiredHeatingW, availableHeatingW);
+          unmetLoadW = Math.max(0, requiredHeatingW - heatingPowerW);
+          nextTempK = currentTempK + ((netPowerW + heatingPowerW) / zone.capacitance_J_K) * timestepSeconds;
+        }
       }
       if (!Number.isFinite(heatingPowerW) || heatingPowerW < 0) {
         heatingPowerW = 0;
+      }
+      if (!Number.isFinite(unmetLoadW) || unmetLoadW < 0) {
+        unmetLoadW = 0;
       }
       if (!Number.isFinite(nextTempK)) {
         nextTempK = currentTempK;
@@ -279,12 +354,14 @@ export function simulateThermalNetwork(model: ThermalModel, scenario: Simulation
         temperatureC: currentTempC,
         heatingPowerW,
         setpointC,
+        unmetLoadW,
       };
       metricFrame.zones.push({
         zoneId: zone.id,
         temperatureC: currentTempC,
         setpointC,
         heatingPowerW,
+        unmetLoadW,
       });
 
       const history = roomHistories.get(zone.id);
@@ -293,6 +370,8 @@ export function simulateThermalNetwork(model: ThermalModel, scenario: Simulation
           timeHours,
           temperatureC: currentTempC,
           heatingPowerW,
+          setpointC,
+          unmetLoadW,
         });
       }
 

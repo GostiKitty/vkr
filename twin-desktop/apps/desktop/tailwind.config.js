@@ -5,6 +5,7 @@ export default {
     extend: {
       fontFamily: {
         sans: [
+          "Manrope",
           "Inter",
           "system-ui",
           "-apple-system",

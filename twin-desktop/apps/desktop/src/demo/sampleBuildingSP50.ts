@@ -1,3 +1,7 @@
+/**
+ * Legacy minimal SP50 fixture.
+ * Kept for tests and methodical examples; user-facing demo flows should use the canonical demo project instead.
+ */
 import { createEmptyBuildingModel, type BuildingModel, type Sp50EnvelopeFragmentInput, type WallLayer } from "../entities/geometry/types";
 import type { Sp50ComplianceReport } from "../core/thermal/sp50/types";
 import { runSP50Compliance } from "../core/thermal/sp50/index";

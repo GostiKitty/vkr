@@ -11,7 +11,7 @@
  *  7. Все 5 документов можно сгенерировать и скачать как HTML.
  *  8. «Скачать все документы» формирует 5 файлов.
  *  9. Все первые 4 документа содержат ГОСТ-штамп.
- * 10. Краткое инженерное заключение без тяжёлого штампа, но в стиле A4/ГОСТ.
+ * 10. Инженерное заключение оформляется в том же A4/ГОСТ-стиле.
  * 11. В экспортируемом HTML нет запрещённых строк.
  */
 
@@ -368,8 +368,8 @@ test("download-all: формирует 5 файлов с корректными 
   const expected = [
     "01-razdel-5-ov-ts.html",
     "02-raschet-teplovoy-zashchity.html",
-    "03-energeticheskiy-pasport.html",
-    "04-ekspluatacionno-tehnicheskiy-pasport.html",
+    "03-energeticheskiy-pasport-proekta-zdaniya.html",
+    "04-pasport-proektnyh-teplotehnicheskih-harakteristik.html",
     "05-inzhenernoe-zaklyuchenie.html",
   ];
   const actual = ALL_REPORT_EXPORT_KINDS.map((kind) => REPORT_EXPORT_BUNDLE_FILENAME[kind]);
@@ -405,17 +405,17 @@ test("ГОСТ: первые 4 документа содержат штамп rx
 // 10. Краткое заключение без тяжёлого штампа, но в стиле A4/ГОСТ.
 // ──────────────────────────────────────────────────────────────────────────
 
-test("ГОСТ: краткое заключение без тяжёлого штампа, но с A4/Times New Roman", () => {
+test("ГОСТ: инженерное заключение использует тот же A4/Times New Roman стиль", () => {
   const base = buildReportBaseData(emptyInput());
   const html = renderReportHtml("engineering-summary", base);
-  if (html.includes('<section class="rx-gost-stamp">')) {
-    throw new Error("Краткое заключение не должно содержать тяжёлый ГОСТ-штамп.");
+  if (!html.includes('<section class="rx-gost-stamp">')) {
+    throw new Error("Инженерное заключение должно содержать ГОСТ-штамп.");
   }
   if (!html.includes("Times New Roman")) {
-    throw new Error("Краткое заключение должно использовать Times New Roman в стиле.");
+    throw new Error("Инженерное заключение должно использовать Times New Roman в стиле.");
   }
   if (!html.includes("size: A4")) {
-    throw new Error("Краткое заключение должно объявлять размер A4 в стиле.");
+    throw new Error("Инженерное заключение должно объявлять размер A4 в стиле.");
   }
 });
 

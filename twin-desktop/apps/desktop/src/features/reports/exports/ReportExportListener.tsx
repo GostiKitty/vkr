@@ -1,6 +1,5 @@
 import { useEffect } from "react";
 import { useBuildStore } from "../../build/build.store";
-import { isVideoDemoProjectModel } from "../../build/demoVideoProject";
 import { loadReportMeta } from "../../build/reports/reportMetaPersistence";
 import { useTwinStore } from "../../../entities/twin/twin.store";
 import { useProjectStore } from "../../../entities/project/project.store";
@@ -8,6 +7,7 @@ import { useWorkflowStore } from "../../../entities/workflow/workflow.store";
 import {
   isDownloadReportCommand,
   isExportReportCommand,
+  type WorkspaceProjectCommand,
   useWorkspaceStore,
 } from "../../../entities/workspace/workspace.store";
 import { downloadAllReportDocuments, exportReportDocument } from "./exportReportDocument";
@@ -15,6 +15,11 @@ import { buildReportBaseData } from "./data/buildReportBaseData";
 import { prepareExportReportInput } from "./prepareExportReportInput";
 import { loadExpertiseInputs, useExpertiseInputsStore } from "./store/expertiseInputs.store";
 import type { ReportExportKind } from "./types";
+import {
+  isCanonicalDemoProjectId,
+  isCanonicalDemoProjectModel,
+} from "../../../shared/utils/demoProject";
+import { getResultSyncState } from "../../../shared/utils/modelSync";
 
 const EXPORT_COMMAND_TO_KIND: Record<string, ReportExportKind> = {
   "export-project-ov-ts": "project-ov-ts",
@@ -122,7 +127,7 @@ export function ReportExportListener() {
 
 export default ReportExportListener;
 
-function shouldPromptDemoDefaults(command: string, applyDemoDefaults: boolean): boolean {
+function shouldPromptDemoDefaults(command: WorkspaceProjectCommand | null, applyDemoDefaults: boolean): boolean {
   if (applyDemoDefaults) {
     return false;
   }
@@ -137,9 +142,8 @@ function isDemoProjectContext(): boolean {
   const buildState = useBuildStore.getState();
   const projectState = useProjectStore.getState();
   return (
-    isVideoDemoProjectModel(buildState.model) ||
-    (typeof projectState.projectId === "string" &&
-      projectState.projectId.startsWith("local:demo"))
+    isCanonicalDemoProjectModel(buildState.model) ||
+    isCanonicalDemoProjectId(projectState.projectId)
   );
 }
 
@@ -159,7 +163,7 @@ function askAboutDemoDefaults(): "enable" | "as-is" | "cancel" {
   return asIs ? "as-is" : "cancel";
 }
 
-function shouldCheckStrictCompleteness(command: string): boolean {
+function shouldCheckStrictCompleteness(command: WorkspaceProjectCommand | null): boolean {
   return (
     command === "download-all-exports" ||
     isExportReportCommand(command) ||
@@ -174,13 +178,25 @@ function buildCurrentExportBase(applyDemoDefaults: boolean) {
   const workflowState = useWorkflowStore.getState();
   const projectId = projectState.projectId ?? null;
   const projectKey = buildState.projectKey || projectId || "local-project";
+  const thermalResultState = getResultSyncState(
+    Boolean(twinState.lastThermalResult),
+    twinState.lastThermalResultBinding,
+    buildState.projectKey,
+    buildState.modelRevision
+  );
+  const monteCarloResultState = getResultSyncState(
+    Boolean(workflowState.monteCarloResult),
+    workflowState.monteCarloResultBinding,
+    buildState.projectKey,
+    buildState.modelRevision
+  );
   const prepared = prepareExportReportInput(
     {
       model: buildState.model,
       projectId,
       scenarioConfig: workflowState.scenarioConfig ?? null,
-      thermalResult: twinState.lastThermalResult ?? null,
-      monteCarloResult: workflowState.monteCarloResult ?? null,
+      thermalResult: thermalResultState === "current" ? twinState.lastThermalResult ?? null : null,
+      monteCarloResult: monteCarloResultState === "current" ? workflowState.monteCarloResult ?? null : null,
       reportMeta: loadReportMeta(projectKey),
       generatedAt: new Date(),
       expertiseInputs: loadExpertiseInputs(projectKey),
@@ -197,26 +213,18 @@ function canProceedWithStrictExport(
   base: ReturnType<typeof buildReportBaseData>,
   openInputsPanel: () => void
 ): boolean {
-  if (
-    base.expertise.exportMode !== "strict-expertise" ||
-    base.expertise.readiness.criticalMissing.length === 0
-  ) {
+  if (base.preflight.generationMode !== "final" || base.preflight.blockingIssues.length === 0) {
     return true;
   }
   if (typeof window === "undefined") {
     return false;
   }
-  const fields = base.expertise.readiness.criticalMissing
-    .map((field) => `• ${field.label}`)
+  const fields = base.preflight.blockingIssues
+    .map((issue) => `• ${issue.message}`)
     .join("\n");
-  const fillNow = window.confirm(
-    `Для формирования комплекта требуется заполнить следующие поля:\n\n${fields}\n\nНажмите OK, чтобы открыть форму заполнения.`
+  window.alert(
+    `Финальная выгрузка заблокирована. Устраните следующие замечания:\n\n${fields}`
   );
-  if (fillNow) {
-    openInputsPanel();
-    return false;
-  }
-  return window.confirm(
-    "Сформировать документы с пометкой «требует уточнения» для незаполненных полей?"
-  );
+  openInputsPanel();
+  return false;
 }

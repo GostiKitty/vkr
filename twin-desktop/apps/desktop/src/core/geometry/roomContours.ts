@@ -45,10 +45,30 @@ const SIGNATURE_PRECISION = 3;
 
 const clonePolygon = (polygon: Vec2[]): Vec2[] => polygon.map((point) => ({ ...point }));
 
-const signature = (polygon: Vec2[]): string =>
-  polygon
-    .map((point) => `${point.x.toFixed(SIGNATURE_PRECISION)}:${point.y.toFixed(SIGNATURE_PRECISION)}`)
-    .join("|");
+function pointToken(point: Vec2): string {
+  return `${point.x.toFixed(SIGNATURE_PRECISION)}:${point.y.toFixed(SIGNATURE_PRECISION)}`;
+}
+
+function rotateTokens(tokens: string[], startIndex: number): string[] {
+  return tokens.slice(startIndex).concat(tokens.slice(0, startIndex));
+}
+
+function signature(polygon: Vec2[]): string {
+  const tokens = polygon.map(pointToken);
+  if (!tokens.length) {
+    return "";
+  }
+  const candidates: string[] = [];
+  for (let index = 0; index < tokens.length; index += 1) {
+    candidates.push(rotateTokens(tokens, index).join("|"));
+  }
+  const reversed = [...tokens].reverse();
+  for (let index = 0; index < reversed.length; index += 1) {
+    candidates.push(rotateTokens(reversed, index).join("|"));
+  }
+  candidates.sort();
+  return candidates[0] ?? "";
+}
 
 export function detectRoomsFromWalls(
   model: BuildingModel

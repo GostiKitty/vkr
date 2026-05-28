@@ -88,9 +88,10 @@ function createRoomSeed(model, room, surfaces, levelMap, options, networkContext
     const infiltrationUA_W_K = AIR_DENSITY_KG_M3 * AIR_CP_J_KG_K * airflowFromACH(infiltrationAch, volumeM3);
     const roomSupply = networkContext.roomSupplyAir.get(room.roomId);
     const scheduledVentilationAch = Math.max(0, options.ventilationACH ?? DEFAULT_VENTILATION_ACH);
-    const scheduledVentilationUA_W_K = AIR_DENSITY_KG_M3 * AIR_CP_J_KG_K * airflowFromACH(scheduledVentilationAch, volumeM3);
+    const heatRecoveryFactor = Math.min(1, Math.max(0, options.heatRecoveryFactor ?? 0));
+    const scheduledVentilationUA_W_K = AIR_DENSITY_KG_M3 * AIR_CP_J_KG_K * airflowFromACH(scheduledVentilationAch, volumeM3) * (1 - heatRecoveryFactor);
     const mechanicalSupplyUA_W_K = roomSupply
-        ? AIR_DENSITY_KG_M3 * AIR_CP_J_KG_K * Math.max(0, roomSupply.airflow_m3_s)
+        ? AIR_DENSITY_KG_M3 * AIR_CP_J_KG_K * Math.max(0, roomSupply.airflow_m3_s) * (1 - heatRecoveryFactor)
         : 0;
     const ventilationUA_W_K = infiltrationUA_W_K + scheduledVentilationUA_W_K + mechanicalSupplyUA_W_K;
     const supplyAirTemperatureC = roomSupply?.supplyTemperatureC ?? options.supplyAirTemperatureC ?? options.outdoorTemperatureC;
@@ -218,6 +219,7 @@ function solveRoomBalances(roomSeeds, couplingLinks, options) {
     const balances = new Map();
     roomSeeds.forEach((room) => {
         const airTemperatureC = roomTemp.get(room.roomId) ?? room.setpointC;
+        const lossReferenceTemperatureC = room.setpointC;
         const adjacencyExchangeW = couplingLinks.reduce((sum, link) => {
             if (link.roomAId === room.roomId) {
                 return sum + link.conductance_W_K * ((roomTemp.get(link.roomBId) ?? airTemperatureC) - airTemperatureC);
@@ -227,9 +229,9 @@ function solveRoomBalances(roomSeeds, couplingLinks, options) {
             }
             return sum;
         }, 0);
-        const envelopeLossW = Math.max(0, room.externalUA_W_K * (airTemperatureC - options.outdoorTemperatureC));
-        const infiltrationLossW = Math.max(0, room.infiltrationUA_W_K * (airTemperatureC - options.outdoorTemperatureC));
-        const mechanicalVentilationLossW = Math.max(0, (room.ventilationUA_W_K - room.infiltrationUA_W_K) * (airTemperatureC - room.supplyAirTemperatureC));
+        const envelopeLossW = Math.max(0, room.externalUA_W_K * (lossReferenceTemperatureC - options.outdoorTemperatureC));
+        const infiltrationLossW = Math.max(0, room.infiltrationUA_W_K * (lossReferenceTemperatureC - options.outdoorTemperatureC));
+        const mechanicalVentilationLossW = Math.max(0, (room.ventilationUA_W_K - room.infiltrationUA_W_K) * (lossReferenceTemperatureC - room.supplyAirTemperatureC));
         const airExchangeLossW = infiltrationLossW + mechanicalVentilationLossW;
         const denominator = Math.max(1, room.externalUA_W_K + room.ventilationUA_W_K + room.internalCouplingUA_W_K);
         const requiredHeatingW = Math.max(0, room.setpointC * denominator -

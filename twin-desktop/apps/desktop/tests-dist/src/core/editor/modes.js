@@ -1,6 +1,29 @@
 const ARCHITECTURE_TOOLS = ["select", "roomRect", "room", "wall", "roof", "slab", "door", "window", "erase"];
-const NETWORK_TOOLS = ["select", "pipe", "duct", "equipment", "sensor", "erase"];
-const DRAW_TOOLS = ["roomRect", "room", "wall", "roof", "slab", "door", "window", "pipe", "duct", "equipment", "sensor"];
+const NETWORK_TOOLS = [
+    "select",
+    "pipe",
+    "duct",
+    "equipment",
+    "sensor",
+    "engineeringEquipment",
+    "engineeringPipe",
+    "erase",
+];
+const DRAW_TOOLS = [
+    "roomRect",
+    "room",
+    "wall",
+    "roof",
+    "slab",
+    "door",
+    "window",
+    "pipe",
+    "duct",
+    "equipment",
+    "sensor",
+    "engineeringEquipment",
+    "engineeringPipe",
+];
 export function modeFromViewport(viewport) {
     if (viewport === "view3d") {
         return "view3d";

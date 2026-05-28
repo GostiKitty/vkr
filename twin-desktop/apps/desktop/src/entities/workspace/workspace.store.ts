@@ -7,11 +7,12 @@ export type WorkspaceProjectCommand =
   | "new-project"
   | "open-project"
   | "open-demo"
+  | "run-thermal-calculation"
+  | "run-full-analysis"
   | "save"
   /**
-   * Устаревший общий канал: оставлен только для совместимости с
-   * существующими консьюмерами (ResultsPanel/TwinPage), которые переключают
-   * шаги/вкладки. Меню выгрузок использует 5 раздельных команд ниже.
+   * Legacy bridge-команда: оставлена только для переключения на вкладку документов
+   * внутри нового Results Hub.
    */
   | "export-report"
   | "export-project-ov-ts"
@@ -29,7 +30,7 @@ export type WorkspaceProjectCommand =
   | "clear-demo-defaults";
 
 /**
- * Команды «открыть в окне для просмотра / печати PDF».
+ * Команды "открыть документ для печати / PDF".
  */
 export const EXPORT_REPORT_COMMANDS = [
   "export-project-ov-ts",
@@ -40,7 +41,7 @@ export const EXPORT_REPORT_COMMANDS = [
 ] as const satisfies ReadonlyArray<WorkspaceProjectCommand>;
 
 /**
- * Команды «скачать как HTML-файл».
+ * Команды "скачать документ как HTML".
  */
 export const DOWNLOAD_REPORT_COMMANDS = [
   "download-project-ov-ts",
@@ -81,7 +82,7 @@ export const WORKSPACE_MODES: Array<{ id: WorkspaceMode; label: string; title: s
   { id: "plan", label: "План", title: "Планировка и ограждения" },
   { id: "view3d", label: "3D", title: "Объёмная модель" },
   { id: "networks", label: "Сети", title: "Инженерные сети" },
-  { id: "results", label: "Результаты", title: "Расчёт и отчёт" },
+  { id: "results", label: "Сводка", title: "Сводка конструктора" },
 ];
 
 interface WorkspaceState {
@@ -89,10 +90,8 @@ interface WorkspaceState {
   command: WorkspaceProjectCommand | null;
   commandNonce: number;
   /**
-   * Если true — слой выгрузки применяет профиль проектных допущений
-   * (defaults/demoHouseDesignDefaults) перед построением документов. Выключен
-   * по умолчанию: defaults никогда не применяются автоматически без явного
-   * согласия пользователя.
+   * Если true, слой выгрузки применяет demo/default profile перед построением
+   * экспортных документов.
    */
   applyDemoDefaults: boolean;
   setMode: (mode: WorkspaceMode) => void;

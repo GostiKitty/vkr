@@ -5,6 +5,7 @@ import { fetchTwin } from "./twin.api";
 import { buildSpaceInstances, buildThermalGraph, simulateThermalGraph } from "./twin.engine";
 import type { UseTwinResult } from "./twin.types";
 import { useEngineSettingsStore } from "../../entities/settings/engine.store";
+import { writeAgentDebugLog } from "../../shared/utils/agentDebugLog";
 
 const RECONNECT_DELAY_MS = 5000;
 
@@ -34,6 +35,19 @@ export function useTwin(projectId: string | null, projectKind: ProjectKind): Use
     }
 
     if (projectKind === "local" || normalizedProjectId.startsWith("local:")) {
+      const simulationDataSource = useTwinStore.getState().simulationDataSource;
+      const twinSource = typeof twin?.meta?.source === "string" ? twin.meta.source : null;
+      const twinProjectId = typeof twin?.meta?.sourceProjectId === "string" ? twin.meta.sourceProjectId.trim() : null;
+      const keepComputedTwin =
+        simulationDataSource === "computed" &&
+        twinSource === "build-mode" &&
+        twinProjectId === normalizedProjectId;
+      // #region agent log
+      writeAgentDebugLog({sessionId:'c3d591',runId:'repro-5',hypothesisId:'H9',location:'useTwin.ts:local-branch',message:'useTwin local branch decision',data:{projectId:normalizedProjectId,projectKind,hadTwin:Boolean(twin),simulationDataSource,twinSource,twinProjectId,keepComputedTwin},timestamp:Date.now()});
+      // #endregion
+      if (!keepComputedTwin) {
+        setTwin(null);
+      }
       setLoading(false);
       setError(null);
       return;

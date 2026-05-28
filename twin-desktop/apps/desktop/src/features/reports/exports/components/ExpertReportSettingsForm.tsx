@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import { useMemo } from "react";
 import {
   EXPERTISE_INPUT_SECTIONS,
   useExpertiseInputsStore,
@@ -48,7 +48,7 @@ export function ExpertReportSettingsForm({
     >
       <div className="flex items-center justify-between border-b border-[color:var(--border-soft)] px-5 py-4">
         <div>
-          <h2 className="text-lg font-semibold">Исходные данные для экспертизы</h2>
+          <h2 className="text-lg font-semibold">Исходные данные для выпуска документов</h2>
           <p className="mt-1 text-sm text-[color:var(--text-muted)]">
             Поля из этой формы имеют приоритет над demo-defaults и используются при
             формировании всех 5 документов.

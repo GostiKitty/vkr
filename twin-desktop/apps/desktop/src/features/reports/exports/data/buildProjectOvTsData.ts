@@ -1,21 +1,13 @@
 /**
- * Данные для выгрузки "Раздел 5. Сведения об инженерном оборудовании,
- * сетях и системах инженерно-технического обеспечения. Подраздел Отопление,
- * вентиляция и кондиционирование воздуха, тепловые сети".
+ * Данные для выгрузки "Раздел 5 ОВ/ТС".
  */
 
 import type { ReportBaseData } from "./buildReportBaseData";
-import {
-  buildExportEnvelopeView,
-  type ExportEnvelopeElement,
-} from "./buildExportEnvelopeView";
+import type { ExportEnvelopeElement } from "./buildExportEnvelopeView";
 import { humanizeProjectText } from "./exportText";
 import {
-  formatDisplayEnum,
   formatDynamicMetricValue,
-  REPORT_EXPORT_NEEDS_CLARIFICATION,
   REPORT_EXPORT_NO_DATA,
-  REPORT_EXPORT_NOT_SET,
 } from "../helpers";
 
 export interface MetricRow {
@@ -53,6 +45,7 @@ export interface EnvelopeAppendixRow {
 export interface ProjectOvTsData {
   meta: ReportBaseData["meta"];
   expertise: ReportBaseData["expertise"];
+  preflight: ReportBaseData["preflight"];
   sectionTitle: string;
   subsectionTitle: string;
   toc: Array<{ id: string; label: string }>;
@@ -74,21 +67,10 @@ export interface ProjectOvTsData {
 
 export function buildProjectOvTsData(base: ReportBaseData): ProjectOvTsData {
   const { passport, sp50Report, meta } = base;
-  const expertise = base.expertise;
-  const climate = passport.climate;
-  const operation = passport.operation;
-  const summary = passport.summary;
-  const sp50Source = sp50Report?.sourceData;
-  const sp50Energy = sp50Report?.energy ?? null;
+  const { expertise, envelopeView, reportMetrics, preflight } = base;
+  const energy = sp50Report?.energy ?? null;
   const dynamics = passport.thermalResults;
   const dynamicState = base.source.dynamicResultState;
-  const envelopeView = buildExportEnvelopeView({
-    model: base.source.model,
-    constructions: sp50Report?.constructions ?? [],
-    heatedVolumeM3: summary.totalVolumeM3,
-    kobNorm: sp50Report?.building.kobNorm_W_m3K ?? null,
-    outdoorDesignTemperatureC: climate.outdoorDesignTemperatureC,
-  });
 
   const sourceDataRows: MetricRow[] = [
     metric("object", "Объект", "", expertise.fieldMap.projectName.value),
@@ -100,144 +82,43 @@ export function buildProjectOvTsData(base: ReportBaseData): ProjectOvTsData {
   ];
 
   const climateRows: MetricRow[] = [
-    metric("city", "Город / климатическая база", "", expertise.fieldMap.climateCity.value),
-    metric(
-      "outdoorDesign",
-      "Расчётная наружная температура для проектирования отопления",
-      "°C",
-      expertise.fieldMap.outdoorDesignTemperatureC.value
-    ),
-    metric(
-      "outdoorHeatingAverage",
-      "Средняя температура наружного воздуха отопительного периода",
-      "°C",
-      expertise.fieldMap.outdoorHeatingAverageC.value
-    ),
-    metric(
-      "heatingDays",
-      "Продолжительность отопительного периода",
-      "сут.",
-      expertise.fieldMap.heatingDurationDays.value
-    ),
-    metric(
-      "gsop",
-      "Градусо-сутки отопительного периода (ГСОП)",
-      "°C·сут.",
-      expertise.fieldMap.gsop.value
-    ),
-    metric("indoor", "Расчётная внутренняя температура", "°C", expertise.fieldMap.indoorDesignTemperatureC.value),
-    metric(
-      "humidity",
-      "Относительная влажность внутреннего воздуха",
-      "%",
-      expertise.fieldMap.indoorRelativeHumidityPercent.value
-    ),
-    metric(
-      "humidityZone",
-      "Зона влажности района строительства",
-      "",
-      expertise.fieldMap.humidityZone.value
-    ),
+    metric("city", "Город / климатическая база", "", reportMetrics.climateCity ?? REPORT_EXPORT_NO_DATA),
+    metric("outdoorDesign", "Расчётная наружная температура для проектирования отопления", "°C", formatValue(reportMetrics.outdoorDesignTemperatureC, 1)),
+    metric("outdoorHeatingAverage", "Средняя температура наружного воздуха отопительного периода", "°C", formatValue(reportMetrics.outdoorHeatingAverageC, 1)),
+    metric("heatingDays", "Продолжительность отопительного периода", "сут.", formatValue(reportMetrics.heatingDurationDays, 0)),
+    metric("gsop", "Градусо-сутки отопительного периода (ГСОП)", "°C·сут.", formatValue(reportMetrics.gsop, 0)),
+    metric("indoor", "Расчётная внутренняя температура", "°C", formatValue(reportMetrics.indoorDesignTemperatureC, 1)),
+    metric("humidity", "Относительная влажность внутреннего воздуха", "%", formatValue(reportMetrics.indoorRelativeHumidityPercent, 0)),
+    metric("humidityZone", "Зона влажности района строительства", "", reportMetrics.humidityZone ?? REPORT_EXPORT_NO_DATA),
   ];
 
-  climateRows[1].value = expertise.fieldMap.outdoorDesignTemperatureC.value;
-  climateRows[2].value = expertise.fieldMap.outdoorHeatingAverageC.value;
-  climateRows[3].value = expertise.fieldMap.heatingDurationDays.value;
-
   const objectSummaryRows: MetricRow[] = [
-    metric(
-      "purpose",
-      "Назначение здания",
-      "",
-      expertise.fieldMap.buildingPurpose.value
-    ),
+    metric("purpose", "Назначение здания", "", expertise.fieldMap.buildingPurpose.value),
     metric("storeys", "Этажность", "эт.", expertise.fieldMap.floorsCount.value),
-    metric("levels", "Количество уровней", "шт.", formatValue(summary.levelCount, 0)),
-    metric("rooms", "Количество помещений", "шт.", expertise.fieldMap.roomsCount.value),
-    metric("area", "Отапливаемая площадь", "м²", expertise.fieldMap.heatedArea.value),
-    metric("volume", "Отапливаемый объём", "м³", expertise.fieldMap.heatedVolume.value),
-    metric(
-      "envelopeCount",
-      "Количество элементов наружной тепловой оболочки",
-      "шт.",
-      formatValue(envelopeView.includedElements.length, 0)
-    ),
-    metric(
-      "compactness",
-      "Показатель компактности",
-      "1/м",
-      formatValue(sp50Report?.building.compactness_1_m ?? null, 3)
-    ),
+    metric("levels", "Количество уровней", "шт.", formatValue(reportMetrics.levelCount, 0)),
+    metric("rooms", "Количество помещений", "шт.", formatValue(reportMetrics.roomCount, 0)),
+    metric("area", "Отапливаемая площадь", "м²", formatValue(reportMetrics.heatedAreaM2, 2)),
+    metric("volume", "Отапливаемый объём", "м³", formatValue(reportMetrics.heatedVolumeM3, 2)),
+    metric("envelopeCount", "Количество элементов наружной тепловой оболочки", "шт.", formatValue(envelopeView.includedElements.length, 0)),
+    metric("compactness", "Показатель компактности", "1/м", formatValue(sp50Report?.building.compactness_1_m ?? null, 3)),
   ];
 
   const heatingVentSummaryRows: MetricRow[] = [
-    metric(
-      "ventilationACH",
-      "Расчётная кратность вентиляции",
-      "1/ч",
-      expertise.fieldMap.ventilationAch.value,
-      "Параметр расчётного сценария"
-    ),
-    metric(
-      "infiltrationACH",
-      "Расчётная кратность инфильтрации",
-      "1/ч",
-      expertise.fieldMap.infiltrationAch.value,
-      "Параметр расчётного сценария"
-    ),
-    metric(
-      "heatRecovery",
-      "Коэффициент рекуперации",
-      "доля",
-      expertise.fieldMap.heatRecoveryEfficiencyPercent.value
-    ),
-    metric(
-      "mechVent",
-      "Механическая вентиляция",
-      "",
-      expertise.fieldMap.mechanicalVentilation.value
-    ),
+    metric("ventilationACH", "Расчётная кратность вентиляции", "1/ч", formatValue(reportMetrics.ventilationAch, 3), expertise.fieldMap.ventilationAch.sourceLabel),
+    metric("infiltrationACH", "Расчётная кратность инфильтрации", "1/ч", formatValue(reportMetrics.infiltrationAch, 3), expertise.fieldMap.infiltrationAch.sourceLabel),
+    metric("heatRecovery", "Коэффициент рекуперации", "доля", formatValue(reportMetrics.heatRecoveryFactor, 2), expertise.fieldMap.heatRecoveryEfficiencyPercent.sourceLabel),
+    metric("mechVent", "Механическая вентиляция", "", reportMetrics.mechanicalVentilation === null ? REPORT_EXPORT_NO_DATA : reportMetrics.mechanicalVentilation ? "да" : "нет"),
     metric("daySetpoint", "Дневная уставка температуры", "°C", expertise.fieldMap.daySetpointC.value),
     metric("nightSetpoint", "Ночная уставка температуры", "°C", expertise.fieldMap.nightSetpointC.value),
   ];
 
   const thermalLoadRows: MetricRow[] = [
-    metric(
-      "peakLoad",
-      "Расчётная пиковая тепловая нагрузка",
-      "кВт",
-      formatDynamicMetricValue(dynamics.peakLoadKW, dynamicState, { digits: 2 })
-    ),
-    metric(
-      "specificPeak",
-      "Удельная пиковая нагрузка",
-      "Вт/м²",
-      formatDynamicMetricValue(dynamics.specificPeakLoad_W_m2, dynamicState, { digits: 1 })
-    ),
-    metric(
-      "totalEnergy",
-      "Расчётная тепловая энергия за период",
-      "кВт·ч",
-      formatDynamicMetricValue(dynamics.totalEnergyKWh, dynamicState, { digits: 1 })
-    ),
-    metric(
-      "specificEnergy",
-      "Удельная тепловая энергия за период",
-      "кВт·ч/м²",
-      formatDynamicMetricValue(dynamics.specificEnergyKWh_m2, dynamicState, { digits: 2 })
-    ),
-    metric(
-      "annualHeating",
-      "Годовой расход тепловой энергии",
-      "кВт·ч",
-      formatValue(sp50Energy?.annualHeatingEnergy_kWh, 1)
-    ),
-    metric(
-      "annualLosses",
-      "Годовые теплопотери оболочки",
-      "кВт·ч",
-      formatValue(sp50Energy?.annualTotalLosses_kWh, 1)
-    ),
+    metric("peakLoad", "Расчётная пиковая тепловая нагрузка", "кВт", formatDynamicMetricValue(reportMetrics.peakHeatLoadKW, dynamicState, { digits: 2 })),
+    metric("specificPeak", "Удельная пиковая нагрузка", "Вт/м²", formatDynamicMetricValue(reportMetrics.specificPeakLoad_W_m2, dynamicState, { digits: 1 })),
+    metric("totalEnergy", "Тепловая энергия за расчётный период", "кВт·ч", formatDynamicMetricValue(reportMetrics.totalHeatEnergyKWh, dynamicState, { digits: 1 })),
+    metric("specificEnergy", "Удельная тепловая энергия за расчётный период", "кВт·ч/м²", formatDynamicMetricValue(reportMetrics.specificEnergyKWh_m2, dynamicState, { digits: 2 })),
+    metric("annualHeating", "Годовой расход тепловой энергии", "кВт·ч", formatValue(reportMetrics.annualHeatingEnergy_kWh, 1)),
+    metric("annualLosses", "Годовые теплопотери оболочки", "кВт·ч", formatValue(reportMetrics.annualEnvelopeLosses_kWh, 1)),
   ];
 
   const envelopeGroupRows: EnvelopeGroupRow[] = envelopeView.groupedElements.map((entry) => ({
@@ -252,31 +133,21 @@ export function buildProjectOvTsData(base: ReportBaseData): ProjectOvTsData {
   }));
 
   const energyRows: MetricRow[] = [
-    metric("kob", "Удельная теплозащитная характеристика kоб", "Вт/(м³·К)", formatValue(envelopeView.kobActual, 3)),
-    metric(
-      "kobNorm",
-      "Нормативное значение kоб",
-      "Вт/(м³·К)",
-      formatValue(envelopeView.kobNorm, 3)
-    ),
-    metric("kobStatus", "Статус проверки kоб", "", envelopeView.kobStatus),
-    metric(
-      "qHeatingCharacteristic",
-      "Удельная характеристика расхода тепловой энергии",
-      "Вт/(м³·К)",
-      formatValue(sp50Energy?.qHeatingCharacteristic_W_m3K, 3)
-    ),
-    metric("qByArea", "Удельный расход по площади", "кВт·ч/м²", formatValue(sp50Energy?.qByArea_kWh_m2, 2)),
-    metric("qByVolume", "Удельный расход по объёму", "кВт·ч/м³", formatValue(sp50Energy?.qByVolume_kWh_m3, 3)),
+    metric("kob", "Удельная теплозащитная характеристика kоб", "Вт/(м³·К)", formatValue(reportMetrics.kobActual_W_m3K, 3)),
+    metric("kobNorm", "Нормативное значение kоб", "Вт/(м³·К)", formatValue(reportMetrics.kobNorm_W_m3K, 3)),
+    metric("kobStatus", "Статус проверки kоб", "", reportMetrics.kobStatus),
+    metric("qHeatingCharacteristic", "Удельная характеристика расхода тепловой энергии qот", "Вт/(м³·К)", formatValue(reportMetrics.qHeatingCharacteristic_W_m3K, 3)),
+    metric("qByArea", "Удельный годовой расход по площади", "кВт·ч/м²", formatValue(reportMetrics.qByArea_kWh_m2, 2)),
+    metric("qByVolume", "Удельный годовой расход по объёму", "кВт·ч/м³", formatValue(reportMetrics.qByVolume_kWh_m3, 3)),
   ];
 
-  const conclusions = buildConclusions(base, envelopeView.kobStatus);
   const missingData = uniqueHumanMessages(base.source.model, [
     ...expertise.clarificationLines,
+    ...preflight.blockingIssues.map((issue) => issue.message),
     ...buildDoorClarificationLines(envelopeView.includedElements),
     ...(passport.warnings ?? []),
     ...(sp50Report?.missingData ?? []),
-    ...(sp50Energy?.placeholderWarnings ?? []),
+    ...(energy?.placeholderWarnings ?? []),
     ...envelopeView.warnings,
   ]);
 
@@ -292,28 +163,29 @@ export function buildProjectOvTsData(base: ReportBaseData): ProjectOvTsData {
   return {
     meta,
     expertise,
+    preflight,
     sectionTitle:
       "Раздел 5. Сведения об инженерном оборудовании, сетях и системах инженерно-технического обеспечения",
     subsectionTitle: "Отопление, вентиляция и кондиционирование воздуха, тепловые сети",
     toc: [
-      { id: "ovts-1", label: "1 Общие положения" },
-      { id: "ovts-2", label: "2 Исходные данные" },
-      { id: "ovts-3", label: "3 Климатические и метеорологические условия" },
-      { id: "ovts-4", label: "4 Сведения об объекте и расчётной модели" },
-      { id: "ovts-5", label: "5 Сведения об отоплении, вентиляции и тепловом режиме" },
-      { id: "ovts-6", label: "6 Тепловые нагрузки" },
-      { id: "ovts-7", label: "7 Теплотехнические характеристики ограждающих конструкций" },
+      { id: "ovts-1", label: "1 Общие сведения" },
+      { id: "ovts-2", label: "2 Основание для проектирования" },
+      { id: "ovts-3", label: "3 Исходные климатические данные" },
+      { id: "ovts-4", label: "4 Характеристика объекта" },
+      { id: "ovts-5", label: "5 Проектные решения по отоплению и вентиляции" },
+      { id: "ovts-6", label: "6 Расчётные тепловые нагрузки" },
+      { id: "ovts-7", label: "7 Теплотехнические характеристики оболочки" },
       { id: "ovts-8", label: "8 Энергетические показатели" },
-      { id: "ovts-9", label: "9 Выводы и рекомендации" },
-      { id: "ovts-10", label: "10 Перечень недостающих исходных данных" },
+      { id: "ovts-9", label: "9 Вывод" },
+      { id: "ovts-10", label: "10 Перечень данных, требующих уточнения" },
       { id: "ovts-app-a", label: "Приложение А. Ведомость ограждающих конструкций" },
       { id: "ovts-app-b", label: "Приложение Б. Подробные расчётные таблицы" },
       { id: "ovts-app-v", label: "Приложение В. Справочная динамическая RC-оценка" },
     ],
     generalProvisions: [
-      "Настоящий расчётный документ сформирован в структуре текстовой части проектной документации и предназначен для представления расчётно-пояснительных материалов по тепловой защите здания.",
-      "Расчёт выполнен средствами расчётного модуля программного комплекса.",
-      "Основная часть документа содержит сводные показатели по типам конструкций; детальная ведомость элементов вынесена в приложение.",
+      "Документ сформирован как текстовая часть проектной документации по разделу 5 ОВ/ТС и содержит расчётно-пояснительные материалы по тепловой защите здания и инженерным нагрузкам.",
+      "Расчётные теплотехнические показатели приняты по данным цифровой модели здания, расчёта по СП 50.13330 и действующего расчётного сценария.",
+      "Нормативные выводы по оболочке и энергетическим показателям представлены по единому набору проектных метрик без локальных пересчётов в шаблонах документа.",
     ],
     sourceDataRows,
     climateRows,
@@ -322,7 +194,7 @@ export function buildProjectOvTsData(base: ReportBaseData): ProjectOvTsData {
     thermalLoadRows,
     envelopeGroupRows,
     energyRows,
-    conclusions,
+    conclusions: buildConclusions(base),
     missingData,
     appendixEnvelopeRows: envelopeView.appendixElements.map((entry) =>
       mapEnvelopeAppendixRow(entry, expertise.showTechnicalIdsInAppendix)
@@ -346,53 +218,39 @@ function buildRcDynamicRows(base: ReportBaseData): MetricRow[] {
   ];
 }
 
-function buildConclusions(base: ReportBaseData, kobStatus: string): string[] {
+function buildConclusions(base: ReportBaseData): string[] {
+  const metrics = base.reportMetrics;
   const lines: string[] = [];
-  const energy = base.sp50Report?.energy ?? null;
-  const dynamics = base.passport.thermalResults;
-  const dynamicComfort =
-    dynamics.available &&
-    dynamics.averageRoomTemperatureC !== null &&
-    dynamics.averageRoomTemperatureC >= 20 &&
-    dynamics.averageRoomTemperatureC <= 24;
 
-  if (dynamicComfort && kobStatus === "не соответствует") {
+  const integralPass =
+    metrics.kobStatus === "соответствует" && metrics.qHeatingStatus === "соответствует";
+
+  if (integralPass && metrics.envelopeElementFailures.length > 0) {
     lines.push(
-      "По результатам динамической RC-оценки температура воздуха в расчётном сценарии находится в комфортном диапазоне. При этом нормативная проверка теплозащиты выявила несоответствие отдельных ограждающих конструкций требованиям по сопротивлению теплопередаче."
+      `Соответствует по интегральным показателям. Требуется устранить несоответствие поэлементной проверки: ${metrics.envelopeElementFailures
+        .map((entry) => `${entry.designation} (${entry.typeLabel})`)
+        .join(", ")}.`
     );
-  } else if (kobStatus === "соответствует") {
-    lines.push(
-      "По сводным теплотехническим характеристикам наружная оболочка здания соответствует расчётным нормативным требованиям."
-    );
-  } else if (kobStatus === "не соответствует") {
-    lines.push(
-      "По сводным теплотехническим характеристикам выявлены конструкции и/или показатели, требующие корректировки проектных решений."
-    );
+  } else if (metrics.kobStatus === "соответствует" && metrics.qHeatingStatus === "соответствует") {
+    lines.push("Интегральные показатели тепловой защиты и энергетической эффективности соответствуют расчётным нормативным требованиям.");
+  } else if (metrics.kobStatus === "не соответствует" || metrics.qHeatingStatus === "не соответствует") {
+    lines.push("Требуется корректировка проектных решений по оболочке и/или инженерным параметрам для достижения нормативных интегральных показателей.");
   } else {
-    lines.push(
-      "Окончательная нормативная проверка теплозащиты сформирована частично из-за неполноты исходных данных либо неоднозначной классификации отдельных элементов."
-    );
+    lines.push("Окончательный нормативный вывод не может быть представлен без устранения замечаний по исходным данным и поэлементной проверке.");
   }
 
-  if (energy?.usesPlaceholderInputs) {
-    lines.push(
-      "Энергетические показатели рассчитаны предварительно; часть исходных данных по вентиляции и инфильтрации требует уточнения."
-    );
-  } else if (energy?.status === "pass") {
-    lines.push(
-      "Удельный расход тепловой энергии на отопление и вентиляцию находится в пределах нормативных требований."
-    );
-  } else if (energy?.status === "fail" || energy?.complies === false) {
-    lines.push("Энергетические показатели здания требуют дополнительной оптимизации.");
+  if (metrics.usesPlaceholderInputs) {
+    lines.push("Энергетические показатели сформированы с учётом placeholder-данных и подлежат уточнению после задания проектных параметров вентиляции и инфильтрации.");
+  }
+
+  if (base.preflight.status === "not-ready") {
+    lines.push("Финальный выпуск комплекта заблокирован до устранения критических замечаний preflight-проверки.");
+  } else if (base.preflight.status === "ready") {
+    lines.push("Комплект может быть выпущен как итоговый расчётно-пояснительный материал после печатной проверки оформления.");
   } else {
-    lines.push("Энергетические показатели требуют дополнительного набора исходных данных.");
+    lines.push("Документ сформирован как черновой / проверочный экземпляр и должен использоваться только после проверки полноты исходных данных.");
   }
 
-  if (base.passport.thermalResults.available) {
-    lines.push(
-      "Динамическая RC-оценка теплового режима использовалась как справочный инженерный материал и не заменяет нормативную проверку по СП 50."
-    );
-  }
   return lines;
 }
 
@@ -407,11 +265,18 @@ function mapEnvelopeAppendixRow(
     typeLabel: entry.typeLabel,
     area: formatValue(entry.areaM2, 2),
     actualResistance: formatValue(entry.actualResistance, 2),
-    requiredResistance: formatValue(entry.normalizedResistance, 2),
+    requiredResistance: formatRequiredResistance(entry),
     status: entry.status,
     modelId: showTechnicalIdsInAppendix ? entry.modelId : "—",
     note: entry.classificationNote,
   };
+}
+
+function formatRequiredResistance(entry: ExportEnvelopeElement): string {
+  if (entry.category === "external-door" && entry.normalizedResistance === null) {
+    return "требуется задание нормативного значения";
+  }
+  return formatValue(entry.normalizedResistance, 2);
 }
 
 function formatValue(value: number | null | undefined, digits = 1): string {
@@ -424,16 +289,18 @@ function formatValue(value: number | null | undefined, digits = 1): string {
   }).format(value);
 }
 
-function textOrNoData(value: string | null | undefined): string {
-  return typeof value === "string" && value.trim() ? value : REPORT_EXPORT_NO_DATA;
-}
-
 function metric(key: string, label: string, unit: string, value: string, note?: string): MetricRow {
   return { key, label, unit, value, note };
 }
 
 function buildDoorClarificationLines(
-  elements: Array<{ category: string; designation: string; name: string; includeInEnvelope: boolean; normalizedResistance: number | null }>
+  elements: Array<{
+    category: string;
+    designation: string;
+    name: string;
+    includeInEnvelope: boolean;
+    normalizedResistance: number | null;
+  }>
 ): string[] {
   return elements
     .filter(
@@ -444,7 +311,7 @@ function buildDoorClarificationLines(
     )
     .map(
       (entry) =>
-        `Для наружной двери ${entry.designation || entry.name} требуется задание нормативного сопротивления теплопередаче или подтверждение принятого значения.`
+        `Для наружной двери ${entry.designation || entry.name} требуется задать нормативное сопротивление теплопередаче или подтвердить проектное значение.`
     );
 }
 
@@ -475,37 +342,6 @@ function humanizeMessage(
   const normalized = message.toLowerCase();
   if (normalized.includes("monte carlo")) {
     return "";
-  }
-  if (
-    normalized.includes("l_vent") ||
-    normalized.includes("lvent") ||
-    normalized.includes("ventilationach") ||
-    normalized.includes("nvent")
-  ) {
-    return "Часть исходных данных по вентиляции не задана. Энергетические показатели требуют уточнения после ввода проектных параметров воздухообмена.";
-  }
-  if (
-    normalized.includes("g_inf") ||
-    normalized.includes("ginf") ||
-    normalized.includes("infiltrationach") ||
-    normalized.includes("ninf")
-  ) {
-    return "Часть исходных данных по инфильтрации не задана. Энергетические показатели требуют уточнения после ввода проектных параметров воздухообмена.";
-  }
-  if (normalized.includes("beta") || normalized.includes("betav")) {
-    return "Не задан коэффициент использования теплопоступлений. Энергетические показатели требуют уточнения.";
-  }
-  if (normalized.includes("констант")) {
-    return "Часть параметров принята по умолчанию; рекомендуется уточнить исходные данные.";
-  }
-  if (
-    normalized.includes("межэтаж") &&
-    (normalized.includes("перекрыт") || normalized.includes("плита"))
-  ) {
-    return "Межэтажное перекрытие не включено в наружную тепловую оболочку, так как относится к внутренним конструкциям.";
-  }
-  if (/^перекрытие\s+межэтажное\s+перекрытие/i.test(message.trim())) {
-    return "Межэтажное перекрытие не включено в наружную тепловую оболочку, так как относится к внутренним конструкциям.";
   }
   return humanizeProjectText(message, model);
 }

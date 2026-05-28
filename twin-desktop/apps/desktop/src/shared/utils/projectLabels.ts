@@ -1,6 +1,9 @@
 import { firstDisplayText, looksLikeInternalId, sanitizeDisplayText } from "./displayText";
-
-const DEMO_VIDEO_PROJECT_IDS = new Set(["local:demo-video", "demo-video"]);
+import {
+  DEMO_PROJECT_NAME,
+  DEMO_PROJECT_SOURCE,
+  isCanonicalDemoProjectId,
+} from "./demoProject";
 
 /**
  * Человекочитаемое имя проекта для шапки и подписей (без raw `local:…`).
@@ -22,12 +25,8 @@ export function formatProjectDisplayLabel(
     return options?.fallback ?? "Текущий проект";
   }
 
-  if (DEMO_VIDEO_PROJECT_IDS.has(token) || /demo[-_]?video/i.test(token)) {
-    return "Демонстрационный дом · 2 этажа";
-  }
-
-  if (/^(?:local:)?demo/i.test(token) || /(?:^|[-_:])video(?:[-_:]|$)/i.test(token)) {
-    return "Демонстрационный дом";
+  if (isCanonicalDemoProjectId(token) || token === DEMO_PROJECT_SOURCE) {
+    return DEMO_PROJECT_NAME;
   }
 
   if (token.startsWith("local:")) {

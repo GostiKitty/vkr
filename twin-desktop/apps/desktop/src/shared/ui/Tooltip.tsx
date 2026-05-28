@@ -85,7 +85,7 @@ export function Tooltip({
         pointerEvents: open ? "auto" : "none",
       }}
     >
-      <p className="ui-kicker truncate">{title}</p>
+      <p className="text-sm font-semibold text-[color:var(--text-base)] truncate">{title}</p>
       <p className="mt-1.5 text-xs leading-5 text-[color:var(--text-muted)]">{description}</p>
       {details.length > 0 && (
         <ul className="mt-2.5 list-disc space-y-1 pl-4 text-[11px] leading-5 text-[color:var(--text-soft)]">
@@ -96,7 +96,7 @@ export function Tooltip({
       )}
       {formulas.length > 0 && (
         <div className="ui-panel-muted mt-3 p-2.5">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[color:var(--text-soft)]">Формулы</p>
+          <p className="text-sm font-semibold text-[color:var(--text-base)]">Формулы</p>
           <ul className="mt-1.5 space-y-1 text-[11px] text-[color:var(--text-muted)]">
             {formulas.map((formula) => (
               <li key={formula.id} className="flex items-center justify-between gap-2">

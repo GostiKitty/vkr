@@ -1,3 +1,4 @@
+import { createEmptyEngineeringSystems } from "../engineering/types";
 export const createEmptyBuildingModel = () => ({
     levels: [],
     rooms: [],
@@ -15,4 +16,5 @@ export const createEmptyBuildingModel = () => ({
     events: [],
     meta: {},
     thermalProtection: undefined,
+    engineeringSystems: createEmptyEngineeringSystems(),
 });

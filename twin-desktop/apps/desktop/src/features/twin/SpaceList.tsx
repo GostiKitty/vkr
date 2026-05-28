@@ -31,8 +31,8 @@ export function SpaceList() {
     <div className="ui-panel p-4">
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h3 className="text-sm font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">Помещения</h3>
-          <p className="text-xs text-[color:var(--text-soft)]">{loading ? "Загружаю…" : `${filteredSpaces.length} найдено`}</p>
+          <h3 className="text-base font-semibold text-[color:var(--text-base)]">Помещения</h3>
+          <p className="text-sm text-[color:var(--text-soft)]">{loading ? "Загружаю…" : `${filteredSpaces.length} найдено`}</p>
         </div>
         <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
           <input
@@ -78,13 +78,13 @@ export function SpaceList() {
               >
                 <div className="flex items-center justify-between text-sm font-semibold text-[color:var(--text-base)]">
                   <span className="truncate">{displayName}</span>
-                  <span className="text-xs text-[color:var(--text-soft)]">{formatArea(space.area_m2)}</span>
+                  <span className="text-sm text-[color:var(--text-soft)]">{formatArea(space.area_m2)}</span>
                 </div>
-                <div className="mt-1 flex items-center justify-between text-xs text-[color:var(--text-soft)]">
+                <div className="mt-1 flex items-center justify-between text-sm text-[color:var(--text-soft)]">
                   <span className="truncate">{space.level ?? "—"}</span>
                   <span>{formatVolume(space.volume_m3)}</span>
                 </div>
-                <div className="mt-2 flex items-center justify-between text-xs">
+                <div className="mt-2 flex items-center justify-between text-sm">
                   <span className="inline-flex items-center gap-2">
                     <span className="text-[color:var(--text-soft)]">Температура</span>
                     <span

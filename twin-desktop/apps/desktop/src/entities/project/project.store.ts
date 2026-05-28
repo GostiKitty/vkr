@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { isLocalProjectId, normalizeProjectId } from "../../shared/utils/projectRuntime";
 
 export type ProjectKind = "local" | "engine";
 
@@ -16,6 +17,20 @@ interface StoredProjectPayload {
 
 const STORAGE_KEY = "twinstudio.project";
 
+const resolveKind = (projectId: string | null, explicit?: ProjectKind): ProjectKind => {
+  const normalizedId = normalizeProjectId(projectId);
+  if (!normalizedId) {
+    return "local";
+  }
+  if (isLocalProjectId(normalizedId)) {
+    return "local";
+  }
+  if (explicit) {
+    return explicit;
+  }
+  return "engine";
+};
+
 const readStoredProject = (): StoredProjectPayload => {
   if (typeof window === "undefined") {
     return { id: null, kind: "local" };
@@ -27,18 +42,19 @@ const readStoredProject = (): StoredProjectPayload => {
   try {
     const parsed = JSON.parse(raw) as StoredProjectPayload;
     if (typeof parsed.id === "string" || parsed.id === null) {
+      const normalizedId = normalizeProjectId(parsed.id);
       return {
-        id: parsed.id,
-        kind: parsed.kind === "engine" ? "engine" : "local",
+        id: normalizedId,
+        kind: resolveKind(normalizedId, parsed.kind === "engine" ? "engine" : "local"),
       };
     }
   } catch {
     // ignore legacy format
   }
-  const fallbackId = raw;
+  const fallbackId = normalizeProjectId(raw);
   return {
     id: fallbackId,
-    kind: fallbackId?.startsWith("local:") ? "local" : "engine",
+    kind: resolveKind(fallbackId),
   };
 };
 
@@ -49,25 +65,16 @@ const persistProject = (payload: StoredProjectPayload) => {
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
 };
 
-const resolveKind = (projectId: string | null, explicit?: ProjectKind): ProjectKind => {
-  if (!projectId) {
-    return "local";
-  }
-  if (explicit) {
-    return explicit;
-  }
-  return projectId.startsWith("local:") ? "local" : "engine";
-};
-
 export const useProjectStore = create<ProjectState>((set) => {
   const initial = readStoredProject();
   return {
     projectId: initial.id,
     projectKind: initial.kind,
     setProjectId: (projectId, kind) => {
-      const nextKind = resolveKind(projectId, kind);
-      persistProject({ id: projectId, kind: nextKind });
-      set({ projectId, projectKind: nextKind });
+      const normalizedId = normalizeProjectId(projectId);
+      const nextKind = resolveKind(normalizedId, kind);
+      persistProject({ id: normalizedId, kind: nextKind });
+      set({ projectId: normalizedId, projectKind: nextKind });
     },
     clearProjectId: () => {
       persistProject({ id: null, kind: "local" });

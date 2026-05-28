@@ -1,3 +1,7 @@
+/**
+ * Legacy VKR fixture.
+ * Kept for tests and isolated experiments; product routes should use the canonical demo project instead.
+ */
 import type { BuildingModel, FloorSlab, Roof } from "../entities/geometry/types";
 import type { Equipment, PipeNetwork } from "../entities/networks/types";
 import { buildDemoSp50RunResult, sampleBuildingSP50, type DemoSp50RunResult } from "./sampleBuildingSP50";

@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { ThermalSimulationResult } from "../../core/thermal/solver";
 import type { Twin } from "../../shared/api/types";
+import type { ModelBinding } from "../../shared/utils/modelSync";
 import type { SimulationFrame, SpaceInstance, ThermalGraph } from "./types";
 
 export type SimulationDataSource = "demo" | "computed" | null;
@@ -15,6 +16,7 @@ interface TwinStoreState {
   simulationFrames: SimulationFrame[];
   timeIndex: number;
   lastThermalResult: ThermalSimulationResult | null;
+  lastThermalResultBinding: ModelBinding | null;
   simulationDataSource: SimulationDataSource;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
@@ -28,6 +30,7 @@ interface TwinStoreState {
     graph: ThermalGraph | null;
     result?: ThermalSimulationResult | null;
     source: "demo" | "computed";
+    binding?: ModelBinding | null;
   }) => void;
   setTimeIndex: (index: number) => void;
   clearSimulation: () => void;
@@ -57,6 +60,7 @@ const initialState: Omit<
   simulationFrames: [],
   timeIndex: 0,
   lastThermalResult: null,
+  lastThermalResultBinding: null,
   simulationDataSource: null,
 };
 
@@ -96,11 +100,12 @@ export const useTwinStore = create<TwinStoreState>((set, get) => ({
       simulationFrames: frames,
       timeIndex: frames.length ? Math.min(get().timeIndex, frames.length - 1) : 0,
     }),
-  setSimulationResult: ({ frames, graph, result, source }) =>
+  setSimulationResult: ({ frames, graph, result, source, binding }) =>
     set({
       simulationFrames: frames,
       thermalGraph: graph,
       lastThermalResult: result ?? null,
+      lastThermalResultBinding: result ? binding ?? null : null,
       simulationDataSource: source,
       timeIndex: frames.length ? 0 : 0,
     }),
@@ -119,6 +124,7 @@ export const useTwinStore = create<TwinStoreState>((set, get) => ({
       simulationFrames: [],
       timeIndex: 0,
       lastThermalResult: null,
+      lastThermalResultBinding: null,
       simulationDataSource: null,
     }),
   reset: () => set(initialState),

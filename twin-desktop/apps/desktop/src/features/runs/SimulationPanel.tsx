@@ -1,19 +1,25 @@
 import { useMemo, useState } from "react";
 
 import { useBuildStore } from "../build/build.store";
-import { buildAdjacencyGraph } from "../../core/graph/adjacency";
-import { syncBuildSimulationToStudio } from "../../core/thermal/thermalSimulationExport";
-import { runThermalSimulation, type ThermalSimulationResult } from "../../core/thermal/solver";
+import { type ThermalSimulationResult } from "../../core/thermal/solver";
 import type { EngineeringMetricCard } from "../../core/thermal/thermalDiagnostics";
 import { buildThermalSimulationInsightLines } from "../../core/thermal/thermalResultsInterpretation";
-import { applyScenarioToBuilding } from "../build/thermal/applyScenarioToBuilding";
 import { buildThermalOptionsFromWorkflow } from "../build/thermal/workflowThermalOptions";
 import { formatEnergy, formatNumber } from "../../shared/utils/format";
 import type { ProjectKind } from "../../entities/project/project.store";
 import type { RunResult, RunResultMetric } from "../../shared/api/types";
-import { runEngineSimulation } from "./runs.api";
+import { ENGINE_RUN_PATH, runEngineSimulation } from "./runs.api";
 import { FormulaHint } from "../formulas/components/FormulaHint";
 import { useWorkflowStore } from "../../entities/workflow/workflow.store";
+import { useEngineSettingsStore } from "../../entities/settings/engine.store";
+import { ApiError } from "../../shared/api/client";
+import { getProjectSource } from "../../shared/utils/projectRuntime";
+import { runLocalThermalCalculation } from "./runLocalThermalCalculation";
+import {
+  CollapsibleSection,
+  SummaryHero,
+  SummaryHighlightGrid,
+} from "../../shared/ui";
 import {
   EngineeringCallout,
   EngineeringMetricTile,
@@ -25,6 +31,9 @@ interface SimulationPanelProps {
   projectId: string | null;
   projectKind: ProjectKind;
   onSolveComplete?: (result: ThermalSimulationResult) => void;
+  onLocalRunStart?: () => void;
+  onLocalRunFinish?: () => void;
+  onLocalRunError?: (message: string) => void;
   /** Кнопка перехода к 3D (например, из вкладки «Результаты»). */
   onShowOnModel?: () => void;
   /** Прокрутка или фокус на блоке отчёта. */
@@ -35,13 +44,18 @@ export function SimulationPanel({
   projectId,
   projectKind,
   onSolveComplete,
+  onLocalRunStart,
+  onLocalRunFinish,
+  onLocalRunError,
   onShowOnModel,
   onGenerateReport,
 }: SimulationPanelProps) {
   const buildModel = useBuildStore((state) => state.model);
+  const projectKey = useBuildStore((state) => state.projectKey);
   const scenarioConfig = useWorkflowStore((state) => state.scenarioConfig);
-  const pushScenarioRunSnapshot = useWorkflowStore((state) => state.pushScenarioRunSnapshot);
-  const isLocalProject = projectKind === "local";
+  const engineBaseUrl = useEngineSettingsStore((state) => state.baseUrl.trim());
+  const projectSource = getProjectSource(projectId, projectKind);
+  const engineProjectAvailable = projectSource === "engine";
   const simulationOptions = useMemo(() => buildThermalOptionsFromWorkflow(scenarioConfig), [scenarioConfig]);
 
   const [result, setResult] = useState<ThermalSimulationResult | null>(null);
@@ -84,7 +98,7 @@ export function SimulationPanel({
   }, [result?.diagnostics?.building.balanceStatus]);
 
   const handleRunLocal = () => {
-    if (!isLocalProject || running) {
+    if (running) {
       return;
     }
     if (!buildModel.rooms.length) {
@@ -93,19 +107,11 @@ export function SimulationPanel({
     }
 
     setRunning(true);
+    onLocalRunStart?.();
     setSimError(null);
     setShowSuccess(false);
     try {
-      const adjacency = buildAdjacencyGraph(buildModel);
-      const modelForSim = applyScenarioToBuilding(buildModel, scenarioConfig);
-      const simulation = runThermalSimulation(modelForSim, simulationOptions, adjacency);
-      syncBuildSimulationToStudio(modelForSim, simulation, adjacency);
-      pushScenarioRunSnapshot({
-        label: scenarioConfig?.climateCityId ?? "Прогон",
-        peakLoadKW: simulation.summary.peakLoadKW,
-        totalEnergyKWh: simulation.summary.totalEnergyKWh,
-        discomfortHours: simulation.summary.discomfortHours,
-      });
+      const simulation = runLocalThermalCalculation();
       setResult(simulation);
       setShowSuccess(true);
       setTimeout(() => setShowSuccess(false), 1500);
@@ -113,14 +119,39 @@ export function SimulationPanel({
     } catch (err) {
       const message = err instanceof Error ? err.message : "Не удалось выполнить расчёт.";
       setSimError(message);
+      onLocalRunError?.(message);
     } finally {
       setRunning(false);
+      onLocalRunFinish?.();
     }
   };
 
   const handleRunEngine = async () => {
-    if (projectKind !== "engine" || !projectId || engineRunning) {
+    if (!engineProjectAvailable) {
+      setEngineError(
+        "Серверный расчёт недоступен для локального проекта. Используйте локальный расчёт или импортируйте модель на движок."
+      );
       return;
+    }
+    if (!projectId || engineRunning) {
+      return;
+    }
+    if (!engineBaseUrl) {
+      setEngineError("Не задан адрес движка. Откройте Инструменты → Настройки.");
+      return;
+    }
+    const endpoint = `${engineBaseUrl.replace(/\/+$/, "")}${ENGINE_RUN_PATH}`;
+    if (import.meta.env.DEV) {
+      console.groupCollapsed("[engine-run] Request debug");
+      console.log({
+        projectId,
+        projectKind,
+        projectKey,
+        baseUrl: engineBaseUrl,
+        endpoint,
+        source: projectSource,
+      });
+      console.groupEnd();
     }
     setEngineRunning(true);
     setEngineError(null);
@@ -132,105 +163,161 @@ export function SimulationPanel({
         onSolveComplete?.({ timeline: [], rooms: {}, summary: fallbackSummary });
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Не удалось запустить расчёт на движке.";
+      const message = mapEngineRunError(err, {
+        projectSource,
+        baseUrl: engineBaseUrl,
+      });
       setEngineError(message);
     } finally {
       setEngineRunning(false);
     }
   };
 
-  const localDisabled = !isLocalProject || !buildModel.rooms.length || running;
-  const engineActionDisabled = projectKind !== "engine" || !projectId || engineRunning;
+  const localDisabled = !buildModel.rooms.length || running;
+  const engineActionDisabled = !engineProjectAvailable || !projectId || !engineBaseUrl || engineRunning;
   const isBusy = running || engineRunning;
   const b = result?.diagnostics?.building;
 
+  const enginePeakMetric = engineMetrics.find((m) => /peak|нагруз/i.test(m.key) || /peak|нагруз/i.test(m.label ?? ""));
+  const heroHighlights =
+    result || engineResult
+      ? [
+          {
+            label: "Пиковая нагрузка",
+            value:
+              metrics.heatingLoad != null
+                ? `${formatNumber(metrics.heatingLoad, { maximumFractionDigits: 2 })} кВт`
+                : enginePeakMetric
+                  ? formatEngineValue(enginePeakMetric)
+                  : "—",
+            hint: "Максимум суммарной мощности отопления за период.",
+            tone: "info" as const,
+          },
+          {
+            label: "Тепловая энергия",
+            value: metrics.energyDemand == null ? "—" : formatEnergy(metrics.energyDemand),
+            hint: "Интеграл нагрузки за длительность сценария.",
+            tone: "neutral" as const,
+          },
+          {
+            label: "Часы дискомфорта",
+            value:
+              result?.summary.discomfortHours == null
+                ? "—"
+                : `${formatNumber(result.summary.discomfortHours, { maximumFractionDigits: 1 })} ч`,
+            hint: "Суммарно по зонам при отклонении ниже уставки.",
+            tone: (result?.summary.discomfortHours ?? 0) > 24 ? ("warning" as const) : ("success" as const),
+          },
+          {
+            label: "Удельная пиковая нагрузка",
+            value: b == null ? "—" : `${formatNumber(b.specificPeakLoad_W_m2, { maximumFractionDigits: 1 })} Вт/м²`,
+            hint: "На м² пола зон RC-модели.",
+            tone: balanceTone === "ok" ? ("success" as const) : balanceTone === "risk" ? ("warning" as const) : ("info" as const),
+          },
+        ]
+      : [];
+
   return (
     <div className="space-y-5">
-      <div className="ui-panel p-5 sm:p-6">
-        <EngineeringSectionHeader
-          kicker="Шаг расчёта"
-          title="Локальный тепловой расчёт"
-          subtitle="Зональная RC-модель по текущей геометрии из конструктора. Если сценарий сохранён, расчёт использует его климат, уставки, теплопоступления и ACH; иначе применяется встроенный пресет."
-        />
-        <div className="mt-5 flex flex-wrap gap-3">
+      <SummaryHero
+        title="Запуск теплового расчёта"
+        description="Локальная зональная RC-модель по геометрии из конструктора. При сохранённом сценарии учитываются климат, уставки и инфильтрация."
+      >
+        <div className="flex flex-wrap items-center gap-3">
           <button
             type="button"
             onClick={handleRunLocal}
             disabled={localDisabled}
-            className={`rounded-xl px-5 py-3 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-[color:var(--accent-base)]/30 sm:min-w-[220px] ${
+            className={`rounded-xl px-6 py-3.5 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-[color:var(--accent-base)]/30 sm:min-w-[240px] ${
               localDisabled
                 ? "cursor-not-allowed border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] text-[color:var(--text-soft)]"
-                : "ui-btn-primary sm:min-w-[220px]"
+                : "ui-btn-primary sm:min-w-[240px]"
             }`}
           >
             {running ? "Выполняется расчёт…" : "Запустить расчёт"}
           </button>
+          {result && (onShowOnModel || onGenerateReport) ? (
+            <div className="flex flex-wrap gap-2">
+              {onShowOnModel ? (
+                <button type="button" className="ui-btn-secondary text-sm" onClick={onShowOnModel}>
+                  Показать на модели
+                </button>
+              ) : null}
+              {onGenerateReport ? (
+                <button type="button" className="ui-btn-secondary text-sm" onClick={onGenerateReport}>
+                  Сформировать отчёт
+                </button>
+              ) : null}
+            </div>
+          ) : null}
         </div>
 
-        {!isLocalProject && (
-          <EngineeringCallout variant="info" title="Проект на движке" className="mt-4">
-            <p>
-              Сейчас выбран серверный режим. Локальный RC-прогон ниже не блокирует движок; при необходимости используйте
-              блок «Расчёт на движке».
-            </p>
-          </EngineeringCallout>
-        )}
-        {isLocalProject && !buildModel.rooms.length && (
+        {engineProjectAvailable ? (
+          <p className="mt-3 text-sm text-[color:var(--text-muted)]">
+            Проект также доступен на движке — серверный запрос вынесен в дополнительный блок ниже.
+          </p>
+        ) : null}
+        {!buildModel.rooms.length ? (
           <EngineeringCallout variant="attention" title="Модель не готова" className="mt-4">
-            <p>Добавьте помещения и стены в режиме конструирования — без зон расчёт не запустится.</p>
+            <p>Добавьте помещения и стены в конструкторе — без зон расчёт не запустится.</p>
           </EngineeringCallout>
-        )}
-
-        {simError && (
+        ) : null}
+        {simError ? (
           <EngineeringCallout variant="risk" title="Не удалось выполнить расчёт" className="mt-4">
             <p>{simError}</p>
           </EngineeringCallout>
-        )}
-
-        {showSuccess && !simError && (
-          <EngineeringCallout variant="success" title="Расчётная тепловая модель обновлена" className="mt-4">
-            <p>
-              Зональный расчёт выполнен по текущей геометрии. Можно открыть результаты, 3D и температурную карту — она
-              построена по зональной модели и не является CFD.
-            </p>
+        ) : null}
+        {showSuccess && !simError ? (
+          <EngineeringCallout variant="success" title="Расчёт обновлён" className="mt-4">
+            <p>Модель пересчитана. Откройте результаты или 3D — карта температур строится по зональной модели, не CFD.</p>
           </EngineeringCallout>
-        )}
-      </div>
+        ) : null}
+      </SummaryHero>
 
-      {projectKind === "engine" && (
-        <div className="ui-panel p-5 sm:p-6">
-          <EngineeringSectionHeader
-            kicker="Сервер"
-            title="Расчёт на движке"
-            subtitle="Запрос к API движка с текущим идентификатором проекта. Набор метрик зависит от версии сервера."
-          />
+      {heroHighlights.length > 0 ? <SummaryHighlightGrid items={heroHighlights} /> : null}
+
+      <CollapsibleSection
+        title="Расчёт на движке (опционально)"
+        description="Запрос к API движка. Набор метрик зависит от версии сервера."
+      >
+        <div className="space-y-4 pt-3">
           <button
             type="button"
             onClick={handleRunEngine}
             disabled={engineActionDisabled}
-            className={`mt-4 rounded-xl px-5 py-3 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-[color:var(--accent-base)]/30 sm:min-w-[220px] ${
+            className={`rounded-xl px-5 py-3 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-[color:var(--accent-base)]/30 sm:min-w-[220px] ${
               engineActionDisabled
                 ? "cursor-not-allowed border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] text-[color:var(--text-soft)]"
-                : "ui-btn-primary sm:min-w-[220px]"
+                : "ui-btn-secondary sm:min-w-[220px]"
             }`}
           >
             {engineRunning ? "Отправка запроса…" : "Запросить расчёт на движке"}
           </button>
-          {!projectId && (
-            <EngineeringCallout variant="attention" title="Нет идентификатора проекта" className="mt-4">
-              <p>Сначала загрузите проект в студии и получите идентификатор на движке.</p>
+          {!engineProjectAvailable ? (
+            <EngineeringCallout variant="info" title="Локальная модель">
+              <p>Серверный расчёт доступен после импорта проекта на движок.</p>
             </EngineeringCallout>
-          )}
-          {engineError && (
-            <EngineeringCallout variant="risk" title="Ответ движка" className="mt-4">
+          ) : null}
+          {engineProjectAvailable && !engineBaseUrl ? (
+            <EngineeringCallout variant="attention" title="Движок не настроен">
+              <p>Укажите адрес в Инструменты → Настройки.</p>
+            </EngineeringCallout>
+          ) : null}
+          {engineProjectAvailable && !projectId ? (
+            <EngineeringCallout variant="attention" title="Нет идентификатора проекта">
+              <p>Сначала загрузите проект на движке.</p>
+            </EngineeringCallout>
+          ) : null}
+          {engineError ? (
+            <EngineeringCallout variant="risk" title="Ответ движка">
               <p>{engineError}</p>
             </EngineeringCallout>
-          )}
-          {engineResult && (
-            <div className="mt-4 space-y-1 rounded-xl border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] p-4 text-sm text-[color:var(--text-muted)]">
-              <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">Последний ответ</p>
+          ) : null}
+          {engineResult ? (
+            <div className="space-y-1 rounded-xl border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] p-4 text-sm text-[color:var(--text-muted)]">
+              <p className="text-sm font-semibold text-[color:var(--text-base)]">Последний ответ</p>
               <p>
-                ID запуска: <span className="font-semibold text-[color:var(--text-base)]">{engineResult.id}</span>
+                Запуск: <span className="font-semibold text-[color:var(--text-base)]">{engineResult.id}</span>
               </p>
               <p>
                 Статус: <span className="font-semibold text-[color:var(--text-base)]">{translateStatus(engineResult.status)}</span>
@@ -239,16 +326,16 @@ export function SimulationPanel({
                 Время: <span className="font-semibold text-[color:var(--text-base)]">{formatTimestamp(engineResult.started_at)}</span>
               </p>
             </div>
-          )}
+          ) : null}
         </div>
-      )}
+      </CollapsibleSection>
 
       <div className="ui-panel p-5 sm:p-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <EngineeringSectionHeader
-            kicker="Выходные данные"
-            title="Сводка по расчёту"
-            subtitle="Ключевые величины за выбранный период сценария. Удельные показатели отнесены к суммарной площади пола зон модели (не к «отапливаемой площади» СП)."
+            kicker="Показатели"
+            title="Детальная сводка"
+            subtitle="Расширенные величины за период сценария. Удельные значения — на м² пола зон модели."
           />
           <FormulaHint ids={["thermal_peak_load"]} />
         </div>
@@ -309,102 +396,101 @@ export function SimulationPanel({
                   />
                 </div>
 
-                {b && (
-                  <EngineeringCallout variant="assumption" title="Доли теплопотерь в диагностическом срезе (пик Σ Q̇_ot)">
-                    <p className="mb-2 text-[color:var(--text-muted)]">
-                      Непрозрачная часть {b.lossSharePercent.opaque.toFixed(0)}% · окна {b.lossSharePercent.window.toFixed(0)}% · двери{" "}
-                      {b.lossSharePercent.door.toFixed(0)}% · инфильтрация {b.lossSharePercent.infiltration.toFixed(0)}%. Учитывается только
-                      отвод при <em>T</em>
-                      <sub>внутри</sub> &gt; <em>T</em>
-                      <sub>наруж</sub>.
-                    </p>
-                    <p className="text-xs text-[color:var(--text-soft)]">{b.referenceNote}</p>
-                  </EngineeringCallout>
-                )}
-
-                <div className="grid gap-4 lg:grid-cols-2">
-                  <EngineeringCallout variant="assumption" title="Допущения расчёта">
-                    <ul>
-                      <li>Отопление моделируется как источник до уставки без учёта гидравлики и реальной регулировки.</li>
-                      <li>Инфильтрация — сенсибельная модель по ACH (см. формулу проводимости в карточках ниже).</li>
-                      <li>Блок не заменяет нормативную проверку СП 50 и не является CFD.</li>
-                    </ul>
-                  </EngineeringCallout>
-                  <EngineeringCallout variant="info" title="Ограничения метода">
-                    <ul>
-                      <li>Зональная температура — усреднение по объёму зоны.</li>
-                      <li>Остаток баланса в срезе проверяет согласованность с дискретным уравнением RC, а не «правильность здания» в нормах.</li>
-                    </ul>
-                  </EngineeringCallout>
-                </div>
-
-                {result.modelWarnings && result.modelWarnings.length > 0 && (
-                  <EngineeringCallout variant="attention" title="Предупреждения модели — что стоит проверить">
-                    <ul>
-                      {result.modelWarnings.map((w) => (
-                        <li key={w}>{w}</li>
-                      ))}
-                    </ul>
-                  </EngineeringCallout>
-                )}
-
-                {insightLines.length > 0 && (
-                  <EngineeringCallout variant="info" title="Инженерный вывод (кратко)">
+                {insightLines.length > 0 ? (
+                  <EngineeringCallout variant="info" title="Краткий вывод">
                     <ul>
                       {insightLines.map((line) => (
                         <li key={line.slice(0, 80)}>{line}</li>
                       ))}
                     </ul>
                   </EngineeringCallout>
-                )}
-
-                {result.diagnostics && (
-                  <div className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] p-4 text-sm text-[color:var(--text-base)]">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">Методика RC и контрольные карточки</p>
-                    <p className="mt-2 leading-relaxed text-[color:var(--text-muted)]">{result.diagnostics.engineering.calculationLevelRu}</p>
-                    <p className="mt-2 font-mono text-[11px] leading-snug text-[color:var(--text-muted)]">{result.diagnostics.engineering.discreteBalanceEquation}</p>
-                    <p className="mt-1 text-xs text-[color:var(--text-muted)]">{result.diagnostics.engineering.infiltrationConductanceFormula}</p>
-                    <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">Показатели: формула и смысл</p>
-                    <ul className="mt-2 space-y-3">
-                      {result.diagnostics.metricCards.map((card) => (
-                        <li key={card.title} className="rounded-xl border border-[color:var(--border-soft)] bg-[color:var(--surface-elevated)] p-3 shadow-sm">
-                          <div className="flex flex-wrap items-baseline justify-between gap-2">
-                            <span className="font-medium text-[color:var(--text-base)]">{card.title}</span>
-                            <span className="tabular-nums text-[color:var(--text-base)]">
-                              {card.valueText} <span className="text-[color:var(--text-muted)]">{card.unit}</span> <DiagnosticsStatusBadge status={card.status} />
-                            </span>
-                          </div>
-                          <p className="mt-1 text-xs text-[color:var(--text-soft)]">Формула: {card.formula}</p>
-                          <p className="mt-1 text-xs text-[color:var(--text-muted)]">{card.engineeringSenseRu}</p>
-                          <p className="mt-1 text-xs text-[color:var(--text-muted)]">Допущения: {card.assumptionsRu}</p>
-                        </li>
-                      ))}
-                    </ul>
-                    <p className="mt-3 text-xs text-[color:var(--text-soft)]">{result.diagnostics.engineering.notSp50NormativeCheckRu}</p>
-                    <p className="mt-1 text-xs text-[color:var(--text-soft)]">{result.diagnostics.engineering.notMonteCarloRu}</p>
-                    <p className="mt-1 text-xs text-[color:var(--text-soft)]">{result.diagnostics.engineering.notCfdFieldRu}</p>
-                  </div>
-                )}
-
-                {result && (onShowOnModel || onGenerateReport) ? (
-                  <div className="mt-5 flex flex-wrap gap-2 border-t border-[color:var(--border-soft)] pt-4">
-                    {onShowOnModel ? (
-                      <button type="button" className="ui-btn-secondary text-sm" onClick={onShowOnModel}>
-                        Показать на модели
-                      </button>
-                    ) : null}
-                    {onGenerateReport ? (
-                      <button type="button" className="ui-btn-primary text-sm" onClick={onGenerateReport}>
-                        Сформировать отчёт
-                      </button>
-                    ) : null}
-                  </div>
                 ) : null}
+
+                <CollapsibleSection
+                  title="Методика, допущения и диагностика"
+                  description="Формулы, ограничения модели и контрольные карточки RC — для углублённой проверки."
+                >
+                  <div className="space-y-4 pt-3">
+                    {b ? (
+                      <EngineeringCallout variant="assumption" title="Доли теплопотерь (пик)">
+                        <p className="mb-2 text-[color:var(--text-muted)]">
+                          Непрозрачные {b.lossSharePercent.opaque.toFixed(0)}% · окна {b.lossSharePercent.window.toFixed(0)}% · двери{" "}
+                          {b.lossSharePercent.door.toFixed(0)}% · инфильтрация {(b.infiltrationShareOfTotalPct ?? b.lossSharePercent.infiltration).toFixed(0)}% от всех теплопотерь.
+                        </p>
+                        {b.lossShareWarnings.length ? (
+                          <ul className="mb-2 list-disc pl-5 text-xs text-[color:var(--text-soft)]">
+                            {b.lossShareWarnings.map((warning) => (
+                              <li key={warning}>{warning}</li>
+                            ))}
+                          </ul>
+                        ) : null}
+                        <p className="text-xs text-[color:var(--text-soft)]">{b.referenceNote}</p>
+                      </EngineeringCallout>
+                    ) : null}
+
+                    <div className="grid gap-4 lg:grid-cols-2">
+                      <EngineeringCallout variant="assumption" title="Допущения расчёта">
+                        <ul>
+                          <li>Отопление — источник до уставки без гидравлики и реальной регулировки.</li>
+                          <li>Инфильтрация по ACH; см. формулы в карточках ниже.</li>
+                          <li>Не заменяет нормативную проверку СП 50 и не является CFD.</li>
+                        </ul>
+                      </EngineeringCallout>
+                      <EngineeringCallout variant="info" title="Ограничения метода">
+                        <ul>
+                          <li>Зональная температура — усреднение по объёму.</li>
+                          <li>Остаток баланса проверяет согласованность RC, а не норматив здания.</li>
+                        </ul>
+                      </EngineeringCallout>
+                    </div>
+
+                    {result.modelWarnings && result.modelWarnings.length > 0 ? (
+                      <EngineeringCallout variant="attention" title="Предупреждения модели">
+                        <ul>
+                          {result.modelWarnings.map((w) => (
+                            <li key={w}>{w}</li>
+                          ))}
+                        </ul>
+                      </EngineeringCallout>
+                    ) : null}
+
+                    {result.diagnostics ? (
+                      <div className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] p-4 text-sm text-[color:var(--text-base)]">
+                        <p className="text-sm font-semibold text-[color:var(--text-base)]">Методика RC</p>
+                        <p className="mt-2 leading-relaxed text-[color:var(--text-muted)]">{result.diagnostics.engineering.calculationLevelRu}</p>
+                        <p className="mt-2 font-mono text-[11px] leading-snug text-[color:var(--text-muted)]">
+                          {result.diagnostics.engineering.discreteBalanceEquation}
+                        </p>
+                        <p className="mt-1 text-xs text-[color:var(--text-muted)]">{result.diagnostics.engineering.infiltrationConductanceFormula}</p>
+                        <p className="mt-4 text-sm font-semibold text-[color:var(--text-base)]">Контрольные показатели</p>
+                        <ul className="mt-2 space-y-3">
+                          {result.diagnostics.metricCards.map((card) => (
+                            <li key={card.title} className="rounded-xl border border-[color:var(--border-soft)] bg-[color:var(--surface-elevated)] p-3 shadow-sm">
+                              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                                <span className="font-medium text-[color:var(--text-base)]">{card.title}</span>
+                                <span className="tabular-nums text-[color:var(--text-base)]">
+                                  {card.valueText} <span className="text-[color:var(--text-muted)]">{card.unit}</span>{" "}
+                                  <DiagnosticsStatusBadge status={card.status} />
+                                </span>
+                              </div>
+                              <p className="mt-1 text-xs text-[color:var(--text-soft)]">Формула: {card.formula}</p>
+                              <p className="mt-1 text-xs text-[color:var(--text-muted)]">{card.engineeringSenseRu}</p>
+                              <p className="mt-1 text-xs text-[color:var(--text-muted)]">Допущения: {card.assumptionsRu}</p>
+                            </li>
+                          ))}
+                        </ul>
+                        <p className="mt-3 text-xs text-[color:var(--text-soft)]">{result.diagnostics.engineering.notSp50NormativeCheckRu}</p>
+                        <p className="mt-1 text-xs text-[color:var(--text-soft)]">{result.diagnostics.engineering.notMonteCarloRu}</p>
+                        <p className="mt-1 text-xs text-[color:var(--text-soft)]">{result.diagnostics.engineering.notCfdFieldRu}</p>
+                      </div>
+                    ) : null}
+                  </div>
+                </CollapsibleSection>
               </>
             )}
             {engineResult && (
               <div className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] p-4">
-                <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">Ответ движка</p>
+                <p className="text-sm font-semibold text-[color:var(--text-base)]">Ответ движка</p>
                 {engineMetrics.length ? (
                   <ul className="mt-2 space-y-1.5 text-sm text-[color:var(--text-muted)]">
                     {engineMetrics.map((metric) => (
@@ -507,6 +593,30 @@ function buildEngineSummary(result: RunResult | null): ThermalSimulationResult["
     peakLoadKW: peak ?? 0,
     discomfortHours: 0,
   };
+}
+
+function mapEngineRunError(
+  error: unknown,
+  context: {
+    projectSource: ReturnType<typeof getProjectSource>;
+    baseUrl: string;
+  }
+): string {
+  if (context.projectSource !== "engine") {
+    return "Серверный расчёт недоступен для локального проекта. Используйте локальный расчёт или импортируйте модель на движок.";
+  }
+  if (!context.baseUrl) {
+    return "Не задан адрес движка. Откройте Инструменты → Настройки.";
+  }
+  if (error instanceof ApiError) {
+    if (error.status === 404) {
+      return "Проект не найден на движке. Проверьте ID проекта или повторите импорт IFC.";
+    }
+    if (error.status >= 500) {
+      return "Движок не смог выполнить расчёт. Проверьте доступность сервера и повторите запрос.";
+    }
+  }
+  return error instanceof Error ? error.message : "Не удалось запустить расчёт на движке.";
 }
 
 export default SimulationPanel;

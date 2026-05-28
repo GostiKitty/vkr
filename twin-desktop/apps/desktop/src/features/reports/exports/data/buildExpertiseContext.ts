@@ -5,7 +5,6 @@ import type { AssumptionEntry } from "../defaults/demoHouseDesignDefaults";
 import {
   formatDisplayEnum,
   REPORT_EXPORT_DASH,
-  REPORT_EXPORT_NEEDS_CLARIFICATION,
   REPORT_EXPORT_NOT_SET,
 } from "../helpers";
 import type { ReportExportDocumentMeta } from "../types";
@@ -140,6 +139,7 @@ const STRICT_REQUIRED_KEYS = new Set<ExpertiseInputKey>([
   "checkedBy",
   "normControl",
   "chiefEngineer",
+  "contractNumber",
 ]);
 
 const SOURCE_LABEL: Record<ExpertiseResolvedSource, string> = {
@@ -192,6 +192,7 @@ const TRACKED_FIELD_ORDER: Array<{
   { key: "operationOrg", label: "Эксплуатирующая организация", importance: "optional" },
   { key: "inspectionFrequency", label: "Периодичность осмотров", importance: "optional" },
 ];
+void TRACKED_FIELD_ORDER;
 
 export function buildExpertiseContext(
   input: BuildExpertiseContextInput
@@ -711,9 +712,9 @@ export function buildExpertiseContext(
     packageRows: [
       { label: "01", value: "Раздел 5 ОВ/ТС" },
       { label: "02", value: "Расчёт тепловой защиты здания" },
-      { label: "03", value: "Энергетический паспорт здания" },
-      { label: "04", value: "Эксплуатационно-технический паспорт" },
-      { label: "05", value: "Краткое инженерное заключение" },
+      { label: "03", value: "Энергетический паспорт проекта здания" },
+      { label: "04", value: "Паспорт проектных теплотехнических характеристик" },
+      { label: "05", value: "Инженерное заключение" },
     ],
   };
 }
@@ -770,6 +771,9 @@ function buildClarificationLines(
 }
 
 function buildLimitations(inputs: ExpertiseReportInputs): string[] {
+  if (inputs.exportMode === "strict-expertise") {
+    return [];
+  }
   const lines = [
     "Расчётная часть сформирована по логике СП 50 и предназначена для предварительного расчётно-пояснительного анализа.",
     "Справочная динамическая RC-оценка не заменяет нормативную проверку по СП 50.",
@@ -984,11 +988,11 @@ function solarModeText(value: SolarGainsMode): string {
 function exportModeLabel(value: ExpertiseExportMode): string {
   switch (value) {
     case "strict-expertise":
-      return "строгий комплект для экспертизы";
+      return "финальный / expert";
     case "vkr-brief":
-      return "краткий комплект для ВКР";
+      return "для проверки / ВКР";
     default:
-      return "демонстрационный комплект";
+      return "черновой / demo";
   }
 }
 

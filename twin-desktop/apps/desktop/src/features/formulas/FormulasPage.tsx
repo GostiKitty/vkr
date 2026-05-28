@@ -7,12 +7,15 @@ import type { SimulationFrame } from "../../entities/twin/types";
 import { useWorkflowStore, type UncertaintyConfig } from "../../entities/workflow/workflow.store";
 import {
   assumptions,
+  formulaContours,
   formulaRegistry,
   type Formula,
   type Assumption,
+  type FormulaContour,
   type FormulaVariable,
 } from "../../entities/formulas/registry";
 import type { ScenarioConfig } from "../../entities/workflow/workflow.store";
+import { CollapsibleSection, SummaryHero, SummaryHighlightGrid } from "../../shared/ui";
 
 interface FormulaValueContext {
   selectedSpace: Space | null;
@@ -43,6 +46,8 @@ interface FormulaTopic {
   description: string;
   formulaIds: string[];
 }
+
+type FormulaContourFilter = "all" | FormulaContour;
 
 const formulaTopics: FormulaTopic[] = [
   {
@@ -88,6 +93,37 @@ const formulaTopics: FormulaTopic[] = [
     formulaIds: ["uncertainty_mc", "uncertainty_std"],
   },
   {
+    id: "derived",
+    title: "Дополнительные показатели и нормативные проверки",
+    description: "Дополнительные инженерные показатели и проверки, которые считаются поверх основных контуров и не подменяют базовый расчёт.",
+    formulaIds: [
+      "reduced_resistance_homogeneity",
+      "thermal_bridge_linear",
+      "thermal_bridge_point",
+      "heat_loss_coefficient_total",
+      "thermal_time_constant",
+      "free_cooling",
+      "internal_surface_temperature",
+      "dew_point_magnus",
+      "interstitial_condensation_check",
+      "temperature_profile_layers",
+      "fourier_number",
+      "heat_equation_1d",
+      "boundary_condition_third_kind",
+      "normative_ventilation",
+      "ventilation_recovery",
+      "hydronic_heat_capacity",
+      "heating_capacity_limit",
+      "discomfort_hours_split",
+      "uncertainty_risk_probability",
+      "uncertainty_cv",
+      "uncertainty_confidence_interval",
+      "uncertainty_corr_sensitivity",
+      "specific_heat_load_area",
+      "specific_heat_load_volume",
+    ],
+  },
+  {
     id: "metrics",
     title: "Энергетические показатели",
     description: "Суммарная энергия, пиковая нагрузка, средние и перцентильные значения.",
@@ -116,15 +152,15 @@ const calculationContours = [
   },
   {
     id: "transient1d",
-    title: "1D transient расчёт конструкции",
+    title: "Послойный 1D-расчёт конструкции",
     description:
       "Отдельный нестационарный расчёт по слоям конструкции. Базовые свойства слоёв связаны с этой страницей, но контур считается отдельно.",
   },
   {
     id: "legacy",
-    title: "Legacy report / legacy Monte Carlo path",
+    title: "Архивный отчётный контур",
     description:
-      "Устаревший отчётный контур по данным Twin API. Нуждается в синхронизации с основным расчётом конструктора и помечается отдельно.",
+      "Ранее использовавшийся отчётный контур по архивным данным движка. Он отделён от основного маршрута и помечается отдельно.",
   },
 ] as const;
 
@@ -139,7 +175,7 @@ const formulaStatusLegend: Array<{ status: FormulaUsageStatus; note: string }> =
   },
   {
     status: "используется в инженерной оценке оборудования",
-    note: "Derived hydronic metrics и проверка доступной мощности без прямого влияния на базовый RC solver.",
+    note: "Дополнительная оценка доступной мощности и расхода теплоносителя без влияния на базовый RC-расчёт.",
   },
   {
     status: "используется в hydronic mode",
@@ -155,7 +191,7 @@ const formulaStatusLegend: Array<{ status: FormulaUsageStatus; note: string }> =
   },
   {
     status: "используется только в legacy path",
-    note: "Старый отчётный или калибровочный контур, не основной расчёт конструктора.",
+    note: "Архивный отчётный или калибровочный контур, не основной расчёт конструктора.",
   },
   {
     status: "справочная / пока не участвует в основном расчёте",
@@ -186,6 +222,90 @@ const formulaUsageStatus: Record<string, FormulaUsageStatus> = {
 
 const formulaById: Record<string, Formula> = Object.fromEntries(formulaRegistry.map((formula) => [formula.id, formula]));
 
+function inferFormulaContour(formula: Formula): FormulaContour {
+  if (formula.contour) {
+    return formula.contour;
+  }
+  const usage = formulaUsageStatus[formula.id];
+  switch (usage) {
+    case "используется в RC-модели":
+    case "используется в hydronic mode":
+      return "rc-runtime";
+    case "используется в инженерном балансе":
+    case "используется в инженерной оценке оборудования":
+      return "derived-only";
+    case "используется в проверке СП 50":
+      return "normative-check";
+    case "используется в 1D transient":
+      return "transient-1d";
+    case "используется только в legacy path":
+      return "legacy";
+    default:
+      if (formula.module === "Geometry") {
+        return "geometry";
+      }
+      if (formula.module === "Uncertainty") {
+        return "monte-carlo";
+      }
+      return "derived-only";
+  }
+}
+
+function contourLabel(contour: FormulaContour): string {
+  return formulaContours.find((item) => item.id === contour)?.label ?? contour;
+}
+
+function readableContourLabel(label: string): string {
+  switch (label) {
+    case "derived-only":
+      return "Дополнительная инженерная оценка";
+    case "normative-check":
+      return "Нормативная проверка";
+    case "report-only":
+      return "Только для отчёта";
+    case "rc-runtime":
+      return "Основной RC-расчёт";
+    case "transient-1d":
+      return "Послойный 1D-расчёт";
+    case "monte-carlo":
+      return "Вероятностный анализ";
+    case "geometry":
+      return "Геометрия и модель";
+    case "legacy":
+      return "Архивный контур";
+    default:
+      return label;
+  }
+}
+
+function readableFormulaStatus(status: string): string {
+  switch (status) {
+    case "derived-only":
+      return "Дополнительный показатель";
+    case "normative-check":
+      return "Нормативная проверка";
+    case "report-only":
+      return "Отчётный показатель";
+    case "experimental":
+      return "Экспериментальный блок";
+    case "core":
+      return "Основной расчёт";
+    default:
+      return status;
+  }
+}
+
+function readableUsageStatus(status: FormulaUsageStatus): string {
+  switch (status) {
+    case "используется в hydronic mode":
+      return "используется в режиме ограничения мощности";
+    case "используется только в legacy path":
+      return "используется только в архивном контуре";
+    default:
+      return status;
+  }
+}
+
 export default function FormulasPage() {
   const twin = useTwinStore((state) => state.twin);
   const selectedSpaceId = useTwinStore((state) => state.selectedSpaceId);
@@ -205,6 +325,7 @@ export default function FormulasPage() {
   const uncertaintyConfig = useWorkflowStore((state) => state.uncertaintyConfig);
   const scenarioConfig = useWorkflowStore((state) => state.scenarioConfig);
   const setScenarioConfig = useWorkflowStore((state) => state.setScenarioConfig);
+  const [selectedContour, setSelectedContour] = React.useState<FormulaContourFilter>("all");
 
   const valueContext = useMemo<FormulaValueContext>(
     () => ({
@@ -216,16 +337,54 @@ export default function FormulasPage() {
     }),
     [assumptionMap, currentFrame, frames, selectedSpace, uncertaintyConfig]
   );
+  const filteredTopics = useMemo(
+    () =>
+      formulaTopics
+        .map((topic) => ({
+          ...topic,
+          formulas: topic.formulaIds
+            .map((id) => formulaById[id])
+            .filter((formula): formula is Formula =>
+              Boolean(formula) &&
+              (selectedContour === "all" || inferFormulaContour(formula) === selectedContour)
+            ),
+        }))
+        .filter((topic) => topic.formulas.length > 0),
+    [selectedContour]
+  );
 
   return (
     <section className="mx-auto max-w-[min(100%,96rem)] space-y-6 p-4 sm:p-6">
-      <header className="space-y-2">
-        <p className="ui-kicker">Теория</p>
-        <h1 className="text-3xl font-semibold text-[color:var(--text-base)]">Формулы и допущения</h1>
-        <p className="text-sm text-[color:var(--text-muted)]">
-          Цифровой двойник прозрачен: ключевые метрики студии опираются на формулу с физическим смыслом, областью применимости, единицами и допущениями.
-        </p>
-      </header>
+      <SummaryHero
+        title="Формулы и допущения"
+        description="Здесь собраны физические зависимости, расчётные контуры и пользовательские допущения, на которых строятся показатели TherNest."
+      >
+        <SummaryHighlightGrid
+          className="mt-1"
+          items={[
+            {
+              label: "Темы",
+              value: String(formulaTopics.length),
+              hint: "Основные смысловые блоки формул в интерфейсе.",
+            },
+            {
+              label: "Формулы",
+              value: String(formulaRegistry.length),
+              hint: "Формулы, проверки и производные показатели.",
+            },
+            {
+              label: "Контуры",
+              value: String(calculationContours.length),
+              hint: "Отдельные типы расчёта без смешивания результатов.",
+            },
+            {
+              label: "Редактируемые допущения",
+              value: "6",
+              hint: "Ключевые входы сценария, доступные прямо на странице.",
+            },
+          ]}
+        />
+      </SummaryHero>
 
       <section className="ui-panel space-y-4 p-5 sm:p-6">
         <div className="space-y-1">
@@ -251,18 +410,40 @@ export default function FormulasPage() {
               key={entry.status}
               className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)] px-3 py-2"
             >
-              <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--accent-base)]">{entry.status}</p>
+              <p className="text-sm font-semibold text-[color:var(--accent-base)]">{readableUsageStatus(entry.status)}</p>
               <p className="mt-1 text-sm text-[color:var(--text-muted)]">{entry.note}</p>
             </div>
           ))}
         </div>
+        <div className="space-y-2">
+          <p className="text-sm font-semibold text-[color:var(--text-base)]">Фильтр по контуру</p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setSelectedContour("all")}
+              className={selectedContour === "all" ? "ui-btn-primary px-3 py-1.5 text-sm" : "ui-btn-secondary px-3 py-1.5 text-sm"}
+            >
+              Все
+            </button>
+            {formulaContours.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setSelectedContour(item.id)}
+                className={selectedContour === item.id ? "ui-btn-primary px-3 py-1.5 text-sm" : "ui-btn-secondary px-3 py-1.5 text-sm"}
+              >
+                {readableContourLabel(item.label)}
+              </button>
+            ))}
+          </div>
+        </div>
       </section>
 
-      {formulaTopics.map((topic) => (
+      {filteredTopics.map((topic) => (
         <FormulaGroup
           key={topic.id}
           topic={topic}
-          formulas={topic.formulaIds.map((id) => formulaById[id]).filter(Boolean) as Formula[]}
+          formulas={topic.formulas}
           context={valueContext}
         />
       ))}
@@ -305,10 +486,13 @@ const FormulaCard = ({ formula, context }: { formula: Formula; context: FormulaV
     variable,
     data: resolveVariableValue(formula.id, variable, context),
   }));
+  const contour = inferFormulaContour(formula);
+  const statusLabel = formula.status ?? "derived-only";
+  const affectsSolver = formula.affectsSolver ?? false;
 
   const [copied, setCopied] = React.useState<"latex" | "text" | null>(null);
   const copy = async (mode: "latex" | "text") => {
-    const payload = mode === "latex" ? formula.latex : buildPlainText(formula);
+    const payload = mode === "latex" ? formula.formulaLatex ?? formula.latex : buildPlainText(formula);
     try {
       await navigator.clipboard.writeText(payload);
       setCopied(mode);
@@ -322,12 +506,29 @@ const FormulaCard = ({ formula, context }: { formula: Formula; context: FormulaV
     <article id={`formula-${formula.id}`} className="flex flex-col gap-3 rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] p-4">
       <div>
         <div className="flex flex-wrap items-center gap-2">
-          <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">{formula.id}</p>
+          <p className="text-sm font-semibold text-[color:var(--text-muted)]">{readableUsageStatus(formulaUsageStatus[formula.id] ?? "справочная / пока не участвует в основном расчёте")}</p>
+        </div>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
           <span className="rounded-full bg-[color:var(--accent-soft)] px-2 py-0.5 text-[11px] font-semibold text-[color:var(--accent-base)]">
-            {formulaUsageStatus[formula.id] ?? "справочная / пока не участвует в основном расчёте"}
+            {readableContourLabel(contourLabel(contour))}
+          </span>
+          <span className="rounded-full border border-[color:var(--border-soft)] px-2 py-0.5 text-[11px] font-semibold text-[color:var(--text-muted)]">
+            {readableFormulaStatus(statusLabel)}
+          </span>
+          <span className="rounded-full border border-[color:var(--border-soft)] px-2 py-0.5 text-[11px] font-semibold text-[color:var(--text-muted)]">
+            Код: {formula.id}
+          </span>
+          <span
+            className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+              affectsSolver
+                ? "bg-[color:var(--success-bg)] text-[color:var(--success-fg)]"
+                : "bg-[color:var(--surface-base)] text-[color:var(--text-soft)]"
+            }`}
+          >
+            {affectsSolver ? "Влияет на основной расчёт" : "Справочный слой, без влияния на расчёт"}
           </span>
         </div>
-        <h3 className="text-lg font-semibold text-[color:var(--text-base)]">{formula.title}</h3>
+        <h3 className="text-lg font-semibold text-[color:var(--text-base)]">{formula.titleRu ?? formula.title}</h3>
         <p className="text-sm text-[color:var(--text-muted)]">{formula.description}</p>
         <p className="mt-1 text-xs text-[color:var(--text-soft)]">
           <span className="font-semibold text-[color:var(--text-muted)]">Метод:</span> {formula.methodName}
@@ -335,22 +536,27 @@ const FormulaCard = ({ formula, context }: { formula: Formula; context: FormulaV
         <p className="mt-1 text-xs text-[color:var(--text-soft)]">
           <span className="font-semibold text-[color:var(--text-muted)]">Где используется:</span> {resolveFormulaUsage(formula)}
         </p>
+        {formula.sourceFiles?.length ? (
+          <p className="mt-1 text-xs text-[color:var(--text-soft)]">
+            <span className="font-semibold text-[color:var(--text-muted)]">Файлы:</span> {formula.sourceFiles.join(", ")}
+          </p>
+        ) : null}
       </div>
       <div className="overflow-x-auto rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-elevated)] px-4 py-3">
-        <BlockMath math={formula.latex} />
+        <BlockMath math={formula.formulaLatex ?? formula.latex} />
       </div>
       <div className="flex flex-wrap gap-2">
         <button
           type="button"
           onClick={() => copy("latex")}
-          className="ui-control rounded-full px-3 py-1 text-xs font-semibold hover:border-[color:var(--accent-base)]/35"
+          className="ui-control rounded-full px-3 py-1.5 text-sm font-semibold hover:border-[color:var(--accent-base)]/35"
         >
           {copied === "latex" ? "Скопировано" : "Скопировать LaTeX"}
         </button>
         <button
           type="button"
           onClick={() => copy("text")}
-          className="ui-control rounded-full px-3 py-1 text-xs font-semibold hover:border-[color:var(--accent-base)]/35"
+          className="ui-control rounded-full px-3 py-1.5 text-sm font-semibold hover:border-[color:var(--accent-base)]/35"
         >
           {copied === "text" ? "Готово" : "Скопировать текст"}
         </button>
@@ -359,7 +565,7 @@ const FormulaCard = ({ formula, context }: { formula: Formula; context: FormulaV
       <div className="overflow-x-auto rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)]">
         <table className="w-full text-sm text-[color:var(--text-muted)]">
           <thead>
-            <tr className="text-xs uppercase tracking-wide text-[color:var(--text-soft)]">
+            <tr className="text-sm text-[color:var(--text-soft)]">
               <th className="px-3 py-2 text-left font-semibold">Переменная</th>
               <th className="px-3 py-2 text-left font-semibold">Описание</th>
               <th className="px-3 py-2 text-left font-semibold">Значение</th>
@@ -387,7 +593,7 @@ const FormulaCard = ({ formula, context }: { formula: Formula; context: FormulaV
       </div>
 
       <div className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)] px-3 py-2">
-        <p className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">Подставленные значения</p>
+        <p className="text-sm font-semibold text-[color:var(--text-base)]">Подставленные значения</p>
         <ul className="mt-2 space-y-1 text-sm text-[color:var(--text-muted)]">
           {resolvedVariables.map(({ variable, data }) => (
             <li key={`resolved-${formula.id}-${variable.key}`} className="flex flex-col gap-0.5">
@@ -405,28 +611,32 @@ const FormulaCard = ({ formula, context }: { formula: Formula; context: FormulaV
 
       <div className="grid gap-3 lg:grid-cols-2">
         <div className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)] px-3 py-3">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">Физический смысл</p>
+          <p className="text-sm font-semibold text-[color:var(--text-base)]">Физический смысл</p>
           <p className="mt-2 text-sm text-[color:var(--text-muted)]">{formula.physicalMeaning}</p>
         </div>
         <div className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)] px-3 py-3">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">Что означает результат</p>
+          <p className="text-sm font-semibold text-[color:var(--text-base)]">Что означает результат</p>
           <p className="mt-2 text-sm text-[color:var(--text-muted)]">{formula.resultMeaning}</p>
         </div>
       </div>
 
       <div className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)] px-3 py-3">
-        <p className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">Область применимости</p>
+        <p className="text-sm font-semibold text-[color:var(--text-base)]">Область применимости</p>
         <p className="mt-2 text-sm text-[color:var(--text-muted)]">{formula.applicability}</p>
       </div>
 
-      <div className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)] px-3 py-3">
-        <p className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">Допущения</p>
-        <ul className="mt-2 space-y-1 text-sm text-[color:var(--text-muted)]">
+      <CollapsibleSection title="Допущения и ограничения" description="Что важно помнить при чтении этой формулы.">
+        <ul className="space-y-1 text-sm text-[color:var(--text-muted)]">
           {formula.assumptions.map((assumption) => (
             <li key={`${formula.id}-${assumption}`}>{assumption}</li>
           ))}
+          {formula.warnings?.map((warning) => (
+            <li key={`${formula.id}-warning-${warning}`} className="text-[color:var(--warning-fg)]">
+              {warning}
+            </li>
+          ))}
         </ul>
-      </div>
+      </CollapsibleSection>
     </article>
   );
 };
@@ -436,8 +646,15 @@ const DEFAULT_SCENARIO: ScenarioConfig = {
   setpoints: { day: 21, night: 18, dayStartHour: 6, nightStartHour: 22 },
   internalGains: { dayGain_W_m2: 5, nightGain_W_m2: 1 },
   occupancy: { dayFraction: 1, nightFraction: 0.2 },
-  ventilation: { infiltrationACH: 0.5 },
+  ventilation: {
+    infiltrationACH: 0.5,
+    ventilationACH: 0,
+    heatRecoveryFactor: 0,
+    mechanicalVentilationEnabled: false,
+  },
 };
+
+type EditableScenarioSection = "climate" | "setpoints" | "internalGains" | "ventilation";
 
 const EditableAssumptionsPanel = ({
   scenarioConfig,
@@ -453,7 +670,11 @@ const EditableAssumptionsPanel = ({
     setDraft(scenarioConfig ?? DEFAULT_SCENARIO);
   }, [scenarioConfig]);
 
-  const update = (section: keyof ScenarioConfig, key: string, value: number) => {
+  const update = <S extends EditableScenarioSection, K extends keyof ScenarioConfig[S]>(
+    section: S,
+    key: K,
+    value: number
+  ) => {
     setDraft((prev) => ({
       ...prev,
       [section]: {
@@ -472,12 +693,12 @@ const EditableAssumptionsPanel = ({
         </p>
       </div>
       <div className="grid gap-3 lg:grid-cols-3">
-        <AssumptionField label="Уставка днём" unit="°C" value={draft.setpoints.day} min={10} max={30} onChange={(value) => update("setpoints", "day", value)} usage="evaluateSetpoint → solver" />
-        <AssumptionField label="Уставка ночью" unit="°C" value={draft.setpoints.night} min={8} max={28} onChange={(value) => update("setpoints", "night", value)} usage="evaluateSetpoint → solver" />
-        <AssumptionField label="ACH инфильтрации" unit="1/ч" value={draft.ventilation.infiltrationACH} min={0} max={5} step={0.1} onChange={(value) => update("ventilation", "infiltrationACH", value)} usage="G_inf = rho·cp·ACH·V/3600" />
-        <AssumptionField label="Наружная базовая" unit="°C" value={draft.climate.baseC} min={-60} max={40} step={0.5} onChange={(value) => update("climate", "baseC", value)} usage="createSinusoidalWeatherProfile" />
-        <AssumptionField label="Амплитуда улицы" unit="°C" value={draft.climate.amplitudeC} min={0} max={35} step={0.5} onChange={(value) => update("climate", "amplitudeC", value)} usage="createSinusoidalWeatherProfile" />
-        <AssumptionField label="Дневные теплопоступления" unit="Вт/м²" value={draft.internalGains.dayGain_W_m2} min={0} max={50} step={0.5} onChange={(value) => update("internalGains", "dayGain_W_m2", value)} usage="evaluateInternalGains" />
+        <AssumptionField label="Уставка днём" unit="°C" value={draft.setpoints.day} min={10} max={30} onChange={(value) => update("setpoints", "day", value)} usage="влияет на целевую температуру дневного режима" />
+        <AssumptionField label="Уставка ночью" unit="°C" value={draft.setpoints.night} min={8} max={28} onChange={(value) => update("setpoints", "night", value)} usage="влияет на целевую температуру ночного режима" />
+        <AssumptionField label="ACH инфильтрации" unit="1/ч" value={draft.ventilation.infiltrationACH} min={0} max={5} step={0.1} onChange={(value) => update("ventilation", "infiltrationACH", value)} usage="задаёт потери на неконтролируемый воздухообмен" />
+        <AssumptionField label="Наружная базовая" unit="°C" value={draft.climate.baseC} min={-60} max={40} step={0.5} onChange={(value) => update("climate", "baseC", value)} usage="формирует опорную наружную температуру сценария" />
+        <AssumptionField label="Амплитуда улицы" unit="°C" value={draft.climate.amplitudeC} min={0} max={35} step={0.5} onChange={(value) => update("climate", "amplitudeC", value)} usage="задаёт размах колебаний наружной температуры" />
+        <AssumptionField label="Дневные теплопоступления" unit="Вт/м²" value={draft.internalGains.dayGain_W_m2} min={0} max={50} step={0.5} onChange={(value) => update("internalGains", "dayGain_W_m2", value)} usage="влияет на внутренние теплопоступления в дневной период" />
       </div>
       <div className="flex flex-wrap gap-2">
         <button type="button" onClick={() => onSave(draft)} className="ui-btn-primary px-5 py-2 text-sm">
@@ -514,7 +735,7 @@ const AssumptionField = ({
   return (
     <label className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] p-3 text-sm">
       <span className="font-semibold text-[color:var(--text-base)]">{label}</span>
-      <span className="mt-1 block text-xs text-[color:var(--text-soft)]">Используется: {usage}</span>
+      <span className="mt-1 block text-xs text-[color:var(--text-soft)]">Где применяется: {usage}</span>
       <div className="mt-2 flex items-center gap-2">
         <input
           type="number"
@@ -527,7 +748,7 @@ const AssumptionField = ({
         />
         <span className="w-14 text-xs text-[color:var(--text-soft)]">{unit}</span>
       </div>
-      <span className="mt-1 block text-xs text-[color:var(--text-soft)]">Диапазон: {min}…{max} {unit}</span>
+      <span className="mt-1 block text-xs text-[color:var(--text-soft)]">Рабочий диапазон: {min}…{max} {unit}</span>
       {suspicious ? <span className="mt-1 block text-xs font-semibold text-[color:var(--danger-fg)]">Проверьте значение: оно вне ожидаемого диапазона.</span> : null}
     </label>
   );
@@ -544,7 +765,7 @@ const AssumptionsPanel = ({ items }: { items: Assumption[] }) => (
     <div className="overflow-x-auto rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)]">
       <table className="w-full text-left text-sm text-[color:var(--text-muted)]">
         <thead>
-          <tr className="text-xs uppercase tracking-wide text-[color:var(--text-soft)]">
+          <tr className="text-sm text-[color:var(--text-soft)]">
             <th className="px-4 py-2 font-semibold">Параметр</th>
             <th className="px-4 py-2 font-semibold">Значение</th>
             <th className="px-4 py-2 font-semibold">Описание</th>
@@ -597,33 +818,33 @@ const resolveFormulaUsage = (formula: Formula): string => {
     transmission_loss:
       "Разложение потерь через стены, окна, двери, кровлю и пол в инженерном балансе.",
     envelope_infiltration:
-      "Основной RC solver через эквивалентную проводимость инфильтрации по ACH.",
+      "Основной RC-расчёт через эквивалентную проводимость инфильтрации по ACH.",
     ventilation_loss:
       "Инженерный квазистационарный баланс вентиляционных и инфильтрационных потерь; не просто справочное допущение.",
     internal_gains:
       "RC-модель помещения и её сценарные входы по людям, освещению и оборудованию.",
     thermal_balance:
-      "Основной RC solver и интерпретация суммарного баланса мощности по зоне.",
+      "Основной RC-расчёт и интерпретация суммарного баланса мощности по зоне.",
     thermal_balance_room:
       "Инженерный квазистационарный срез по помещению для оценки дефицита тепла.",
     rc_lumped:
-      "Основной зональный RC solver, временные ряды температуры, энергии и мощности.",
+      "Основной зональный RC-расчёт, временные ряды температуры, энергии и мощности.",
     weather_sinusoid:
-      "Климатический сценарий основного RC solver.",
+      "Климатический сценарий основного RC-расчёта.",
     thermal_peak_load:
       "Пиковая нагрузка основного RC расчёта и связанный подбор требуемой мощности.",
     uncertainty_mc:
-      "Панель вероятностного анализа поверх RC-модели; не норматив СП 50 и не legacy calibration report.",
+      "Панель вероятностного анализа поверх RC-модели; это отдельный слой поверх базового расчёта, а не нормативный отчёт.",
     uncertainty_std:
       "Статистика разброса результатов вероятностного анализа поверх RC-модели.",
     calibration_rmse:
-      "Только legacy report path и связанный калибровочный отчёт по данным Twin API.",
+      "Только архивный отчётный путь и связанный калибровочный отчёт по данным движка.",
     calibration_mape:
-      "Только legacy report path и связанный калибровочный отчёт по данным Twin API.",
+      "Только архивный отчётный путь и связанный калибровочный отчёт по данным движка.",
     radiator_heat_output:
-      "Используется в derived hydronic metrics для инженерной оценки доступной мощности оборудования; пока не управляет основным зональным отоплением.",
+      "Используется в дополнительной инженерной оценке доступной мощности оборудования; пока не управляет основным зональным отоплением.",
     coolant_flow_rate:
-      "Используется в derived hydronic metrics для оценки требуемого расхода теплоносителя; прямой hydronic mode пока не включён.",
+      "Используется в дополнительной инженерной оценке требуемого расхода теплоносителя; прямой режим ограничения мощности пока не включён.",
   };
   if (explicitUsage[formula.id]) {
     return explicitUsage[formula.id];

@@ -3,6 +3,7 @@ import { buildGeometryRenderModel } from "../../geometry/bimPipeline";
 import { buildHeatingModelSnapshot } from "../../networks/heatingModel";
 import { createThermalFieldModel } from "../field";
 import { calculateHydronicHeatPower, calculateRequiredHydronicMassFlow, calculateRequiredHydronicVolumeFlowM3H, transmissionLoss, uValue, } from "../formulas";
+import { resolveBuildingInfiltration } from "../infiltration";
 import { buildThermalPhysicsModel } from "../physics";
 import { DEFAULT_ENGINEERING_OPTIONS, DEFAULT_SURFACE_RESISTANCE_PROFILE, ENGINEERING_METHODS, DEFAULT_WATER_DENSITY_KG_M3, DEFAULT_WATER_HEAT_CAPACITY_J_KG_K, } from "./constants";
 import { getEnvelopeElementLabel, getRoomDisplayName } from "./display";
@@ -161,7 +162,21 @@ function evaluateEngineeringState(model, options, engineeringOptions, simulation
     const outdoorTemperatureC = overrides.outdoorTemperatureC ?? options.outdoor.baseC + (options.outdoor.seasonalOffsetC ?? 0);
     const solarGainFactor = buildSolarGainFactor(resolvedOptions);
     const renderGeometry = buildGeometryRenderModel(model);
-    const infiltrationACH = overrides.infiltrationACH ?? options.infiltrationACH ?? 0.5;
+    const infiltrationCalculation = resolveBuildingInfiltration(model, overrides.infiltrationACH != null
+        ? {
+            infiltrationMode: "manualAch",
+            infiltrationACH: overrides.infiltrationACH,
+        }
+        : options.infiltration ?? {
+            infiltrationMode: "manualAch",
+            infiltrationACH: options.infiltrationACH,
+        }, {
+        indoorTemperatureC: targetTemperatureC,
+        outdoorTemperatureC,
+        mechanicalVentilationACH: resolvedOptions.ventilationACH,
+        mechanicalVentilationEnabled: options.mechanicalVentilationEnabled ?? resolvedOptions.ventilationACH > 0,
+    });
+    const infiltrationACH = infiltrationCalculation.calculatedACH;
     const physics = buildThermalPhysicsModel(model, {
         outdoorTemperatureC,
         timeHours: resolvedOptions.analysisTimeHours,
@@ -170,6 +185,7 @@ function evaluateEngineeringState(model, options, engineeringOptions, simulation
         occupancyGain_W_m2: resolvedOptions.occupancyGain_W_m2,
         infiltrationACH,
         ventilationACH: resolvedOptions.ventilationACH,
+        heatRecoveryFactor: options.heatRecoveryFactor,
         supplyAirTemperatureC: resolvedOptions.supplyAirTemperatureC,
         radiatorPowerMultiplier: resolvedOptions.radiatorPowerMultiplier,
         equipmentGainMultiplier: resolvedOptions.equipmentGainMultiplier,

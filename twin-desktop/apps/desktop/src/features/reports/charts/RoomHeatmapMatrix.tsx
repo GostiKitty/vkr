@@ -34,7 +34,7 @@ export function RoomHeatmapMatrix({ rows, selectedRoomId, onSelectRoom }: RoomHe
     <div className="overflow-x-auto rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)]">
       <table className="w-full border-collapse text-sm text-[color:var(--text-muted)]">
         <thead>
-          <tr className="text-xs uppercase tracking-wide text-[color:var(--text-soft)]">
+          <tr className="text-sm text-[color:var(--text-soft)]">
             <th className="px-4 py-3 text-left font-semibold">Помещение</th>
             <th className="px-4 py-3 text-left font-semibold">Температура, °C</th>
             <th className="px-4 py-3 text-left font-semibold">Нагрузка</th>

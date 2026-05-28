@@ -68,23 +68,26 @@ export function ReportGenerator() {
         </div>
         <div className="min-w-0 flex-1">
           <EngineeringSectionHeader
-            kicker="Инженерное заключение"
-            title="Legacy PDF (Twin API)"
-            subtitle="Вспомогательная сводка для внутреннего использования. Нормативный расчёт теплозащиты и энергопаспорт — в конструкторе, «Экспорт для экспертизы»."
+            kicker="Инженерная сводка"
+            title="Архивный PDF-отчёт"
+            subtitle="Вспомогательная инженерная сводка по текущему состоянию модели и результатам расчёта."
           />
         </div>
       </div>
 
+      {/* Temporarily hidden from UI. Will be restored after project documentation export redesign. */}
+      {/*
       <EngineeringCallout variant="attention" title="Устаревший контур / не для экспертизы по СП 50">
         <p>
-          Этот PDF — legacy-отчёт по Twin API (англоязычная сводка, Monte Carlo). Для государственной и негосударственной экспертизы по теплозащите используйте кнопку
+          Этот PDF относится к архивному отчётному контуру и предназначен только для внутренней сводки. Для государственной и негосударственной экспертизы по теплозащите используйте кнопку
           «Экспорт для экспертизы (PDF)» в конструкторе после расчёта (блок СП 50.13330.2024).
         </p>
       </EngineeringCallout>
+      */}
 
       <div className="grid gap-4 lg:grid-cols-[1fr_minmax(0,1.1fr)]">
         <div className="ui-report-frame space-y-3">
-          <p className="ui-kicker">Чеклист разделов</p>
+          <p className="ui-soft-kicker">Чеклист разделов</p>
           <ul className="space-y-2 text-sm text-[color:var(--text-muted)]">
             {checklist.map((item) => (
               <li key={item.id} className="flex items-start gap-2">

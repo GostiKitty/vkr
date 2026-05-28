@@ -106,7 +106,7 @@ export function ScenarioSetupPanel() {
       </EngineeringCallout>
 
       <section className="ui-section space-y-3">
-        <h4 className="text-xs font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">Климат</h4>
+        <h4 className="text-sm font-semibold text-[color:var(--text-base)]">Климат</h4>
         <label className="text-xs font-semibold text-[color:var(--text-muted)]">
           Город (СП 131.13330.2025)
           <select
@@ -129,7 +129,7 @@ export function ScenarioSetupPanel() {
       </section>
 
       <section className="ui-section space-y-3">
-        <h4 className="text-xs font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">Уставки</h4>
+        <h4 className="text-sm font-semibold text-[color:var(--text-base)]">Уставки</h4>
         <div className="grid gap-3 sm:grid-cols-2">
           <NumberField label="День, °C" value={day} onChange={setDay} step={0.5} />
           <NumberField label="Ночь, °C" value={night} onChange={setNight} step={0.5} />
@@ -139,7 +139,7 @@ export function ScenarioSetupPanel() {
       </section>
 
       <section className="ui-section space-y-3">
-        <h4 className="text-xs font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">Тепловые поступления</h4>
+        <h4 className="text-sm font-semibold text-[color:var(--text-base)]">Тепловые поступления</h4>
         <div className="grid gap-3 sm:grid-cols-2">
           <NumberField label="День, Вт/м²" value={dayGain} min={0} onChange={setDayGain} step={0.5} />
           <NumberField label="Ночь, Вт/м²" value={nightGain} min={0} onChange={setNightGain} step={0.5} />
@@ -147,7 +147,7 @@ export function ScenarioSetupPanel() {
       </section>
 
       <section className="ui-section space-y-3">
-        <h4 className="text-xs font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">Воздухообмен</h4>
+        <h4 className="text-sm font-semibold text-[color:var(--text-base)]">Воздухообмен</h4>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <NumberField label="Инфильтрация, ACH" value={infiltration} min={0} step={0.1} onChange={(v) => setInfiltration(Math.max(0, v))} />
           <NumberField label="Вентиляция, ACH" value={ventilationAch} min={0} step={0.05} onChange={(v) => setVentilationAch(Math.max(0, v))} />

@@ -13,6 +13,7 @@ export interface OpeningDescriptorLike {
   type: "window" | "door" | string;
   widthM: number;
   heightM: number;
+  uValue_W_m2K?: number;
 }
 
 export function computeWallOpeningAreasM2(openings: OpeningDescriptorLike[]): {
@@ -87,13 +88,28 @@ export function computeWallFacadeConductances(
   const opaqueAreaM2 = Math.max(0, wallAreaM2 - openingAreaM2);
   const props = computeWallProperties(wall?.layers, assemblyId, { includeSp50AirFilms: true });
   const opaqueU = finitePositive(props?.uValue ?? DEFAULT_WALL_U_FALLBACK_W_M2K, DEFAULT_WALL_U_FALLBACK_W_M2K);
+  let windowConductance = 0;
+  let doorConductance = 0;
+  openings.forEach((opening) => {
+    const area = Math.max(0, opening.widthM) * Math.max(0, opening.heightM);
+    if (!Number.isFinite(area) || area <= 0) {
+      return;
+    }
+    if (opening.type === "window") {
+      const u = finitePositive(opening.uValue_W_m2K ?? DEFAULT_WINDOW_U_W_M2K, DEFAULT_WINDOW_U_W_M2K);
+      windowConductance += u * area;
+    } else if (opening.type === "door") {
+      const u = finitePositive(opening.uValue_W_m2K ?? DEFAULT_DOOR_U_W_M2K, DEFAULT_DOOR_U_W_M2K);
+      doorConductance += u * area;
+    }
+  });
   const denom = Math.max(0.1, wallAreaM2);
   const weightedU =
-    (opaqueAreaM2 * opaqueU + windowAreaM2 * DEFAULT_WINDOW_U_W_M2K + doorAreaM2 * DEFAULT_DOOR_U_W_M2K) / denom;
+    (opaqueAreaM2 * opaqueU + windowConductance + doorConductance) / denom;
   const mult = finitePositive(conductanceMultiplier, 1);
   const conductanceOpaque_W_K = opaqueU * opaqueAreaM2 * mult;
-  const conductanceWindow_W_K = DEFAULT_WINDOW_U_W_M2K * windowAreaM2 * mult;
-  const conductanceDoor_W_K = DEFAULT_DOOR_U_W_M2K * doorAreaM2 * mult;
+  const conductanceWindow_W_K = windowConductance * mult;
+  const conductanceDoor_W_K = doorConductance * mult;
   const conductanceTotal_W_K = weightedU * wallAreaM2 * mult;
   return {
     wallAreaM2,

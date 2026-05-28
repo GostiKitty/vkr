@@ -4,6 +4,7 @@ import { DEFAULT_WALL_ASSEMBLY_ID } from "../../entities/material/types";
 import { buildAdjacencyGraph, type AdjacencyResult } from "../graph/adjacency";
 import { buildGeometryRenderModel } from "../geometry/bimPipeline";
 import { airflowFromACH } from "./formulas";
+import type { InfiltrationCalculationResult } from "./infiltration";
 import { computeWallFacadeConductances, computeFallbackFacadeConductance_W_K } from "./wallFacadeThermal";
 
 const AIR_DENSITY_KG_M3 = 1.204; // kg/m3
@@ -19,6 +20,7 @@ export interface ThermalZone {
   capacitance_J_K: number;
   infiltrationACH: number;
   infiltrationConductance_W_K: number;
+  infiltrationCalculation?: InfiltrationCalculationResult;
   ventilationACH: number;
   ventilationConductance_W_K: number;
 }
@@ -43,12 +45,15 @@ export interface ThermalModel {
   zones: ThermalZone[];
   internalLinks: ThermalLink[];
   outdoorLinks: ThermalLink[];
+  infiltrationCalculation?: InfiltrationCalculationResult;
 }
 
 export interface ThermalModelOptions {
   adjacency?: AdjacencyResult;
   infiltrationACH?: number;
+  infiltrationCalculation?: InfiltrationCalculationResult;
   ventilationACH?: number;
+  heatRecoveryFactor?: number;
   defaultHeight_m?: number;
   defaultAssemblyId?: string;
   effectiveMassFactor?: number;
@@ -69,21 +74,34 @@ export function buildThermalModel(
     throw new Error("Добавьте хотя бы одно помещение для построения тепловой модели.");
   }
   const adjacency = options.adjacency ?? buildAdjacencyGraph(building);
-  const infiltrationACH = options.infiltrationACH ?? 0.5;
+  const infiltrationACH = options.infiltrationCalculation?.calculatedACH ?? options.infiltrationACH ?? 0.5;
   const ventilationACH = options.ventilationACH ?? 0;
+  const heatRecoveryFactor = Math.min(1, Math.max(0, options.heatRecoveryFactor ?? 0));
   const defaultHeight = options.defaultHeight_m ?? MIN_HEIGHT_M;
   const defaultAssembly = options.defaultAssemblyId ?? DEFAULT_WALL_ASSEMBLY_ID;
   const effectiveMassFactor = Math.max(1, options.effectiveMassFactor ?? 1);
 
   const warnings: string[] = [];
   const renderGeometry = buildGeometryRenderModel(building);
-  const openingsByWallId = new Map<string, { type: string; widthM: number; heightM: number }[]>();
+  const openingsByWallId = new Map<
+    string,
+    { type: string; widthM: number; heightM: number; uValue_W_m2K?: number }[]
+  >();
   renderGeometry.walls.forEach(({ wall, openings }) => {
     openingsByWallId.set(wall.id, openings);
   });
 
   const zones = building.rooms.map((room) =>
-    buildZone(room, building, infiltrationACH, ventilationACH, defaultHeight, effectiveMassFactor)
+    buildZone(
+      room,
+      building,
+      infiltrationACH,
+      options.infiltrationCalculation,
+      ventilationACH,
+      heatRecoveryFactor,
+      defaultHeight,
+      effectiveMassFactor
+    )
   );
   const wallMap = new Map<string, Wall>(building.walls.map((wall) => [wall.id, wall]));
 
@@ -147,6 +165,7 @@ export function buildThermalModel(
       zones,
       internalLinks,
       outdoorLinks,
+      infiltrationCalculation: options.infiltrationCalculation,
     },
     adjacency,
     warnings,
@@ -157,7 +176,9 @@ function buildZone(
   room: Room,
   building: BuildingModel,
   infiltrationACH: number,
+  infiltrationCalculation: InfiltrationCalculationResult | undefined,
   ventilationACH: number,
+  heatRecoveryFactor: number,
   defaultHeight: number,
   effectiveMassFactor: number
 ): ThermalZone {
@@ -169,7 +190,7 @@ function buildZone(
   const infiltrationConductance = AIR_DENSITY_KG_M3 * AIR_CP_J_KG_K * airflowFromACH(infiltrationACH, volume);
   const ventilationConductance =
     ventilationACH > 0
-      ? AIR_DENSITY_KG_M3 * AIR_CP_J_KG_K * airflowFromACH(ventilationACH, volume)
+      ? AIR_DENSITY_KG_M3 * AIR_CP_J_KG_K * airflowFromACH(ventilationACH, volume) * (1 - heatRecoveryFactor)
       : 0;
   return {
     id: room.id,
@@ -179,6 +200,7 @@ function buildZone(
     capacitance_J_K: capacitance,
     infiltrationACH,
     infiltrationConductance_W_K: infiltrationConductance,
+    infiltrationCalculation,
     ventilationACH,
     ventilationConductance_W_K: ventilationConductance,
   };
@@ -186,7 +208,7 @@ function buildZone(
 
 function resolveConductanceForWall(
   wall: Wall | undefined,
-  openings: { type: string; widthM: number; heightM: number }[],
+  openings: { type: string; widthM: number; heightM: number; uValue_W_m2K?: number }[],
   area_m2_from_graph: number,
   fallbackAssemblyId: string,
   warnings: string[]

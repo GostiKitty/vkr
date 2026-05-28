@@ -5,8 +5,9 @@ import SimulationPanel from "../runs/SimulationPanel";
 import ResultsPanel from "../reports/ResultsPanel";
 import UncertaintyPanel from "../scenarios/UncertaintyPanel";
 import ScenarioSetupPanel from "../scenarios/ScenarioSetupPanel";
-import { EmptyState, Tooltip } from "../../shared/ui";
+import { EmptyState, SummaryHero, SummaryHighlightGrid, Tooltip } from "../../shared/ui";
 import { formatProjectDisplayLabel } from "../../shared/utils/projectLabels";
+import { isEngineProjectSource } from "../../shared/utils/projectRuntime";
 import { useTwin } from "./useTwin";
 import SpaceList from "./SpaceList";
 import { useTwinStore } from "../../entities/twin/twin.store";
@@ -20,14 +21,17 @@ import {
 import { useWorkspaceStore } from "../../entities/workspace/workspace.store";
 import { evaluateWorkflowDiagnostics } from "../../entities/workflow/workflow.diagnostics";
 import { navigate } from "../../app/router";
+import { buildAdjacencyGraph } from "../../core/graph/adjacency";
+import { syncBuildSimulationToStudio } from "../../core/thermal/thermalSimulationExport";
 import { buildModelFromTwin } from "../build/import/fromTwin";
 import { notifyInfo } from "../../entities/notifications/notification.store";
 import {
-  buildVideoDemoProjectModel,
-  isVideoDemoProjectModel,
-  VIDEO_DEMO_PROJECT_ID,
-  VIDEO_DEMO_PROJECT_NAME,
-} from "../build/demoVideoProject";
+  buildPreparedDemoProject,
+  DEMO_PROJECT_ID,
+  DEMO_PROJECT_NAME,
+  isDemoProjectModel,
+} from "../build/demoProject";
+import { useExpertiseInputsStore } from "../reports/exports/store/expertiseInputs.store";
 
 const stepMetadata: Record<WorkflowStep, { order: number; label: string; description: string }> = {
   geometry: {
@@ -77,10 +81,8 @@ export function TwinPage() {
 
   const currentStep = useWorkflowStore((state) => state.currentStep);
   const setCurrentStep = useWorkflowStore((state) => state.setCurrentStep);
-  const resetWorkflow = useWorkflowStore((state) => state.resetWorkflow);
   const workspaceCommand = useWorkspaceStore((state) => state.command);
   const workspaceCommandNonce = useWorkspaceStore((state) => state.commandNonce);
-  const clearSimulation = useTwinStore((state) => state.clearSimulation);
   const solveCompleted = useWorkflowStore((state) => state.solveCompleted);
   const markSolveCompleted = useWorkflowStore((state) => state.markSolveCompleted);
   const scenarioConfig = useWorkflowStore((state) => state.scenarioConfig);
@@ -89,16 +91,6 @@ export function TwinPage() {
   useEffect(() => {
     setProjectIdInput(storedProjectId ?? "");
   }, [storedProjectId]);
-
-  useEffect(() => {
-    const desiredKey = storedProjectId ?? "local-project";
-    setProjectKey(desiredKey);
-  }, [setProjectKey, storedProjectId]);
-
-  useEffect(() => {
-    resetWorkflow();
-    clearSimulation();
-  }, [clearSimulation, resetWorkflow, storedProjectId]);
 
   useEffect(() => {
     if (workspaceCommand !== "export-report") {
@@ -163,15 +155,16 @@ export function TwinPage() {
   const currentMissing = diagnostics[currentStep].missing;
   const currentMeta = stepMetadata[currentStep];
   const isDemoProject =
-    storedProjectId === VIDEO_DEMO_PROJECT_ID || isVideoDemoProjectModel(buildModel);
+    storedProjectId === DEMO_PROJECT_ID || isDemoProjectModel(buildModel);
   const showEngineProjectForm = projectKind === "engine";
   const showDemoCta = !isDemoProject && !twin && buildModel.rooms.length === 0;
   const projectChipLabel = formatProjectDisplayLabel(storedProjectId, {
-    modelName: isDemoProject ? VIDEO_DEMO_PROJECT_NAME : null,
+    modelName: isDemoProject ? DEMO_PROJECT_NAME : null,
   });
   const currentIndex = workflowOrder.indexOf(currentStep);
   const prevStep = workflowOrder[currentIndex - 1];
   const nextStep = workflowOrder[currentIndex + 1];
+  const readyStepsCount = workflowOrder.filter((step) => diagnostics[step].status === "ready").length;
 
   const nextBlockingReasons = useMemo(() => {
     if (!nextStep) {
@@ -192,21 +185,24 @@ export function TwinPage() {
     if (!twin) {
       return;
     }
+    const nextProjectId = storedProjectId ?? `local:${Date.now()}`;
+    const nextProjectKind = isEngineProjectSource(storedProjectId, projectKind) ? "engine" : "local";
     const editableModel = buildModelFromTwin(twin, storedProjectId ?? null);
+    setProjectId(nextProjectId, nextProjectKind);
+    setProjectKey(nextProjectId);
     loadModelSnapshot(editableModel);
-    setProjectId(storedProjectId ?? `local:${Date.now()}`, storedProjectId ? "engine" : "local");
     notifyInfo("Модель открыта в конструкторе. Можно дополнять стены, окна, двери и инженерные сети.");
     navigate("/build");
-  }, [loadModelSnapshot, setProjectId, storedProjectId, twin]);
+  }, [loadModelSnapshot, projectKind, setProjectId, setProjectKey, storedProjectId, twin]);
 
-  const handleOpenVideoDemo = useCallback(() => {
+  const handleOpenDemoProject = useCallback(() => {
     const hasEditableModel =
       buildModel.rooms.length > 0 ||
       buildModel.walls.length > 0 ||
       (buildModel.roofs?.length ?? 0) > 0 ||
       (buildModel.floorSlabs?.length ?? 0) > 0;
-    const alreadyDemoVideo = isVideoDemoProjectModel(buildModel) || storedProjectId === VIDEO_DEMO_PROJECT_ID;
-    if (typeof window !== "undefined" && hasEditableModel && !alreadyDemoVideo) {
+    const alreadyDemoProject = isDemoProjectModel(buildModel) || storedProjectId === DEMO_PROJECT_ID;
+    if (typeof window !== "undefined" && hasEditableModel && !alreadyDemoProject) {
       const confirmed = window.confirm(
         "Открыть подготовленный демонстрационный дом? Текущая локальная модель будет заменена демонстрационным проектом."
       );
@@ -214,12 +210,26 @@ export function TwinPage() {
         return;
       }
     }
-    const demoModel = buildVideoDemoProjectModel();
-    setProjectId(VIDEO_DEMO_PROJECT_ID, "local");
-    setProjectKey(VIDEO_DEMO_PROJECT_ID);
-    useBuildStore.getState().loadModelSnapshot(demoModel);
+    const demoProject = buildPreparedDemoProject();
+    setProjectId(DEMO_PROJECT_ID, "local");
+    setProjectKey(DEMO_PROJECT_ID);
+    useBuildStore.getState().loadModelSnapshot(demoProject.model);
+    const { model: loadedDemoModel, modelRevision } = useBuildStore.getState();
+    useWorkflowStore.getState().setScenarioConfig(demoProject.scenarioConfig);
+    useWorkflowStore.getState().markSolveCompleted(true);
+    useExpertiseInputsStore.getState().replaceInputs(DEMO_PROJECT_ID, demoProject.reportInputs);
+    syncBuildSimulationToStudio(
+      loadedDemoModel,
+      demoProject.thermalResult,
+      buildAdjacencyGraph(loadedDemoModel),
+      {
+        projectName: DEMO_PROJECT_NAME,
+        projectKey: DEMO_PROJECT_ID,
+        modelRevision,
+      }
+    );
     setCurrentStep("geometry");
-    notifyInfo("Демонстрационный дом загружен. Открываю модель в конструкторе с сохранением в локальном проекте.");
+    notifyInfo("Демонстрационный дом загружен вместе с инженерными исходными данными, расчетным сценарием и demo-результатом.");
     navigate("/build");
   }, [buildModel, setCurrentStep, setProjectId, setProjectKey, storedProjectId]);
 
@@ -234,7 +244,7 @@ export function TwinPage() {
             </div>
             <div className="ui-panel p-4 shadow-sm sm:p-5">
               <div className="mb-3 flex items-center justify-between gap-3">
-                <h3 className="text-sm font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">Импортированная геометрия</h3>
+                <h3 className="text-sm font-semibold text-[color:var(--text-base)]">Импортированная геометрия</h3>
                 <button
                   type="button"
                   onClick={handleOpenInBuild}
@@ -289,32 +299,56 @@ export function TwinPage() {
 
   return (
     <section className="mx-auto flex max-w-[min(100%,96rem)] flex-col gap-5 px-1 py-3 sm:px-2">
-      <header className="space-y-3">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0 space-y-1">
-            <p className="ui-kicker">Шаг {currentMeta.order} из 6</p>
-            <h2 className="ui-heading-hero">{currentMeta.label}</h2>
-            <p className="max-w-3xl text-sm leading-relaxed text-[color:var(--text-muted)]">{currentMeta.description}</p>
+      <SummaryHero title={currentMeta.label} description={currentMeta.description}>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="space-y-1">
+            <p className="ui-soft-kicker">Шаг {currentMeta.order} из 6</p>
             {loading ? <p className="text-sm text-[color:var(--text-soft)]">Загружаю данные проекта…</p> : null}
             {error ? <p className="text-sm text-[color:var(--danger-fg)]">{error}</p> : null}
           </div>
           <span
-            className="shrink-0 rounded-full border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] px-3 py-1.5 text-xs font-medium text-[color:var(--text-base)]"
+            className="shrink-0 rounded-full border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] px-3 py-1.5 text-sm font-medium text-[color:var(--text-base)]"
             title={projectChipLabel}
           >
             {projectChipLabel}
           </span>
         </div>
-      </header>
+        <SummaryHighlightGrid
+          className="mt-4"
+          items={[
+            {
+              label: "Помещения",
+              value: String(twin?.spaces?.length ?? buildModel.rooms.length),
+              hint: "Данные из движка или локальной модели.",
+            },
+            {
+              label: "Стены",
+              value: String(buildModel.walls.length),
+              hint: "Конструкции для ограждений и теплопередачи.",
+            },
+            {
+              label: "Готовых шагов",
+              value: `${readyStepsCount} / ${workflowOrder.length}`,
+              hint: "Прогресс по рабочему маршруту проекта.",
+            },
+            {
+              label: "Температурные кадры",
+              value: String(simulationFrames.length),
+              hint: "Появляются после расчёта и для карты результатов.",
+              tone: simulationFrames.length > 0 ? "success" : "neutral",
+            },
+          ]}
+        />
+      </SummaryHero>
 
       {showDemoCta ? (
         <div className="ui-panel ui-demo-spotlight flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
           <div className="min-w-0">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--accent-base)]">Быстрый старт</p>
-            <h3 className="mt-1 text-lg font-semibold text-[color:var(--text-base)]">{VIDEO_DEMO_PROJECT_NAME}</h3>
+            <p className="ui-soft-kicker text-[color:var(--accent-base)]">Быстрый старт</p>
+            <h3 className="mt-1 text-lg font-semibold text-[color:var(--text-base)]">{DEMO_PROJECT_NAME}</h3>
             <p className="mt-1 text-sm text-[color:var(--text-muted)]">Двухэтажный дом с сетями и 3D.</p>
           </div>
-          <button type="button" onClick={handleOpenVideoDemo} className="ui-btn-primary shrink-0 px-4 py-2.5 text-sm">
+          <button type="button" onClick={handleOpenDemoProject} className="ui-btn-primary shrink-0 px-4 py-2.5 text-sm">
             Открыть демонстрационный дом
           </button>
         </div>
@@ -417,7 +451,7 @@ function EnvelopeStatusPanel({
   return (
     <div className="grid gap-4 lg:grid-cols-2">
       <div className="ui-panel space-y-3 p-4 sm:p-5">
-        <h3 className="text-sm font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">Данные из движка</h3>
+        <h3 className="text-sm font-semibold text-[color:var(--text-base)]">Данные из движка</h3>
         {twinEnvelopeCount > 0 ? (
           <p className="text-sm text-[color:var(--text-muted)]">
             Движок передал {twinEnvelopeCount} элементов ограждений. Их можно использовать для дальнейшего анализа
@@ -433,7 +467,7 @@ function EnvelopeStatusPanel({
       </div>
 
       <div className="ui-panel space-y-3 p-4 sm:p-5">
-        <h3 className="text-sm font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">Локальная модель</h3>
+        <h3 className="text-sm font-semibold text-[color:var(--text-base)]">Локальная модель</h3>
         {localWalls === 0 ? (
           <p className="text-sm text-[color:var(--text-muted)]">
             Добавьте стены в конструкторе, чтобы рассчитывать ограждения, смежности и теплопередачу.

@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "desktop-ui",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev:ui", "--prefix", "twin-desktop/apps/desktop", "--", "--port", "5175", "--host", "127.0.0.1"],
+      "port": 5175
+    }
+  ]
+}

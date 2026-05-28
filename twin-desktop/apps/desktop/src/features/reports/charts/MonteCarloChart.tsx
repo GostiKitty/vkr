@@ -3,6 +3,7 @@ import {
   Bar,
   CartesianGrid,
   ComposedChart,
+  Label,
   ReferenceLine,
   ResponsiveContainer,
   Tooltip,
@@ -10,7 +11,9 @@ import {
   YAxis,
 } from "recharts";
 import type { ThermalMonteCarloResult } from "../../../core/uncertainty/thermalMonteCarlo";
+import { MetricInfoTooltip } from "../../../shared/ui";
 import { formatNumber } from "../../../shared/utils/format";
+import { resultsMetricInfo } from "../resultsMetricInfo";
 
 interface MonteCarloChartProps {
   result: ThermalMonteCarloResult;
@@ -33,26 +36,31 @@ export function MonteCarloChart({ result, baselineEnergyKWh = null }: MonteCarlo
   const markers = useMemo(
     () =>
       [
-        { key: "p10", label: "P10", value: result.totalEnergy.p10, stroke: "var(--chart-line-muted)" },
-        { key: "p50", label: "P50", value: result.totalEnergy.p50, stroke: "var(--accent-base)" },
-        { key: "p90", label: "P90", value: result.totalEnergy.p90, stroke: "var(--warning-border)" },
+        { key: "p10", label: "P10", value: result.totalEnergy.p10, stroke: "var(--chart-line-muted)", dash: "4 4" },
+        { key: "p50", label: "P50", value: result.totalEnergy.p50, stroke: "var(--accent-base)", dash: undefined },
+        { key: "p90", label: "P90", value: result.totalEnergy.p90, stroke: "var(--warning-border)", dash: "8 4" },
         baselineEnergyKWh == null
           ? null
-          : { key: "base", label: "База", value: baselineEnergyKWh, stroke: "var(--danger-border)" },
-      ].filter((entry): entry is { key: string; label: string; value: number; stroke: string } => entry !== null),
+          : { key: "base", label: "База", value: baselineEnergyKWh, stroke: "var(--danger-border)", dash: "2 3" },
+      ].filter(
+        (entry): entry is { key: string; label: string; value: number; stroke: string; dash?: string } => entry !== null
+      ),
     [baselineEnergyKWh, result.totalEnergy.p10, result.totalEnergy.p50, result.totalEnergy.p90]
   );
 
   return (
-    <section className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)] p-4">
+    <section className="ui-chart-shell">
       <div className="mb-3">
-        <p className="text-sm font-semibold text-[color:var(--text-base)]">Гистограмма энергопотребления</p>
+        <div className="flex items-center gap-1.5">
+          <p className="text-sm font-semibold text-[color:var(--text-base)]">Распределение энергии за период</p>
+          <MetricInfoTooltip {...resultsMetricInfo.monteCarloHistogram} />
+        </div>
         <p className="text-sm text-[color:var(--text-muted)]">
-          X: totalEnergyKWh, Y: количество сценариев. Маркеры показывают P10, P50, P90 и базовый сценарий.
+          По оси X — энергия, кВт·ч; по оси Y — число сценариев. Линии: базовый расчёт, P10, P50 и P90.
         </p>
       </div>
 
-      <div className="h-80 rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] p-3">
+      <div className="ui-chart-shell__body rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] p-3">
         <ResponsiveContainer width="100%" height="100%">
           <ComposedChart data={histogramData} margin={{ top: 8, right: 16, bottom: 6, left: 4 }}>
             <CartesianGrid stroke="var(--chart-grid)" strokeDasharray="3 3" />
@@ -62,12 +70,17 @@ export function MonteCarloChart({ result, baselineEnergyKWh = null }: MonteCarlo
               tick={{ fill: "var(--text-soft)", fontSize: 11 }}
               tickFormatter={(value) => formatNumber(Number(value), { maximumFractionDigits: 0 })}
               domain={["dataMin", "dataMax"]}
-            />
-            <YAxis
-              tick={{ fill: "var(--text-soft)", fontSize: 11 }}
-              allowDecimals={false}
-              width={42}
-            />
+            >
+              <Label value="Энергия, кВт·ч" position="insideBottom" offset={-4} fill="var(--text-soft)" fontSize={11} />
+            </XAxis>
+            <YAxis tick={{ fill: "var(--text-soft)", fontSize: 11 }} allowDecimals={false} width={56}>
+              <Label
+                value="Сценарии, шт."
+                angle={-90}
+                position="insideLeft"
+                style={{ textAnchor: "middle", fill: "var(--text-soft)", fontSize: 11 }}
+              />
+            </YAxis>
             <Tooltip
               formatter={(value: number) => [`${formatNumber(value, { maximumFractionDigits: 0 })}`, "Сценарии"]}
               labelFormatter={(_, payload) => payload?.[0]?.payload?.label ?? ""}
@@ -78,13 +91,23 @@ export function MonteCarloChart({ result, baselineEnergyKWh = null }: MonteCarlo
                 fontSize: 12,
               }}
             />
-            <Bar dataKey="count" fill="var(--accent-soft)" radius={[8, 8, 0, 0]} barSize={14} />
+            <Bar
+              dataKey="count"
+              fill="var(--accent-soft)"
+              radius={[8, 8, 0, 0]}
+              barSize={14}
+              isAnimationActive
+              animationDuration={780}
+              animationEasing="ease-out"
+            />
             {markers.map((marker) => (
               <ReferenceLine
                 key={marker.key}
                 x={marker.value}
                 stroke={marker.stroke}
                 strokeWidth={2}
+                strokeDasharray={marker.dash}
+                ifOverflow="extendDomain"
                 label={{
                   value: marker.label,
                   position: "top",
@@ -97,23 +120,55 @@ export function MonteCarloChart({ result, baselineEnergyKWh = null }: MonteCarlo
         </ResponsiveContainer>
       </div>
 
-      <div className="mt-3 flex flex-wrap gap-2 text-xs text-[color:var(--text-muted)]">
-        <span className="rounded-full border border-[color:var(--border-soft)] px-3 py-1">
-          P10: {formatNumber(result.totalEnergy.p10, { maximumFractionDigits: 1 })} кВт·ч
-        </span>
-        <span className="rounded-full border border-[color:var(--border-soft)] px-3 py-1">
-          P50: {formatNumber(result.totalEnergy.p50, { maximumFractionDigits: 1 })} кВт·ч
-        </span>
-        <span className="rounded-full border border-[color:var(--border-soft)] px-3 py-1">
-          P90: {formatNumber(result.totalEnergy.p90, { maximumFractionDigits: 1 })} кВт·ч
-        </span>
+      <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2 xl:grid-cols-4">
+        <LegendChip
+          label="P10"
+          description="10% сценариев ниже этого значения"
+          value={`${formatNumber(result.totalEnergy.p10, { maximumFractionDigits: 1 })} кВт·ч`}
+          borderClass="border-[color:var(--border-soft)]"
+        />
+        <LegendChip
+          label="P50"
+          description="Медиана распределения"
+          value={`${formatNumber(result.totalEnergy.p50, { maximumFractionDigits: 1 })} кВт·ч`}
+          borderClass="border-[color:var(--accent-base)]/35"
+        />
+        <LegendChip
+          label="P90"
+          description="90% сценариев ниже этого значения"
+          value={`${formatNumber(result.totalEnergy.p90, { maximumFractionDigits: 1 })} кВт·ч`}
+          borderClass="border-[color:var(--warning-border)]"
+        />
         {baselineEnergyKWh != null ? (
-          <span className="rounded-full border border-[color:var(--danger-border)] px-3 py-1 text-[color:var(--text-base)]">
-            Базовый сценарий: {formatNumber(baselineEnergyKWh, { maximumFractionDigits: 1 })} кВт·ч
-          </span>
+          <LegendChip
+            label="Базовый расчёт"
+            description="Результат базового сценария"
+            value={`${formatNumber(baselineEnergyKWh, { maximumFractionDigits: 1 })} кВт·ч`}
+            borderClass="border-[color:var(--danger-border)]"
+          />
         ) : null}
       </div>
     </section>
+  );
+}
+
+function LegendChip({
+  label,
+  description,
+  value,
+  borderClass,
+}: {
+  label: string;
+  description: string;
+  value: string;
+  borderClass: string;
+}) {
+  return (
+    <div className={`rounded-2xl border bg-[color:var(--surface-overlay)] px-3 py-2 text-[color:var(--text-muted)] ${borderClass}`}>
+      <p className="font-semibold text-[color:var(--text-base)]">{label}</p>
+      <p>{value}</p>
+      <p className="mt-1 text-[11px] text-[color:var(--text-soft)]">{description}</p>
+    </div>
   );
 }
 

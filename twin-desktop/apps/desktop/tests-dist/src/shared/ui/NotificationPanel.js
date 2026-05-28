@@ -1,13 +1,14 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { useEffect } from "react";
 import { useNotificationStore } from "../../entities/notifications/notification.store";
+const NOTIFICATION_AUTO_DISMISS_MS = 1000;
 export function NotificationPanel() {
     const items = useNotificationStore((state) => state.items);
     const remove = useNotificationStore((state) => state.remove);
     useEffect(() => {
         const timers = items.map((item) => window.setTimeout(() => {
             remove(item.id);
-        }, 5000));
+        }, NOTIFICATION_AUTO_DISMISS_MS));
         return () => {
             timers.forEach((timer) => window.clearTimeout(timer));
         };

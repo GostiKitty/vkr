@@ -4,8 +4,10 @@ import type { AdjacencyResult } from "../graph/adjacency";
 import type { SimulationFrame, ThermalEdge, ThermalGraph, ThermalNode } from "../../entities/twin/types";
 import { useTwinStore } from "../../entities/twin/twin.store";
 import { buildModelToTwin } from "../../features/build/export/toTwin";
-import { buildSpaceInstances } from "../../features/twin/twin.engine";
+import { buildSpaceInstancesFromModel } from "../../features/twin/twin.engine";
+import { writeAgentDebugLog } from "../../shared/utils/agentDebugLog";
 import { getRoomDisplayName } from "../../shared/utils/roomNames";
+import { createModelBinding, getModelRevision } from "../../shared/utils/modelSync";
 import type { ThermalSimulationResult } from "./solver";
 
 function clamp(value: number, min: number, max: number): number {
@@ -78,11 +80,17 @@ export type LossShareBreakdown = {
 };
 
 export function extractLossSharePercent(result: ThermalSimulationResult): LossShareBreakdown | null {
-  const share = result.diagnostics?.building.lossSharePercent;
-  if (!share) {
+  const building = result.diagnostics?.building;
+  if (!building) {
     return null;
   }
-  return { ...share };
+  return {
+    opaque: building.lossSharePercent.opaque,
+    window: building.lossSharePercent.window,
+    door: building.lossSharePercent.door,
+    infiltration: building.infiltrationShareOfTotalPct ?? building.lossSharePercent.infiltration,
+    ventilation: building.lossSharePercent.ventilation,
+  };
 }
 
 /** Привязывает результат RC-расчёта к студии: twin, 3D-инстансы, кадры и граф. */
@@ -90,19 +98,42 @@ export function syncBuildSimulationToStudio(
   model: BuildingModel,
   result: ThermalSimulationResult,
   adjacency: AdjacencyResult,
-  options?: { projectName?: string }
+  options?: { projectName?: string; projectKey?: string | null; modelRevision?: number | null }
 ): void {
   const frames = thermalResultToSimulationFrames(result);
   const outdoorC = result.timeline[0]?.outdoorTemperatureC ?? -5;
   const graph = buildThermalGraphFromBuilding(model, adjacency, outdoorC);
   const twin = buildModelToTwin(model, { projectName: options?.projectName });
-  const instances = buildSpaceInstances(twin.spaces);
+  const instances = buildSpaceInstancesFromModel(model);
+  // #region agent log
+  writeAgentDebugLog({
+    sessionId: "c3d591",
+    runId: "repro-5",
+    hypothesisId: "H8",
+    location: "thermalSimulationExport.ts:syncBuildSimulationToStudio",
+    message: "built space instances from actual geometry",
+    data: {
+      projectKey: options?.projectKey ?? null,
+      modelRevision: options?.modelRevision ?? getModelRevision(model),
+      roomCount: model.rooms.length,
+      firstRoomId: model.rooms[0]?.id ?? null,
+      firstInstancePosition: instances[0]?.position ?? null,
+      firstInstanceSize: instances[0]?.size ?? null,
+      geometrySource: "building-model",
+    },
+    timestamp: Date.now(),
+  });
+  // #endregion
   const store = useTwinStore.getState();
   store.setSimulationResult({
     frames,
     graph,
     result,
     source: "computed",
+    binding: createModelBinding(
+      options?.projectKey ?? null,
+      options?.modelRevision ?? getModelRevision(model)
+    ),
   });
   store.setTwin(twin);
   store.setSpaceInstances(instances);

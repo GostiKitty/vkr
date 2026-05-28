@@ -27,9 +27,6 @@ const REPORT_SECTION_TITLE =
   "Раздел 5. Сведения об инженерном оборудовании, сетях и системах инженерно-технического обеспечения";
 const REPORT_SUBSECTION_TITLE =
   "Отопление, вентиляция и кондиционирование воздуха, тепловые сети";
-const DYNAMIC_NOTE =
-  "Справочный расчет. Не заменяет нормативную проверку по СП 50.";
-
 export interface ThermalProtectionMetricRow {
   key: string;
   label: string;

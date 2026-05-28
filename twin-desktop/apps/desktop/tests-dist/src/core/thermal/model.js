@@ -13,8 +13,9 @@ export function buildThermalModel(building, options = {}) {
         throw new Error("Добавьте хотя бы одно помещение для построения тепловой модели.");
     }
     const adjacency = options.adjacency ?? buildAdjacencyGraph(building);
-    const infiltrationACH = options.infiltrationACH ?? 0.5;
+    const infiltrationACH = options.infiltrationCalculation?.calculatedACH ?? options.infiltrationACH ?? 0.5;
     const ventilationACH = options.ventilationACH ?? 0;
+    const heatRecoveryFactor = Math.min(1, Math.max(0, options.heatRecoveryFactor ?? 0));
     const defaultHeight = options.defaultHeight_m ?? MIN_HEIGHT_M;
     const defaultAssembly = options.defaultAssemblyId ?? DEFAULT_WALL_ASSEMBLY_ID;
     const effectiveMassFactor = Math.max(1, options.effectiveMassFactor ?? 1);
@@ -24,7 +25,7 @@ export function buildThermalModel(building, options = {}) {
     renderGeometry.walls.forEach(({ wall, openings }) => {
         openingsByWallId.set(wall.id, openings);
     });
-    const zones = building.rooms.map((room) => buildZone(room, building, infiltrationACH, ventilationACH, defaultHeight, effectiveMassFactor));
+    const zones = building.rooms.map((room) => buildZone(room, building, infiltrationACH, options.infiltrationCalculation, ventilationACH, heatRecoveryFactor, defaultHeight, effectiveMassFactor));
     const wallMap = new Map(building.walls.map((wall) => [wall.id, wall]));
     const internalLinks = adjacency.graph.edges.map((edge, index) => {
         const wall = wallMap.get(edge.wallId);
@@ -81,12 +82,13 @@ export function buildThermalModel(building, options = {}) {
             zones,
             internalLinks,
             outdoorLinks,
+            infiltrationCalculation: options.infiltrationCalculation,
         },
         adjacency,
         warnings,
     };
 }
-function buildZone(room, building, infiltrationACH, ventilationACH, defaultHeight, effectiveMassFactor) {
+function buildZone(room, building, infiltrationACH, infiltrationCalculation, ventilationACH, heatRecoveryFactor, defaultHeight, effectiveMassFactor) {
     const level = building.levels.find((lvl) => lvl.id === room.levelId);
     const height = Math.max(level?.height_m ?? defaultHeight, MIN_HEIGHT_M);
     const area = Math.max(MIN_AREA_M2, Math.abs(polygonArea(room.polygon)));
@@ -94,7 +96,7 @@ function buildZone(room, building, infiltrationACH, ventilationACH, defaultHeigh
     const capacitance = AIR_DENSITY_KG_M3 * volume * AIR_CP_J_KG_K * Math.max(1, effectiveMassFactor);
     const infiltrationConductance = AIR_DENSITY_KG_M3 * AIR_CP_J_KG_K * airflowFromACH(infiltrationACH, volume);
     const ventilationConductance = ventilationACH > 0
-        ? AIR_DENSITY_KG_M3 * AIR_CP_J_KG_K * airflowFromACH(ventilationACH, volume)
+        ? AIR_DENSITY_KG_M3 * AIR_CP_J_KG_K * airflowFromACH(ventilationACH, volume) * (1 - heatRecoveryFactor)
         : 0;
     return {
         id: room.id,
@@ -104,6 +106,7 @@ function buildZone(room, building, infiltrationACH, ventilationACH, defaultHeigh
         capacitance_J_K: capacitance,
         infiltrationACH,
         infiltrationConductance_W_K: infiltrationConductance,
+        infiltrationCalculation,
         ventilationACH,
         ventilationConductance_W_K: ventilationConductance,
     };

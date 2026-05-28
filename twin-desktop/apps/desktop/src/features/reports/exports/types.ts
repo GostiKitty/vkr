@@ -26,16 +26,16 @@ export const REPORT_EXPORT_TEMPLATE_MARKER: Record<ReportExportKind, string> = {
 export const REPORT_EXPORT_TITLE: Record<ReportExportKind, string> = {
   "project-ov-ts": "Раздел 5. ОВ/ТС",
   "thermal-protection": "Расчёт тепловой защиты здания",
-  "energy-passport": "Энергетический паспорт здания",
-  "operation-technical-passport": "Эксплуатационно-технический паспорт",
-  "engineering-summary": "Краткое инженерное заключение",
+  "energy-passport": "Энергетический паспорт проекта здания",
+  "operation-technical-passport": "Паспорт проектных теплотехнических характеристик",
+  "engineering-summary": "Инженерное заключение",
 };
 
 export const REPORT_EXPORT_FILE_PREFIX: Record<ReportExportKind, string> = {
   "project-ov-ts": "razdel-5-ov-ts",
   "thermal-protection": "thermal-protection",
-  "energy-passport": "energy-passport",
-  "operation-technical-passport": "operation-technical-passport",
+  "energy-passport": "energy-passport-project",
+  "operation-technical-passport": "project-thermal-characteristics-passport",
   "engineering-summary": "engineering-summary",
 };
 

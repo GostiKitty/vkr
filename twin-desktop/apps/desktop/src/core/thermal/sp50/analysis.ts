@@ -101,6 +101,9 @@ export function runSp50ComplianceAnalysis(input: RunSp50ComplianceOptions): Sp50
   const moistureProtection = buildMoistureProtectionCheck(constructions, context);
   const floor = buildFloorCheck(constructions, context);
   const energy = buildEnergyCheck(building, context);
+  if (energy.usesPlaceholderInputs) {
+    context.missingData.push("Использованы placeholder-параметры в energy check СП 50; результат требует уточнения.");
+  }
   context.missingData.push(...energy.placeholderWarnings);
   const materialEfficiency = buildMaterialEfficiency(constructions);
   const recommendations = buildRecommendations(constructions, building, energy, temperature);
@@ -665,6 +668,8 @@ function buildEnergyCheck(building: Sp50BuildingCheck, context: DerivedContext):
   const volume = context.sourceData.heatedVolumeM3;
   const area = context.sourceData.heatedAreaM2;
   const ev = context.buildingMeta.energyVentilation ?? {};
+  const usesDefaultVentilationAch = ev.ventilationFlowM3H == null && ev.ventilationACH == null;
+  const usesDefaultInfiltrationAch = ev.infiltrationMassFlowKgH == null && ev.infiltrationACH == null;
   const computed = computeSp50EnergyCharacteristic({
     kob_W_m3K: building.kob_W_m3K,
     gsop,
@@ -686,6 +691,18 @@ function buildEnergyCheck(building: Sp50BuildingCheck, context: DerivedContext):
       volumeCoefficientBetaV: ev.volumeCoefficientBetaV,
     },
   });
+  const placeholderWarnings = [...computed.placeholderWarnings];
+  if (usesDefaultVentilationAch) {
+    placeholderWarnings.push(
+      "Placeholder: для расчёта энергопоказателей СП 50 использована типовая кратность механической вентиляции ventilationACH = 0.18 1/ч."
+    );
+  }
+  if (usesDefaultInfiltrationAch) {
+    placeholderWarnings.push(
+      "Placeholder: для расчёта энергопоказателей СП 50 использована типовая кратность инфильтрации infiltrationACH = 0.45 1/ч."
+    );
+  }
+  const usesPlaceholderInputs = placeholderWarnings.length > 0;
   const qByArea = computed.annualHeatingEnergy_kWh !== null && area ? computed.annualHeatingEnergy_kWh / area : null;
   const qByVolume = computed.annualHeatingEnergy_kWh !== null && volume ? computed.annualHeatingEnergy_kWh / volume : null;
   const qNorm = getHeatingEnergyNorm(context.sourceData.buildingCategory ?? undefined, context.sourceData.storeys ?? undefined);
@@ -703,8 +720,8 @@ function buildEnergyCheck(building: Sp50BuildingCheck, context: DerivedContext):
     solarGainCharacteristic_W_m3K: computed.solarGainCharacteristic_W_m3K,
     averageAirDensity_kg_m3: computed.averageAirDensity_kg_m3,
     averageAirExchange_1_h: computed.averageAirExchange_1_h,
-    usesPlaceholderInputs: computed.usesPlaceholderInputs,
-    placeholderWarnings: computed.placeholderWarnings,
+    usesPlaceholderInputs,
+    placeholderWarnings,
     complies,
     status: resolveStatus(complies),
   };

@@ -65,8 +65,8 @@ export function QuickImportButton({ variant }: QuickImportButtonProps) {
       try {
         const data = await importModel(file, { projectName: deriveProjectName(file.name) });
         setProjectId(data.project_id, "engine");
-        notifyInfo(`Проект ${data.project_id} импортирован. Загружаю Twin Studio…`);
-        navigate("/");
+        notifyInfo(`Проект ${data.project_id} импортирован. Открываю раздел модели…`);
+        navigate("/model");
       } catch (error) {
         const friendly = describeImportError(error);
         notifyError(friendly);

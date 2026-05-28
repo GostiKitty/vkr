@@ -1,4 +1,3 @@
-import React from "react";
 import type { ThermalProtectionReportData } from "./buildThermalProtectionReportData";
 import ProjectDocumentStamp from "./ProjectDocumentStamp";
 

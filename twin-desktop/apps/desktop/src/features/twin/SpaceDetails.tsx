@@ -17,7 +17,7 @@ export function SpaceDetails() {
 
   return (
     <div className="ui-panel ui-hover-lift rounded-2xl p-4">
-      <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">Детали помещения</h3>
+      <h3 className="mb-3 text-sm font-semibold text-[color:var(--text-base)]">Детали помещения</h3>
 
       {loading ? (
         <div className="space-y-3">
@@ -31,7 +31,7 @@ export function SpaceDetails() {
         </div>
       ) : (
         <dl className="divide-y divide-[color:var(--border-soft)] text-sm text-[color:var(--text-muted)]">
-          <InfoRow label="ID" value={space.id} />
+          <InfoRow label="Код помещения" value={space.id} />
           <InfoRow label="Название" value={getSpaceDisplayName(space, spaceIndex)} />
           <InfoRow label="Полное название" value={space.long_name ?? "—"} />
           <InfoRow label="Уровень" value={space.level ?? "—"} />
@@ -47,7 +47,7 @@ export function SpaceDetails() {
 function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex items-center justify-between gap-6 py-3 transition-colors hover:bg-[color:var(--surface-muted)]/60">
-      <dt className="text-xs uppercase tracking-wide text-[color:var(--text-soft)]">{label}</dt>
+      <dt className="text-sm font-medium text-[color:var(--text-soft)]">{label}</dt>
       <dd className="text-right text-base font-medium tabular-nums text-[color:var(--text-base)]">{value}</dd>
     </div>
   );

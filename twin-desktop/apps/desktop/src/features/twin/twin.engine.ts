@@ -1,3 +1,5 @@
+import { polygonArea, polygonCentroid } from "../../entities/geometry/geom";
+import type { BuildingModel, Room } from "../../entities/geometry/types";
 import type { Space } from "../../shared/api/types";
 import { getSpaceDisplayName } from "../../shared/utils/roomNames";
 import type {
@@ -40,6 +42,41 @@ export function buildSpaceInstances(spaces: Space[]): SpaceInstance[] {
       id: space.id,
       name: getSpaceDisplayName(space, index),
       position: [x, height / 2, z],
+      size: [width, height, depth],
+      area,
+      volume,
+    } satisfies SpaceInstance;
+  });
+}
+
+export function buildSpaceInstancesFromModel(model: BuildingModel): SpaceInstance[] {
+  if (!model.rooms.length) {
+    return [];
+  }
+
+  const levelLookup = new Map(model.levels.map((level) => [level.id, level]));
+
+  return model.rooms.map((room, index) => {
+    const level = levelLookup.get(room.levelId);
+    const area = Math.max(Math.abs(polygonArea(room.polygon)), 1);
+    const volume = area * Math.max(level?.height_m ?? 3, 2.4);
+    const bounds = getRoomBounds(room);
+    const centroid = polygonCentroid(room.polygon);
+    const width = clamp(bounds.maxX - bounds.minX, 0.8, 200);
+    const depth = clamp(bounds.maxY - bounds.minY, 0.8, 200);
+    const height = clamp(level?.height_m ?? 3, 2.4, 8);
+    const elevation = level?.elevation_m ?? 0;
+
+    return {
+      id: room.id,
+      name: getSpaceDisplayName(
+        {
+          name: room.name,
+          long_name: room.name,
+        },
+        index
+      ),
+      position: [centroid.x, elevation + height / 2, centroid.y],
       size: [width, height, depth],
       area,
       volume,
@@ -167,4 +204,15 @@ function clamp(value: number, min: number, max: number) {
 
 function lerp(a: number, b: number, t: number) {
   return a + (b - a) * t;
+}
+
+function getRoomBounds(room: Room) {
+  const xs = room.polygon.map((point) => point.x);
+  const ys = room.polygon.map((point) => point.y);
+  return {
+    minX: Math.min(...xs),
+    maxX: Math.max(...xs),
+    minY: Math.min(...ys),
+    maxY: Math.max(...ys),
+  };
 }

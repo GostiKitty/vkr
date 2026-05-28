@@ -26,7 +26,9 @@ export function buildThermalSimulationInsightLines(
       `${eng.calculationLevelRu}. Дискретный баланс: ${eng.discreteBalanceEquation}. Инфильтрация (сенсибельная модель воздухообмена): ${eng.infiltrationConductanceFormula}. ${eng.notSp50NormativeCheckRu}`
     );
     lines.push(
-      `Разрез потерь (срез при пике Σ Q̇_ot по зонам, t≈${b.referenceTimeHours.toFixed(1)} ч, Tₙ≈${b.referenceOutdoorC.toFixed(1)} °C; ${eng.envelopeLossSliceFormula}): непрозрачная часть ${b.lossSharePercent.opaque.toFixed(0)}%, окна ${b.lossSharePercent.window.toFixed(0)}%, двери ${b.lossSharePercent.door.toFixed(0)}%, инфильтрация ${b.lossSharePercent.infiltration.toFixed(0)}%.`
+      `Разрез потерь (срез при пике Σ Q̇_ot по зонам, t≈${b.referenceTimeHours.toFixed(1)} ч, Tₙ≈${b.referenceOutdoorC.toFixed(1)} °C; ${eng.envelopeLossSliceFormula}): непрозрачная часть ${b.lossSharePercent.opaque.toFixed(0)}%, окна ${b.lossSharePercent.window.toFixed(0)}%, двери ${b.lossSharePercent.door.toFixed(0)}%, инфильтрация ${(
+        b.infiltrationShareOfTotalPct ?? b.lossSharePercent.infiltration
+      ).toFixed(0)}% от всех теплопотерь.`
     );
     lines.push(
       `Удельные показатели за период (RC): пик ≈ ${b.specificPeakLoad_W_m2.toFixed(1)} Вт/м² пола зон, энергия ≈ ${b.specificEnergyKWh_m2.toFixed(2)} кВт·ч/м² пола зон. Остаток r в срезе (алгебраический, с Σ_k G_k,ext(T_i−T_n) и G_inf(T_i−T_n), без max(0,·) как в долях «зимних» потерь): ${b.balanceResidualW.toFixed(0)} Вт (${(100 * b.balanceRelativeResidual).toFixed(1)}% от масштаба мощностей), статус: ${b.balanceStatus}. ${b.balanceStatusNoteRu}`

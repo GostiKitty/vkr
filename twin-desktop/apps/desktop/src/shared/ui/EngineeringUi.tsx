@@ -19,7 +19,6 @@ const calloutDefaultIcon: Record<EngineeringCalloutVariant, ReactNode> = {
   success: <IconStatusOk className="h-[1.1rem] w-[1.1rem] opacity-90" />,
 };
 
-/** Информационный блок: допущения, ограничения метода, подсказки. */
 export function EngineeringCallout({
   variant = "info",
   title,
@@ -62,9 +61,9 @@ export function EngineeringSectionHeader({
 }) {
   return (
     <header className="space-y-1">
-      {kicker ? <p className="ui-kicker">{kicker}</p> : null}
-      <h3 className="ui-heading-panel">{title}</h3>
-      {subtitle ? <p className="max-w-3xl text-sm leading-relaxed text-[color:var(--text-muted)]">{subtitle}</p> : null}
+      {kicker ? <p className="ui-soft-kicker">{kicker}</p> : null}
+      <h3 className="ui-heading-card">{title}</h3>
+      {subtitle ? <p className="max-w-3xl text-[15px] leading-snug text-[color:var(--text-muted)]">{subtitle}</p> : null}
     </header>
   );
 }
@@ -78,7 +77,6 @@ const toneRing: Record<MetricStatusTone, string> = {
   risk: "ring-[color:var(--danger-border)]",
 };
 
-/** Компактная карточка метрики: название, значение, единица, короткая подсказка. */
 export function EngineeringMetricTile({
   label,
   value,
@@ -96,7 +94,7 @@ export function EngineeringMetricTile({
     <div
       className={`ui-metric ui-hover-lift group flex flex-col gap-1 p-4 shadow-sm ring-1 ring-inset ${toneRing[tone]} hover:border-[color:var(--border-base)]`}
     >
-      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[color:var(--text-soft)]">{label}</p>
+      <p className="text-[0.8rem] font-semibold leading-snug text-[color:var(--text-muted)]">{label}</p>
       <p className="text-2xl font-semibold tabular-nums tracking-tight text-[color:var(--text-base)]">
         {value}
         {unit ? <span className="ml-1.5 text-base font-medium text-[color:var(--text-muted)]">{unit}</span> : null}
@@ -106,29 +104,128 @@ export function EngineeringMetricTile({
   );
 }
 
-/** Градиентная шкала для тепловой окраски (15…30 °C по умолчанию, согласовано с `temperatureToColor`). */
 export function TemperatureScaleLegend({
   minC = 15,
   maxC = 30,
+  title = "Temperature Scale",
+  unitLabel = "°C",
+  minLabel,
+  maxLabel,
+  gradientCss,
   caption,
 }: {
   minC?: number;
   maxC?: number;
+  title?: string;
+  unitLabel?: string;
+  minLabel?: string;
+  maxLabel?: string;
+  gradientCss?: string;
   caption?: string;
 }) {
+  const resolvedMinLabel = minLabel ?? `${minC} ${unitLabel}`.trim();
+  const resolvedMaxLabel = maxLabel ?? `${maxC} ${unitLabel}`.trim();
   return (
-    <div className="rounded-xl border border-[color:var(--border-soft)] bg-[color:var(--surface-overlay)] px-3 py-2 text-[11px] text-[color:var(--text-muted)] shadow-sm backdrop-blur">
-      <p className="mb-1.5 font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">Шкала температуры</p>
+    <div className="rounded-xl border border-[color:var(--border-soft)] bg-[color:var(--surface-overlay)] px-3 py-2 text-sm text-[color:var(--text-muted)] shadow-sm backdrop-blur">
+      <p className="mb-1.5 font-semibold text-[color:var(--text-base)]">{title}</p>
       <div
         className="h-2.5 w-full max-w-[220px] rounded-full shadow-inner"
-        style={{ background: "var(--temp-legend-gradient)" }}
-        title={`От ${minC} °C (холоднее) к ${maxC} °C (теплее)`}
+        style={{ background: gradientCss ?? "var(--temp-legend-gradient)" }}
+        title={`${resolvedMinLabel} → ${resolvedMaxLabel}`}
       />
       <div className="mt-1 flex max-w-[220px] justify-between font-medium tabular-nums text-[color:var(--text-base)]">
-        <span>{minC} °C</span>
-        <span>{maxC} °C</span>
+        <span>{resolvedMinLabel}</span>
+        <span>{resolvedMaxLabel}</span>
       </div>
-      {caption ? <p className="mt-1.5 text-[10px] leading-snug text-[color:var(--text-soft)]">{caption}</p> : null}
+      {caption ? <p className="mt-1.5 text-xs leading-snug text-[color:var(--text-soft)]">{caption}</p> : null}
+    </div>
+  );
+}
+
+/**
+ * Compact engineering-grade thermal field legend.
+ *
+ * Shows: mode title, ANSYS colorbar, min / avg / max values, unit label,
+ * source caption, and optional warning list.
+ *
+ * Use this instead of TemperatureScaleLegend wherever ANSYS-like output is shown.
+ */
+export function ThermalFieldLegend({
+  title = "Thermal Field",
+  minC,
+  avgC,
+  maxC,
+  unitLabel = "°C",
+  source,
+  warnings,
+  gradientCss,
+  condensationMode,
+}: {
+  title?: string;
+  minC: number;
+  avgC?: number;
+  maxC: number;
+  unitLabel?: string;
+  /** Short caption describing the data source, e.g. "Patch thermal field" */
+  source?: string;
+  /** List of short warning strings shown below the bar */
+  warnings?: string[];
+  /** Override the CSS gradient (defaults to ANSYS thermal colormap) */
+  gradientCss?: string;
+  /** If true, switches to green→red condensation risk palette labels */
+  condensationMode?: boolean;
+}) {
+  const resolvedGradient =
+    gradientCss ??
+    (condensationMode
+      ? "linear-gradient(90deg, #16a34a 0%, #f59e0b 50%, #dc2626 100%)"
+      : "var(--temp-legend-gradient)");
+
+  const fmt = (v: number) =>
+    unitLabel === "°C" ? `${v.toFixed(1)} ${unitLabel}` : `${v.toFixed(1)} ${unitLabel}`;
+
+  const minLabel = condensationMode ? "Safe" : fmt(minC);
+  const maxLabel = condensationMode ? "Risk" : fmt(maxC);
+
+  return (
+    <div className="rounded-xl border border-[color:var(--border-soft)] bg-[color:var(--surface-overlay)] px-3 py-2 text-sm text-[color:var(--text-muted)] shadow-sm backdrop-blur">
+      {/* Title row */}
+      <p className="mb-1.5 font-semibold text-[color:var(--text-base)]">{title}</p>
+
+      {/* Colorbar */}
+      <div
+        className="h-2.5 w-full max-w-[220px] rounded-full shadow-inner"
+        style={{ background: resolvedGradient }}
+        title={`${minLabel} → ${maxLabel}`}
+      />
+
+      {/* Min / [avg] / max row */}
+      <div className="mt-1 flex max-w-[220px] items-center justify-between font-medium tabular-nums text-[color:var(--text-base)]">
+        <span className="text-[11px]">{minLabel}</span>
+        {typeof avgC === "number" && !condensationMode ? (
+          <span className="text-[10px] text-[color:var(--text-soft)]">∅ {fmt(avgC)}</span>
+        ) : null}
+        <span className="text-[11px]">{maxLabel}</span>
+      </div>
+
+      {/* Source label */}
+      {source ? (
+        <p className="mt-1.5 text-[10px] uppercase tracking-[0.12em] text-[color:var(--text-soft)]">
+          {source}
+        </p>
+      ) : null}
+
+      {/* Warnings */}
+      {warnings?.length ? (
+        <div className="mt-1.5 space-y-0.5">
+          {warnings.map((w) => (
+            <p key={w} className="flex items-start gap-1 text-[10px] leading-snug text-[color:var(--text-muted)]">
+              <span className="mt-px opacity-60">⚠</span>
+              <span>{w}</span>
+            </p>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }

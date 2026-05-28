@@ -2,7 +2,6 @@ import type { Sp50BuildingCategory } from "../../../entities/geometry/types";
 import { getVolumeCoefficientBetaV } from "../../../norms/sp50_2024/volumeCoefficient";
 import { getSolarRadiation } from "../../../norms/sp50_2024/solarRadiation";
 import {
-  calculateAirSpecificWeight,
   calculateAnnualHeatingEnergy,
   calculateHeatingEnergyCharacteristic,
 } from "./calculations";

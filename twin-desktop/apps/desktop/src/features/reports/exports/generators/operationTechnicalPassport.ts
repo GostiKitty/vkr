@@ -1,11 +1,8 @@
-/**
- * HTML-генератор для «Эксплуатационно-технического паспорта».
- */
-
 import {
   escapeHtml,
   renderAssumptionsBlock,
   renderDataTable,
+  renderDocumentStatusBlock,
   renderGostStamp,
   renderGostTitlePage,
   renderSignatureBlock,
@@ -18,7 +15,7 @@ import type {
 } from "../data/buildOperationPassportData";
 import type { AssumptionEntry } from "../defaults/demoHouseDesignDefaults";
 
-const DOCUMENT_LABEL = "Эксплуатационно-технический паспорт";
+const DOCUMENT_LABEL = "Паспорт проектных теплотехнических характеристик";
 
 export function generateOperationTechnicalPassportHtml(
   data: OperationPassportData,
@@ -27,11 +24,8 @@ export function generateOperationTechnicalPassportHtml(
   const titlePage = renderGostTitlePage(
     data.meta,
     DOCUMENT_LABEL,
-    data.isDraft ? "Справочный проектный экземпляр" : undefined
+    "Проектная стадия"
   );
-  const draftBanner = data.isDraft
-    ? `<section><span class="rx-draft-banner">Справочный документ</span><p class="rx-note">${escapeHtml(data.draftReason)}</p></section>`
-    : "";
 
   const sections = [
     renderSection(data.documentInfo),
@@ -41,12 +35,14 @@ export function generateOperationTechnicalPassportHtml(
       data.sourceRegisterRows,
       data.expertise.showIncompleteFields
     ),
-    renderSection(data.generalInfo),
-    renderSection(data.buildingInfo),
+    renderSection(data.objectInfo),
+    renderSection(data.geometryInfo),
+    renderSection(data.constructionInfo),
     renderSection(data.engineeringSystems),
     renderSection(data.designLoads),
-    renderCombinedThermalSection(data),
-    renderSection(data.operationRules),
+    renderSection(data.thermalIndicators),
+    renderSection(data.energyIndicators),
+    renderSection(data.recommendations),
     renderClarificationSection(data),
     renderBulletSection("op-software", "Сведения о программном расчёте", data.expertise.softwareInfoLines),
     renderBulletSection("op-limitations", "Ограничения применения расчёта", data.expertise.limitations),
@@ -62,16 +58,17 @@ export function generateOperationTechnicalPassportHtml(
           null,
           [
             { label: "Показатель", width: "55%" },
-            { label: "Значение", align: "right" },
+            { label: "Значение", width: "30%" },
+            { label: "Примечание", width: "15%" },
           ],
-          appendix.rows.map((row) => ({ cells: [row.label, row.value] }))
+          appendix.rows.map((row) => ({ cells: [row.label, row.value, row.note || "—"] }))
         )}</section>`
     )
     .join("\n");
 
   const body = `
 ${titlePage}
-${draftBanner}
+${renderDocumentStatusBlock(data.preflight, { includeIssues: true, includeWarnings: true })}
 ${sections}
 ${appendices}
 ${renderAssumptionsBlock(options.appliedAssumptions, { id: "op-assumptions" })}
@@ -96,8 +93,9 @@ function renderSection(section: OperationPassportSection): string {
     [
       { label: "Показатель", width: "55%" },
       { label: "Значение", align: "right" },
+      { label: "Примечание", width: "18%" },
     ],
-    section.rows.map((row) => ({ cells: [row.label, row.value] }))
+    section.rows.map((row) => ({ cells: [row.label, row.value, row.note || "—"] }))
   )}
 </section>`.trim();
 }
@@ -130,12 +128,13 @@ function renderInputRegisterSection(
 }
 
 function renderClarificationSection(data: OperationPassportData): string {
+  const visibleLines = Array.from(new Set(data.clarificationLines.filter(Boolean)));
   return `
 <section id="op-clarifications">
   <h3 class="rx-section-title">Перечень данных, требующих уточнения</h3>
   ${
-    data.clarificationLines.length
-      ? `<ul>${data.clarificationLines.map((line) => `<li>${escapeHtml(line)}</li>`).join("")}</ul>`
+    visibleLines.length
+      ? `<ul>${visibleLines.map((line) => `<li>${escapeHtml(line)}</li>`).join("")}</ul>`
       : "<p>Критических пробелов в исходных данных не выявлено.</p>"
   }
 </section>`.trim();
@@ -168,14 +167,5 @@ function renderPackageSection(
     ],
     rows.map((row) => ({ cells: [row.label, row.value] }))
   )}
-</section>`.trim();
-}
-
-function renderCombinedThermalSection(data: OperationPassportData): string {
-  return `
-<section id="op-5">
-  <h3 class="rx-section-title">5 Энергетические характеристики здания</h3>
-  ${renderSection(data.thermalEnergyChars)}
-  ${renderSection(data.energyIndicators)}
 </section>`.trim();
 }

@@ -1,5 +1,11 @@
 import { createEmptyBuildingModel, } from "../entities/geometry/types";
+import { applyEnvelopePresetToDoor, applyEnvelopePresetToWindow, resolveDefaultPresetId, } from "../entities/envelope/envelopePresets";
+import { applyDefaultOpeningEnvelopeToModel, TYPICAL_INSULATED_DOOR_U_W_M2K, TYPICAL_PVC_WINDOW_G_VALUE, TYPICAL_PVC_WINDOW_U_W_M2K, windowEnvelopeSourceNote, } from "../shared/utils/openingThermalData";
+import { polygonArea, segmentLength } from "../entities/geometry/geom";
+import { resolveScenarioConfig } from "../entities/workflow/workflow.store";
 import { DEFAULT_OPERATIONAL_SCENARIOS } from "../entities/networks/types";
+import { runThermalSimulation } from "../core/thermal/solver";
+import { getSp131CityClimate } from "../norms/sp131_2025/climate";
 const LEVEL_1_ID = "video-level-1";
 const LEVEL_2_ID = "video-level-2";
 const HEATING_SYSTEM_ID = "video-heating";
@@ -27,26 +33,6 @@ export const VIDEO_DEMO_ROOM_TEMPERATURES = {
     [VIDEO_DEMO_ROOM_IDS.hall]: 20.8,
     [VIDEO_DEMO_ROOM_IDS.bathroom]: 24.0,
 };
-const VIDEO_DEMO_ROOM_SETPOINTS = {
-    [VIDEO_DEMO_ROOM_IDS.living]: 22,
-    [VIDEO_DEMO_ROOM_IDS.bedroom]: 20.5,
-    [VIDEO_DEMO_ROOM_IDS.kitchen]: 22.5,
-    [VIDEO_DEMO_ROOM_IDS.utility]: 19.5,
-    [VIDEO_DEMO_ROOM_IDS.study]: 21.5,
-    [VIDEO_DEMO_ROOM_IDS.nursery]: 22.5,
-    [VIDEO_DEMO_ROOM_IDS.hall]: 21,
-    [VIDEO_DEMO_ROOM_IDS.bathroom]: 24,
-};
-const VIDEO_DEMO_ROOM_HEATING_W = {
-    [VIDEO_DEMO_ROOM_IDS.living]: 1650,
-    [VIDEO_DEMO_ROOM_IDS.bedroom]: 1320,
-    [VIDEO_DEMO_ROOM_IDS.kitchen]: 980,
-    [VIDEO_DEMO_ROOM_IDS.utility]: 420,
-    [VIDEO_DEMO_ROOM_IDS.study]: 1180,
-    [VIDEO_DEMO_ROOM_IDS.nursery]: 1240,
-    [VIDEO_DEMO_ROOM_IDS.hall]: 760,
-    [VIDEO_DEMO_ROOM_IDS.bathroom]: 540,
-};
 const EXTERIOR_WALL_LAYERS = [
     { materialId: "cement_sand_plaster", thickness_m: 0.02 },
     { materialId: "aerated_concrete", thickness_m: 0.3 },
@@ -73,13 +59,14 @@ const FLOOR_INTER_LAYERS = [
     { materialId: "mineral_wool", thickness_m: 0.06 },
     { materialId: "cement_sand_plaster", thickness_m: 0.04 },
 ];
-const WINDOW_LAYERS = [{ materialId: "window_block", thickness_m: 0.04 }];
+const WINDOW_LAYERS = [{ materialId: "pvc_double_glazed_unit_equivalent", thickness_m: 0.07 }];
+const DEMO_WINDOW_PRESET_ID = resolveDefaultPresetId("window");
+const DEMO_DOOR_PRESET_ID = resolveDefaultPresetId("door");
 const DOOR_LAYERS = [
     { materialId: "wood", thickness_m: 0.04 },
     { materialId: "eps", thickness_m: 0.05 },
     { materialId: "plywood", thickness_m: 0.01 },
 ];
-const HOURS = Array.from({ length: 25 }, (_, index) => index);
 const FOOTPRINT_BOUNDARY = [
     { x: 0, y: 0 },
     { x: FOOTPRINT.width, y: 0 },
@@ -100,6 +87,7 @@ function createWall(id, levelId, a, b, options) {
         b,
         thickness_m: options.thickness_m,
         height_m: LEVEL_HEIGHT_M,
+        wallAssemblyId: options.wallAssemblyId,
         layers: options.layers,
     };
 }
@@ -116,8 +104,16 @@ function buildWallAnchor(wall, offset_m) {
     };
 }
 function buildLevelWalls(levelId, prefix) {
-    const ext = { thickness_m: EXT_WALL_THICKNESS_M, layers: EXTERIOR_WALL_LAYERS };
-    const interior = { thickness_m: INT_WALL_THICKNESS_M, layers: INTERIOR_WALL_LAYERS };
+    const ext = {
+        thickness_m: EXT_WALL_THICKNESS_M,
+        layers: EXTERIOR_WALL_LAYERS,
+        wallAssemblyId: "video-exterior-wall",
+    };
+    const interior = {
+        thickness_m: INT_WALL_THICKNESS_M,
+        layers: INTERIOR_WALL_LAYERS,
+        wallAssemblyId: "video-interior-wall",
+    };
     const w = FOOTPRINT.width;
     const d = FOOTPRINT.depth;
     const midX = w / 2;
@@ -163,6 +159,216 @@ function rect(x, y, width, height) {
         { x: x + width, y: y + height },
         { x, y: y + height },
     ];
+}
+function roomAreaM2(room) {
+    return Math.abs(polygonArea(room.polygon));
+}
+function wallAreaM2(wall) {
+    return Math.max(0, segmentLength(wall.a, wall.b) * Math.max(0, wall.height_m));
+}
+function slabAreaM2(slab) {
+    return Math.abs(polygonArea(slab.boundary));
+}
+function roofAreaM2(roof) {
+    const projectedArea = Math.abs(polygonArea(roof.boundary));
+    const risePerMeter = roof.slope?.risePerMeter ?? 0;
+    return projectedArea * Math.sqrt(1 + risePerMeter * risePerMeter);
+}
+function openingAreaM2(opening) {
+    return Math.max(0, opening.width_m) * Math.max(0, opening.height_m);
+}
+function buildRoomOverrides() {
+    return {
+        [VIDEO_DEMO_ROOM_IDS.living]: {
+            heightM: LEVEL_HEIGHT_M,
+            heated: true,
+            floorContactType: "ground",
+            roofContactType: "interfloor",
+            purpose: "Гостиная",
+        },
+        [VIDEO_DEMO_ROOM_IDS.bedroom]: {
+            heightM: LEVEL_HEIGHT_M,
+            heated: true,
+            floorContactType: "ground",
+            roofContactType: "interfloor",
+            purpose: "Спальня",
+        },
+        [VIDEO_DEMO_ROOM_IDS.kitchen]: {
+            heightM: LEVEL_HEIGHT_M,
+            heated: true,
+            floorContactType: "ground",
+            roofContactType: "interfloor",
+            purpose: "Кухня",
+        },
+        [VIDEO_DEMO_ROOM_IDS.utility]: {
+            heightM: LEVEL_HEIGHT_M,
+            heated: true,
+            floorContactType: "ground",
+            roofContactType: "interfloor",
+            purpose: "Тепловой пункт",
+        },
+        [VIDEO_DEMO_ROOM_IDS.study]: {
+            heightM: LEVEL_HEIGHT_M,
+            heated: true,
+            floorContactType: "interfloor",
+            roofContactType: "outdoor",
+            purpose: "Кабинет",
+        },
+        [VIDEO_DEMO_ROOM_IDS.nursery]: {
+            heightM: LEVEL_HEIGHT_M,
+            heated: true,
+            floorContactType: "interfloor",
+            roofContactType: "outdoor",
+            purpose: "Детская",
+        },
+        [VIDEO_DEMO_ROOM_IDS.hall]: {
+            heightM: LEVEL_HEIGHT_M,
+            heated: true,
+            floorContactType: "interfloor",
+            roofContactType: "outdoor",
+            purpose: "Холл",
+        },
+        [VIDEO_DEMO_ROOM_IDS.bathroom]: {
+            heightM: LEVEL_HEIGHT_M,
+            heated: true,
+            floorContactType: "interfloor",
+            roofContactType: "outdoor",
+            purpose: "Санузел",
+        },
+    };
+}
+export function buildVideoDemoScenarioConfig() {
+    return {
+        climate: {
+            baseC: -10,
+            amplitudeC: 4,
+            seasonalOffsetC: 0,
+            manual: {
+                outdoorDesignTemperatureC: null,
+                outdoorHeatingAverageC: null,
+                heatingDurationDays: null,
+            },
+        },
+        setpoints: {
+            day: 21,
+            night: 18,
+            dayStartHour: 6,
+            nightStartHour: 22,
+        },
+        internalGains: {
+            dayGain_W_m2: 5.5,
+            nightGain_W_m2: 1,
+        },
+        occupancy: {
+            dayFraction: 1,
+            nightFraction: 0.2,
+        },
+        ventilation: {
+            infiltrationACH: 0.2,
+            ventilationACH: 0.35,
+            heatRecoveryFactor: 0.7,
+            mechanicalVentilationEnabled: true,
+        },
+        climateCityId: "moscow",
+        geometry: {
+            roomOverrides: buildRoomOverrides(),
+        },
+        materials: {
+            bridgeAccountingMode: "disabled",
+            homogeneityCoefficient: null,
+            windowUValue_W_m2K: TYPICAL_PVC_WINDOW_U_W_M2K,
+            doorUValue_W_m2K: TYPICAL_INSULATED_DOOR_U_W_M2K,
+            windowGValue: TYPICAL_PVC_WINDOW_G_VALUE,
+            shadingFactor: 0.9,
+        },
+        operation: {
+            duration: "24h",
+            timestepMinutes: 10,
+        },
+        comfort: {
+            relativeHumidityPercent: 50,
+            comfortMinC: 20,
+            comfortMaxC: 26,
+            comfortCategory: "II",
+            measuredMrtC: null,
+            measuredSurfaceTemperatureC: null,
+        },
+        engineeringSystems: {
+            heatingEnabled: true,
+            heatingMode: "ideal",
+            supplyTemperatureC: 70,
+            returnTemperatureC: 50,
+            massFlowKgS: 0.18,
+            fluidType: "water",
+            installedCapacityW: 28000,
+            emitterType: "радиаторы + фанкойл",
+            pipeDiameterMm: 32,
+            pipeLengthM: null,
+            pipeInsulated: true,
+            pipeFluidTemperatureC: 62,
+        },
+        ecology: {
+            energySource: "централизованное теплоснабжение",
+            emissionFactorKgPerKWh: 0.23,
+        },
+        economy: {
+            tariffRubPerKWh: 3.4,
+            capexRub: 950000,
+            analysisPeriodYears: 15,
+            discountRatePercent: 10,
+            annualTariffGrowthPercent: 5,
+            annualMaintenanceCostRub: 25000,
+            insulationCostRub: null,
+            windowsCostRub: null,
+            equipmentCostRub: null,
+        },
+        validation: {
+            roomId: null,
+            measuredSeries: [],
+            measuredEnergyKWh: null,
+            periodLabel: "нет данных",
+            availabilityStatus: "unavailable",
+            dataOrigin: "synthetic",
+            note: "В демонстрационной модели есть только synthetic/demo sensors; реальных измерений для калибровки нет.",
+        },
+    };
+}
+function buildVideoDemoThermalOptions(scenarioConfig = buildVideoDemoScenarioConfig()) {
+    const resolved = resolveScenarioConfig(scenarioConfig);
+    return {
+        duration: resolved.operation?.duration ?? "24h",
+        timestepMinutes: resolved.operation?.timestepMinutes ?? 10,
+        heatingMode: resolved.engineeringSystems?.heatingMode ?? "ideal",
+        heatingCapacityW: resolved.engineeringSystems?.installedCapacityW ?? null,
+        outdoor: {
+            baseC: resolved.climate.baseC,
+            amplitudeC: resolved.climate.amplitudeC,
+            seasonalOffsetC: resolved.climate.seasonalOffsetC,
+            phaseShiftHours: -4,
+        },
+        setpoints: {
+            day: resolved.setpoints.day,
+            night: resolved.setpoints.night,
+            dayStartHour: resolved.setpoints.dayStartHour,
+            nightStartHour: resolved.setpoints.nightStartHour,
+            // Плавный разгон за 60 мин — убирает пик мощности при утреннем прогреве
+            setpointRampMinutes: 60,
+        },
+        internalGains: {
+            dayGain_W_m2: resolved.internalGains.dayGain_W_m2,
+            nightGain_W_m2: resolved.internalGains.nightGain_W_m2,
+        },
+        occupancy: {
+            dayFraction: resolved.occupancy.dayFraction,
+            nightFraction: resolved.occupancy.nightFraction,
+            dayStartHour: resolved.setpoints.dayStartHour,
+            nightStartHour: resolved.setpoints.nightStartHour,
+        },
+        infiltrationACH: resolved.ventilation.infiltrationACH,
+        ventilationACH: resolved.ventilation.mechanicalVentilationEnabled ? resolved.ventilation.ventilationACH : 0,
+        heatRecoveryFactor: resolved.ventilation.heatRecoveryFactor,
+        initialTemperatureC: resolved.setpoints.night,
+    };
 }
 function buildOpenings(levelId, prefix, walls) {
     const wallMap = buildWallMap(walls);
@@ -212,7 +418,10 @@ function buildOpenings(levelId, prefix, walls) {
             { id: `${prefix}-win-hall`, anchor: buildWallAnchor(wallMap.get(`${prefix}-west-north`), 1.8), width_m: 1.2, height_m: 1.4, sill_m: 0.95 },
             { id: `${prefix}-win-bathroom`, anchor: buildWallAnchor(wallMap.get(`${prefix}-north-east`), 3.2), width_m: 0.8, height_m: 1.1, sill_m: 1.25 },
         ];
-    return { doors, windows };
+    return {
+        doors: doors.map((door) => applyEnvelopePresetToDoor(door, DEMO_DOOR_PRESET_ID)),
+        windows: windows.map((window) => applyEnvelopePresetToWindow(window, DEMO_WINDOW_PRESET_ID)),
+    };
 }
 function buildPipeDefaults(id, levelId, path, type, fluidTemperatureC, connectedEquipmentIds) {
     const isSupply = type === "heating_supply";
@@ -654,15 +863,32 @@ function buildSensors() {
         },
     ];
 }
-function buildThermalProtection() {
+function buildThermalProtection(model) {
+    const climate = getSp131CityClimate("moscow");
+    const heatedAreaM2 = model.rooms.reduce((sum, room) => sum + roomAreaM2(room), 0);
+    const heatedVolumeM3 = heatedAreaM2 * LEVEL_HEIGHT_M;
+    const utilityAreaM2 = roomAreaM2(model.rooms.find((room) => room.id === VIDEO_DEMO_ROOM_IDS.utility) ?? model.rooms[0]);
+    const wallMap = new Map(model.walls.map((wall) => [wall.id, wall]));
+    const exteriorWallAreaM2 = model.walls
+        .filter((wall) => wall.wallAssemblyId === "video-exterior-wall")
+        .reduce((sum, wall) => sum + wallAreaM2(wall), 0);
+    const windowAreaM2 = model.windows.reduce((sum, window) => sum + openingAreaM2(window), 0);
+    const exteriorDoorAreaM2 = model.doors.reduce((sum, door) => {
+        const hostingWall = door.anchor.wallId ? wallMap.get(door.anchor.wallId) ?? null : null;
+        return hostingWall?.wallAssemblyId === "video-exterior-wall" ? sum + openingAreaM2(door) : sum;
+    }, 0);
+    const roofArea = (model.roofs ?? []).reduce((sum, roof) => sum + roofAreaM2(roof), 0);
+    const groundFloorArea = (model.floorSlabs ?? [])
+        .filter((slab) => slab.kind === "ground")
+        .reduce((sum, slab) => sum + slabAreaM2(slab), 0);
     const envelope = [
         {
             id: "video-ext-walls",
             label: "Наружные стены",
             constructionType: "wall",
-            areaM2: 198,
-            conditionedAreaM2: 196,
-            conditionedVolumeM3: 588,
+            areaM2: Number(exteriorWallAreaM2.toFixed(2)),
+            conditionedAreaM2: Number(heatedAreaM2.toFixed(2)),
+            conditionedVolumeM3: Number(heatedVolumeM3.toFixed(2)),
             layers: EXTERIOR_WALL_LAYERS,
             riskZones: ["углы фасада", "примыкания окон", "узел входной двери"],
         },
@@ -670,23 +896,37 @@ function buildThermalProtection() {
             id: "video-windows",
             label: "Окна",
             constructionType: "window",
-            areaM2: 24.6,
+            areaM2: Number(windowAreaM2.toFixed(2)),
             layers: WINDOW_LAYERS,
             riskZones: ["откосы", "подоконные зоны"],
+            metadata: {
+                presetId: DEMO_WINDOW_PRESET_ID,
+                presetLabel: "Окно ПВХ, 2-камерный СП",
+                sourceType: "preset",
+                sourceNote: windowEnvelopeSourceNote(),
+                runtimeU_W_m2K: TYPICAL_PVC_WINDOW_U_W_M2K,
+            },
         },
         {
-            id: "video-doors",
-            label: "Наружные двери",
+            id: "video-door-entry",
+            label: "Наружная дверь",
             constructionType: "door",
-            areaM2: 3.8,
+            areaM2: Number(exteriorDoorAreaM2.toFixed(2)),
             layers: DOOR_LAYERS,
             riskZones: ["порог", "коробка"],
+            metadata: {
+                presetId: DEMO_DOOR_PRESET_ID,
+                presetLabel: "Входная утеплённая",
+                sourceType: "preset",
+                sourceNote: "Утеплённая входная дверь; U≈1,2 Вт/(м²·К) по типовому паспорту.",
+                runtimeU_W_m2K: TYPICAL_INSULATED_DOOR_U_W_M2K,
+            },
         },
         {
             id: "video-roof",
             label: "Скатная кровля",
             constructionType: "covering",
-            areaM2: 168,
+            areaM2: Number(roofArea.toFixed(2)),
             layers: ROOF_LAYERS,
             riskZones: ["конёк", "примыкание к стенам"],
         },
@@ -694,43 +934,34 @@ function buildThermalProtection() {
             id: "video-floor-ground",
             label: "Пол по грунту",
             constructionType: "floorOnGround",
-            areaM2: 98,
+            areaM2: Number(groundFloorArea.toFixed(2)),
             layers: FLOOR_GROUND_LAYERS,
             riskZones: ["контур наружных стен"],
-        },
-        {
-            id: "video-floor-inter",
-            label: "Межэтажное перекрытие",
-            constructionType: "floorOverBasement",
-            areaM2: 98,
-            layers: FLOOR_INTER_LAYERS,
-            riskZones: ["лестничный узел"],
         },
     ];
     return {
         buildingCategory: "residential",
         storeys: 2,
-        heatedAreaM2: 196,
-        heatedVolumeM3: 588,
-        residentialAreaM2: 168,
-        occupiedAreaM2: 184,
+        heatedAreaM2: Number(heatedAreaM2.toFixed(2)),
+        heatedVolumeM3: Number(heatedVolumeM3.toFixed(2)),
+        residentialAreaM2: Number((heatedAreaM2 - utilityAreaM2).toFixed(2)),
+        occupiedAreaM2: Number(heatedAreaM2.toFixed(2)),
         operationCondition: "B",
         moistureMode: "normal",
         climate: {
-            city: "Москва",
+            city: climate?.label ?? "Москва",
             climateRegion: "IIБ",
             indoorTemperatureC: 20,
             indoorRelativeHumidityPercent: 50,
-            outdoorHeatingPeriodAverageC: -3.1,
-            heatingPeriodDurationDays: 214,
-            outdoorDesignTemperatureC: -26,
-            julyAverageTemperatureC: 19.7,
-            summerOutdoorAmplitudeC: 9.8,
-            summerWindSpeedM_s: 3.4,
+            outdoorHeatingPeriodAverageC: climate?.outdoorHeatingPeriodAverageC,
+            heatingPeriodDurationDays: climate?.heatingPeriodDurationDays,
+            outdoorDesignTemperatureC: climate?.outdoorDesignTemperatureC,
             humidityZone: "normal",
-            solarRadiationZone: "central",
-            solarRadiationImax_W_m2: 670,
-            solarRadiationIavg_W_m2: 305,
+        },
+        energyVentilation: {
+            ventilationACH: 0.35,
+            infiltrationACH: 0.2,
+            heatRecoveryFactor: 0.7,
         },
         envelope,
     };
@@ -741,7 +972,7 @@ function buildVideoDemoModelInternal() {
     const wallsL2 = buildLevelWalls(LEVEL_2_ID, "video-l2");
     const openingsL1 = buildOpenings(LEVEL_1_ID, "video-l1", wallsL1);
     const openingsL2 = buildOpenings(LEVEL_2_ID, "video-l2", wallsL2);
-    return {
+    const preparedModel = {
         ...model,
         levels: [
             { id: LEVEL_1_ID, name: "1 этаж", elevation_m: 0, height_m: LEVEL_HEIGHT_M },
@@ -815,6 +1046,11 @@ function buildVideoDemoModelInternal() {
         meta: {
             demoScenarioId: "video-demo-house",
             demoScenarioName: "Демонстрационный дом · 2 этажа",
+            demoProjectAddress: "Россия, г. Москва, демонстрационный объект",
+            climateSource: "src/norms/sp131_2025/climate.ts#moscow",
+            materialSource: "src/norms/sp50_2024/materialThermalProperties.ts",
+            validationStatus: "unavailable",
+            validationSource: "synthetic-demo-sensors",
             showcaseFeatures: [
                 "geometry",
                 "pitched-roof",
@@ -826,68 +1062,14 @@ function buildVideoDemoModelInternal() {
                 "3d",
             ],
         },
-        thermalProtection: buildThermalProtection(),
     };
+    preparedModel.thermalProtection = buildThermalProtection(preparedModel);
+    return applyDefaultOpeningEnvelopeToModel(preparedModel);
 }
 export function buildVideoDemoHouseModel() {
     return cloneDeep(buildVideoDemoModelInternal());
 }
 export const videoDemoHouse = buildVideoDemoHouseModel();
-export function buildVideoDemoThermalResult(model = videoDemoHouse) {
-    const roomEntries = model.rooms.map((room) => {
-        const baseTemperature = VIDEO_DEMO_ROOM_TEMPERATURES[room.id] ?? 20;
-        const baseHeating = VIDEO_DEMO_ROOM_HEATING_W[room.id] ?? 800;
-        const setpoint = VIDEO_DEMO_ROOM_SETPOINTS[room.id] ?? baseTemperature;
-        return {
-            room,
-            baseTemperature,
-            baseHeating,
-            setpoint,
-            phaseOffset: room.id.length * 0.31,
-        };
-    });
-    const timeline = HOURS.map((timeHours) => {
-        const normalizedHour = (timeHours / 24) * Math.PI * 2;
-        const outdoorTemperatureC = -10 + Math.sin(normalizedHour - 0.7) * 3.2 + Math.cos(normalizedHour * 0.45) * 0.9;
-        const rooms = Object.fromEntries(roomEntries.map(({ room, baseTemperature, baseHeating, setpoint, phaseOffset }) => {
-            const temperatureC = Number((baseTemperature + Math.sin(normalizedHour + phaseOffset) * 0.28).toFixed(2));
-            const heatingPowerW = Number((baseHeating * (0.93 + Math.cos(normalizedHour + phaseOffset) * 0.07)).toFixed(1));
-            return [room.id, { temperatureC, heatingPowerW, setpointC: setpoint }];
-        }));
-        return {
-            timeHours,
-            outdoorTemperatureC: Number(outdoorTemperatureC.toFixed(2)),
-            rooms,
-        };
-    });
-    const roomResults = Object.fromEntries(roomEntries.map(({ room }) => {
-        const roomTimeline = timeline.map((frame) => ({
-            timeHours: frame.timeHours,
-            temperatureC: frame.rooms[room.id]?.temperatureC ?? 20,
-            heatingPowerW: frame.rooms[room.id]?.heatingPowerW ?? 0,
-        }));
-        const totalHeatingWh = roomTimeline.slice(0, -1).reduce((sum, point) => sum + point.heatingPowerW, 0);
-        return [
-            room.id,
-            {
-                roomId: room.id,
-                timeline: roomTimeline,
-                dailyEnergyKWh: Number((totalHeatingWh / 1000).toFixed(2)),
-                discomfortHours: room.id === VIDEO_DEMO_ROOM_IDS.bathroom ? 0.5 : 0,
-            },
-        ];
-    }));
-    const peakLoadW = timeline.reduce((peak, frame) => Math.max(peak, Object.values(frame.rooms).reduce((sum, payload) => sum + payload.heatingPowerW, 0)), 0);
-    const totalEnergyKWh = Number((timeline
-        .slice(0, -1)
-        .reduce((sum, frame) => sum + Object.values(frame.rooms).reduce((roomsSum, payload) => roomsSum + payload.heatingPowerW, 0), 0) / 1000).toFixed(2));
-    return {
-        timeline,
-        rooms: roomResults,
-        summary: {
-            peakLoadKW: Number((peakLoadW / 1000).toFixed(2)),
-            totalEnergyKWh,
-            discomfortHours: 0.5,
-        },
-    };
+export function buildVideoDemoThermalResult(model = videoDemoHouse, scenarioConfig = buildVideoDemoScenarioConfig()) {
+    return runThermalSimulation(model, buildVideoDemoThermalOptions(scenarioConfig));
 }

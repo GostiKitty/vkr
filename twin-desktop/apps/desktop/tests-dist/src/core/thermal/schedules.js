@@ -1,6 +1,34 @@
 export function evaluateSetpoint(schedule, timeSeconds) {
     const hour = secondsToHour(timeSeconds);
-    return isDay(hour, schedule.dayStartHour, schedule.nightStartHour) ? schedule.dayC : schedule.nightC;
+    const rampH = (schedule.rampMinutes ?? 0) / 60;
+    if (rampH > 0) {
+        // Morning ramp: dayStartHour … dayStartHour + rampH  (nightC → dayC)
+        const morningFrac = rampFraction(hour, schedule.dayStartHour, rampH);
+        if (morningFrac !== null) {
+            return schedule.nightC + morningFrac * (schedule.dayC - schedule.nightC);
+        }
+        // Evening ramp: nightStartHour … nightStartHour + rampH  (dayC → nightC)
+        const eveningFrac = rampFraction(hour, schedule.nightStartHour, rampH);
+        if (eveningFrac !== null) {
+            return schedule.dayC + eveningFrac * (schedule.nightC - schedule.dayC);
+        }
+    }
+    return isDay(hour, schedule.dayStartHour + rampH, schedule.nightStartHour + rampH) ? schedule.dayC : schedule.nightC;
+}
+/**
+ * Returns a 0–1 linear fraction if `hour` falls inside the ramp window
+ * [rampStart, rampStart + rampH) with 24-hour wrap-around.
+ * Returns null when `hour` is outside that window.
+ */
+function rampFraction(hour, rampStart, rampH) {
+    let rel = hour - rampStart;
+    if (rel < 0)
+        rel += 24;
+    if (rel >= 24)
+        rel -= 24;
+    if (rel < 0 || rel >= rampH)
+        return null;
+    return rel / rampH;
 }
 export function evaluateInternalGains(gainSchedule, occupancySchedule, timeSeconds, area_m2) {
     const hour = secondsToHour(timeSeconds);

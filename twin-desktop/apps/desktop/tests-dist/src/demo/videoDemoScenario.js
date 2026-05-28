@@ -1,3 +1,7 @@
+/**
+ * Legacy compatibility module.
+ * User-facing code should import canonical demo scenario symbols from `demoHouseScenario.ts`.
+ */
 import { buildDemoSp50RunResult } from "./sampleBuildingSP50";
 import { buildTransientScenarioPreset, getTransientMonteCarloVisualizationSample, listTransientConstructionTargets, runTransientConstructionAnalysis, runTransientMonteCarlo, } from "../core/thermal/transient/index";
 import { buildVideoDemoHouseModel, buildVideoDemoThermalResult, VIDEO_DEMO_ROOM_TEMPERATURES, videoDemoHouse, } from "./videoDemoHouse";

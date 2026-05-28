@@ -188,3 +188,14 @@ export function IconMonitor({ size = 18, ...rest }: IconProps) {
     </svg>
   );
 }
+
+export function IconInfo({ size = 18, ...rest }: IconProps) {
+  const s = size ?? 18;
+  return (
+    <svg {...baseProps(s)} {...rest}>
+      <circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M12 10v5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      <circle cx="12" cy="7.25" r="1" fill="currentColor" />
+    </svg>
+  );
+}

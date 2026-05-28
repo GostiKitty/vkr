@@ -114,7 +114,8 @@ export function RoomLossStackedChart({ rows, selectedRoomId, onSelectRoom }: Roo
         </div>
       </div>
       <p className="text-xs text-[color:var(--text-soft)]">
-        Top-12 по суммарным потерям. Клик по строке синхронизирует таблицу и 3D.
+        Top-12 по суммарным потерям. Здесь показаны абсолютные потери в Вт, не проценты. Клик по строке синхронизирует
+        таблицу и 3D.
         {selectedRoomId ? " Выбранное помещение подсвечено в таблице." : null}
       </p>
     </div>

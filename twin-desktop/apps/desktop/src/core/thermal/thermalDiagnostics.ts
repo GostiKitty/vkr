@@ -2,6 +2,12 @@ import type { BuildingModel } from "../../entities/geometry/types";
 import type { ThermalModel, ThermalLink } from "./model";
 import type { FrameInstant, ZoneSummaryMetrics } from "./metrics";
 import { evaluateInternalGains, evaluateSetpoint, type GainSchedule, type OccupancySchedule, type SetpointSchedule } from "./schedules";
+import type { ThermalSimulationOptions } from "./solver";
+import type { HydronicAssessment } from "./engineering/types";
+import type { DerivedRcDiagnostics, BuildingPerformanceDiagnostics, BuildBuildingPerformanceDiagnosticsOptions } from "./derived/types";
+import { buildBuildingPerformanceDiagnostics } from "./derived/buildingPerformanceMetrics";
+import type { AdjacencyResult } from "../graph/adjacency";
+import { buildRcDerivedDiagnostics } from "./derived/metrics";
 
 /** Уровень расчёта: не смешивать с СП 50, Monte Carlo и CFD. */
 export const RC_CALCULATION_LEVEL_RU = "Зональная RC-модель здания (динамика по воздушной ёмкости зон)";
@@ -82,11 +88,21 @@ export interface ThermalBuildingDiagnostics {
   totalEnvelopeExchangeSignedW: number;
   /** Σ_i G_inf,i(T_i−T_n), Вт. */
   totalInfiltrationExchangeSignedW: number;
+  /** Σ_i G_vent,i(T_i−T_supply), Вт. */
+  totalMechanicalVentilationExchangeSignedW: number;
+  /** Σ_i (G_inf,i(T_i−T_n) + G_vent,i(T_i−T_supply)), Вт. */
+  totalAirExchangeSignedW: number;
+  totalTransmissionLossW: number;
   totalOpaqueLossW: number;
   totalWindowLossW: number;
   totalDoorLossW: number;
   totalInfiltrationLossW: number;
   totalMechanicalVentilationLossW: number;
+  totalAirExchangeLossW: number;
+  totalLossW: number;
+  infiltrationShareOfTotalPct: number | null;
+  infiltrationShareOfAirExchangePct: number | null;
+  lossShareWarnings: string[];
   totalInternalGainsW: number;
   totalHeatingW: number;
   /** Сумма по зонам чистого обмена с соседями (для всего здания близка к нулю). */
@@ -116,6 +132,18 @@ export interface ThermalBuildingDiagnostics {
   /** Норма / внимание / риск по величине остатка баланса в срезе (не норматив СП 50). */
   balanceStatus: ZoneDiagnosticStatus;
   balanceStatusNoteRu: string;
+  infiltration?: {
+    mode: string;
+    achSource: string;
+    calculatedACH: number;
+    airflowM3h: number;
+    pressureWindPa: number;
+    pressureStackPa: number;
+    pressureTotalPa: number;
+    heatLossW: number;
+    warnings: string[];
+    assumptions: string[];
+  };
 }
 
 export interface ThermalZoneDiagnostics {
@@ -128,11 +156,21 @@ export interface ThermalZoneDiagnostics {
   envelopeExchangeSignedW: number;
   /** G_inf(T_i−T_n), Вт. */
   infiltrationExchangeSignedW: number;
+  /** G_vent(T_i−T_supply), Вт. */
+  mechanicalVentilationExchangeSignedW: number;
+  /** G_inf(T_i−T_n) + G_vent(T_i−T_supply), Вт. */
+  airExchangeSignedW: number;
+  transmissionLossW: number;
   lossOpaqueW: number;
   lossWindowW: number;
   lossDoorW: number;
   lossInfiltrationW: number;
   lossMechanicalVentilationW: number;
+  airExchangeLossW: number;
+  totalLossW: number;
+  infiltrationShareOfTotalPct: number | null;
+  infiltrationShareOfAirExchangePct: number | null;
+  lossShareWarnings: string[];
   internalGainsW: number;
   internalExchangeNetW: number;
   peakSpecificLoad_W_m2: number;
@@ -146,6 +184,8 @@ export interface ThermalSimulationDiagnostics {
   engineering: ThermalDiagnosticsEngineering;
   building: ThermalBuildingDiagnostics;
   zones: ThermalZoneDiagnostics[];
+  derived: DerivedRcDiagnostics;
+  buildingPerformance: BuildingPerformanceDiagnostics;
   /** Карточки для UI/отчёта: название, единицы, формула, смысл, допущения, уровень RC. */
   metricCards: EngineeringMetricCard[];
 }
@@ -153,6 +193,7 @@ export interface ThermalSimulationDiagnostics {
 export interface BuildThermalDiagnosticsInput {
   building: BuildingModel;
   model: ThermalModel;
+  options: ThermalSimulationOptions;
   frames: DiagnosticsTimelineFrame[];
   metricFrames: FrameInstant[];
   setpoints: SetpointSchedule;
@@ -162,6 +203,19 @@ export interface BuildThermalDiagnosticsInput {
   zoneSummary: Record<string, ZoneSummaryMetrics>;
   totalEnergyKWh: number;
   peakLoadKW: number;
+  hydronic?: HydronicAssessment | null;
+  adjacency?: AdjacencyResult;
+  performanceOptions?: BuildBuildingPerformanceDiagnosticsOptions;
+}
+
+export interface ThermalLossShareMetrics {
+  transmissionLossW: number;
+  infiltrationLossW: number;
+  mechanicalVentilationLossW: number;
+  airExchangeLossW: number;
+  totalLossW: number;
+  infiltrationShareOfTotalPct: number | null;
+  infiltrationShareOfAirExchangePct: number | null;
 }
 
 function zoneDisplayName(building: BuildingModel, zoneId: string): string {
@@ -326,6 +380,62 @@ function classifyBalanceResidual(relative: number): { status: ZoneDiagnosticStat
   };
 }
 
+function sharePercent(numerator: number, denominator: number): number | null {
+  if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator <= 0) {
+    return null;
+  }
+  return (100 * Math.max(0, numerator)) / denominator;
+}
+
+function sharePercentOrZero(numerator: number, denominator: number): number {
+  return sharePercent(numerator, denominator) ?? 0;
+}
+
+export function calculateLossShareMetrics(input: {
+  transmissionLossW: number;
+  infiltrationLossW: number;
+  mechanicalVentilationLossW: number;
+}): ThermalLossShareMetrics {
+  const transmissionLossW = Math.max(0, input.transmissionLossW);
+  const infiltrationLossW = Math.max(0, input.infiltrationLossW);
+  const mechanicalVentilationLossW = Math.max(0, input.mechanicalVentilationLossW);
+  const airExchangeLossW = infiltrationLossW + mechanicalVentilationLossW;
+  const totalLossW = transmissionLossW + airExchangeLossW;
+  return {
+    transmissionLossW,
+    infiltrationLossW,
+    mechanicalVentilationLossW,
+    airExchangeLossW,
+    totalLossW,
+    infiltrationShareOfTotalPct: sharePercent(infiltrationLossW, totalLossW),
+    infiltrationShareOfAirExchangePct: sharePercent(infiltrationLossW, airExchangeLossW),
+  };
+}
+
+function buildLossShareWarnings(
+  scopeLabel: string,
+  infiltrationShareOfTotalPct: number | null,
+  infiltrationShareOfAirExchangePct: number | null,
+  mechanicalVentilationLossW: number
+): string[] {
+  const warnings: string[] = [];
+  if (infiltrationShareOfTotalPct !== null && infiltrationShareOfTotalPct > 80) {
+    warnings.push(
+      `${scopeLabel}: инфильтрация формирует ${infiltrationShareOfTotalPct.toFixed(1)}% всех теплопотерь в текущем диагностическом срезе.`
+    );
+  }
+  if (
+    infiltrationShareOfAirExchangePct !== null &&
+    infiltrationShareOfAirExchangePct >= 99.95 &&
+    mechanicalVentilationLossW <= 1e-6
+  ) {
+    warnings.push(
+      `${scopeLabel}: 100% относится только к потерям воздухообмена — механическая вентиляция не даёт потерь после рекуперации или отключена.`
+    );
+  }
+  return warnings;
+}
+
 function buildEngineeringMetricCards(
   engineering: ThermalDiagnosticsEngineering,
   building: ThermalBuildingDiagnostics,
@@ -426,6 +536,7 @@ export function buildThermalSimulationDiagnostics(input: BuildThermalDiagnostics
   const {
     building: buildingModel,
     model,
+    options,
     frames,
     metricFrames,
     setpoints,
@@ -435,6 +546,9 @@ export function buildThermalSimulationDiagnostics(input: BuildThermalDiagnostics
     zoneSummary,
     totalEnergyKWh,
     peakLoadKW,
+    hydronic,
+    adjacency,
+    performanceOptions,
   } = input;
   const heatedFloorAreaM2 = buildingModel.rooms.reduce((sum, room) => {
     const z = model.zones.find((zz) => zz.id === room.id);
@@ -476,19 +590,39 @@ export function buildThermalSimulationDiagnostics(input: BuildThermalDiagnostics
     const peakW = zm?.peakHeatingW ?? heatingW;
     const energyKWh = zm ? zm.energyJ / 3_600_000 : 0;
     const { status, note } = zoneStatus(Ti, sp, heatingW, zone.area_m2);
+    const zoneName = zoneDisplayName(buildingModel, zone.id);
+    const lossShareMetrics = calculateLossShareMetrics({
+      transmissionLossW: ex.opaque + ex.window + ex.door,
+      infiltrationLossW: lossInf,
+      mechanicalVentilationLossW: lossVent,
+    });
+    const lossShareWarnings = buildLossShareWarnings(
+      `Помещение «${zoneName}»`,
+      lossShareMetrics.infiltrationShareOfTotalPct,
+      lossShareMetrics.infiltrationShareOfAirExchangePct,
+      lossShareMetrics.mechanicalVentilationLossW
+    );
     return {
       zoneId: zone.id,
-      zoneName: zoneDisplayName(buildingModel, zone.id),
+      zoneName,
       temperatureC: Ti,
       setpointC: sp,
       heatingPowerW: heatingW,
       envelopeExchangeSignedW: envSigned,
-      infiltrationExchangeSignedW: infSigned + ventSigned,
+      infiltrationExchangeSignedW: infSigned,
+      mechanicalVentilationExchangeSignedW: ventSigned,
+      airExchangeSignedW: infSigned + ventSigned,
+      transmissionLossW: lossShareMetrics.transmissionLossW,
       lossOpaqueW: ex.opaque,
       lossWindowW: ex.window,
       lossDoorW: ex.door,
       lossInfiltrationW: lossInf,
       lossMechanicalVentilationW: lossVent,
+      airExchangeLossW: lossShareMetrics.airExchangeLossW,
+      totalLossW: lossShareMetrics.totalLossW,
+      infiltrationShareOfTotalPct: lossShareMetrics.infiltrationShareOfTotalPct,
+      infiltrationShareOfAirExchangePct: lossShareMetrics.infiltrationShareOfAirExchangePct,
+      lossShareWarnings,
       internalGainsW: gainW,
       internalExchangeNetW: intEx,
       peakSpecificLoad_W_m2: zone.area_m2 > 0 ? peakW / zone.area_m2 : 0,
@@ -504,14 +638,20 @@ export function buildThermalSimulationDiagnostics(input: BuildThermalDiagnostics
   const totalDoor = zones.reduce((s, z) => s + z.lossDoorW, 0);
   const totalInfil = zones.reduce((s, z) => s + z.lossInfiltrationW, 0);
   const totalVent = zones.reduce((s, z) => s + z.lossMechanicalVentilationW, 0);
+  const totalTransmission = totalOpaque + totalWindow + totalDoor;
   const totalGains = zones.reduce((s, z) => s + z.internalGainsW, 0);
   const totalHeating = zones.reduce((s, z) => s + z.heatingPowerW, 0);
   const intExSum = zones.reduce((s, z) => s + z.internalExchangeNetW, 0);
   const totalEnvelopeSigned = zones.reduce((s, z) => s + z.envelopeExchangeSignedW, 0);
   const totalInfilSigned = zones.reduce((s, z) => s + z.infiltrationExchangeSignedW, 0);
-  const lossSum = totalOpaque + totalWindow + totalDoor + totalInfil + totalVent;
-  const balanceResidual = totalHeating + totalGains + intExSum - totalEnvelopeSigned - totalInfilSigned;
-  const denom = lossSum > 1 ? lossSum : 1;
+  const totalMechanicalVentilationSigned = zones.reduce((s, z) => s + z.mechanicalVentilationExchangeSignedW, 0);
+  const totalAirExchangeSigned = zones.reduce((s, z) => s + z.airExchangeSignedW, 0);
+  const lossShareMetrics = calculateLossShareMetrics({
+    transmissionLossW: totalTransmission,
+    infiltrationLossW: totalInfil,
+    mechanicalVentilationLossW: totalVent,
+  });
+  const balanceResidual = totalHeating + totalGains + intExSum - totalEnvelopeSigned - totalAirExchangeSigned;
 
   const totalPeakHeating = metricFrames.length
     ? metricFrames[peakIdx].zones.reduce((s, z) => s + Math.max(0, z.heatingPowerW), 0)
@@ -530,36 +670,64 @@ export function buildThermalSimulationDiagnostics(input: BuildThermalDiagnostics
     totalHeating,
     totalGains,
     totalEnvelopeSigned,
-    totalInfilSigned,
+    totalAirExchangeSigned,
     intExAbsSum
   );
   const balanceRelativeResidual = Math.abs(balanceResidual) / balanceScale;
   const { status: balanceStatus, note: balanceStatusNoteRu } = classifyBalanceResidual(balanceRelativeResidual);
+  const lossShareWarnings = buildLossShareWarnings(
+    "Здание",
+    lossShareMetrics.infiltrationShareOfTotalPct,
+    lossShareMetrics.infiltrationShareOfAirExchangePct,
+    lossShareMetrics.mechanicalVentilationLossW
+  );
 
   const engineering = buildThermalDiagnosticsEngineering();
+  const infiltrationDiagnostics = model.infiltrationCalculation
+    ? {
+        mode: model.infiltrationCalculation.mode,
+        achSource: model.infiltrationCalculation.diagnostics.achSource,
+        calculatedACH: model.infiltrationCalculation.calculatedACH,
+        airflowM3h: model.infiltrationCalculation.airflowM3h,
+        pressureWindPa: model.infiltrationCalculation.pressureWindPa,
+        pressureStackPa: model.infiltrationCalculation.pressureStackPa,
+        pressureTotalPa: model.infiltrationCalculation.pressureTotalPa,
+        heatLossW: model.infiltrationCalculation.heatLossW,
+        warnings: [...model.infiltrationCalculation.warnings],
+        assumptions: [...model.infiltrationCalculation.assumptions],
+      }
+    : undefined;
 
   const building: ThermalBuildingDiagnostics = {
       referenceTimeHours: frame?.timeHours ?? 0,
       referenceOutdoorC: outdoorC,
       referenceNote:
-        "Срез в момент максимальной суммарной мощности отопления по зонам. Доли потерь: только положительный отвод при T_i>T_n (opaque/окно/дверь/инфильтрация). Остаток r в карточках — алгебраический баланс с Σ_k G_k,ext(T_i−T_n) и G_inf(T_i−T_n) без max(0,·).",
+        "Срез в момент максимальной суммарной мощности отопления по зонам. Доли потерь считаются только от totalLossW = transmissionLossW + infiltrationLossW + mechanicalVentilationLossW при положительном отводе тепла (T_i>T_n). Отдельная доля инфильтрации внутри воздухообмена использует знаменатель airExchangeLossW = infiltrationLossW + mechanicalVentilationLossW.",
       totalEnvelopeExchangeSignedW: totalEnvelopeSigned,
       totalInfiltrationExchangeSignedW: totalInfilSigned,
+      totalMechanicalVentilationExchangeSignedW: totalMechanicalVentilationSigned,
+      totalAirExchangeSignedW: totalAirExchangeSigned,
+      totalTransmissionLossW: totalTransmission,
       totalOpaqueLossW: totalOpaque,
       totalWindowLossW: totalWindow,
       totalDoorLossW: totalDoor,
       totalInfiltrationLossW: totalInfil,
       totalMechanicalVentilationLossW: totalVent,
+      totalAirExchangeLossW: lossShareMetrics.airExchangeLossW,
+      totalLossW: lossShareMetrics.totalLossW,
+      infiltrationShareOfTotalPct: lossShareMetrics.infiltrationShareOfTotalPct,
+      infiltrationShareOfAirExchangePct: lossShareMetrics.infiltrationShareOfAirExchangePct,
+      lossShareWarnings,
       totalInternalGainsW: totalGains,
       totalHeatingW: totalHeating,
       internalExchangeNetSumW: intExSum,
       balanceResidualW: balanceResidual,
       lossSharePercent: {
-        opaque: (100 * totalOpaque) / denom,
-        window: (100 * totalWindow) / denom,
-        door: (100 * totalDoor) / denom,
-        infiltration: (100 * totalInfil) / denom,
-        ventilation: (100 * totalVent) / denom,
+        opaque: sharePercentOrZero(totalOpaque, lossShareMetrics.totalLossW),
+        window: sharePercentOrZero(totalWindow, lossShareMetrics.totalLossW),
+        door: sharePercentOrZero(totalDoor, lossShareMetrics.totalLossW),
+        infiltration: sharePercentOrZero(totalInfil, lossShareMetrics.totalLossW),
+        ventilation: sharePercentOrZero(totalVent, lossShareMetrics.totalLossW),
       },
       heatedFloorAreaM2: heatedFloorAreaM2,
       specificPeakLoad_W_m2: totalPeakHeating / floorSafe,
@@ -568,14 +736,68 @@ export function buildThermalSimulationDiagnostics(input: BuildThermalDiagnostics
       balanceRelativeResidual,
       balanceStatus,
       balanceStatusNoteRu,
+      infiltration: infiltrationDiagnostics,
     };
 
   const metricCards = buildEngineeringMetricCards(engineering, building, peakLoadKW, totalEnergyKWh);
+  const derived = buildRcDerivedDiagnostics({
+    buildingModel,
+    model,
+    options,
+    building,
+    zones,
+    hydronic,
+  });
+
+  const discomfortHours = Object.values(zoneSummary).reduce(
+    (sum, zone) => sum + zone.discomfortSeconds / 3600,
+    0
+  );
+  const thermalResultForPerformance = {
+    timeline: frames.map((frame) => ({
+      timeHours: frame.timeHours,
+      outdoorTemperatureC: frame.outdoorTemperatureC,
+      rooms: frame.rooms ?? {},
+    })),
+    rooms: Object.fromEntries(
+      model.zones.map((zone) => [
+        zone.id,
+        {
+          roomId: zone.id,
+          timeline: frames.map((frame) => ({
+            timeHours: frame.timeHours,
+            temperatureC: frame.rooms?.[zone.id]?.temperatureC ?? 0,
+            heatingPowerW: frame.rooms?.[zone.id]?.heatingPowerW ?? 0,
+          })),
+          dailyEnergyKWh: zoneSummary[zone.id] ? zoneSummary[zone.id].energyJ / 3_600_000 : 0,
+          discomfortHours: zoneSummary[zone.id] ? zoneSummary[zone.id].discomfortSeconds / 3600 : 0,
+        },
+      ])
+    ),
+    summary: {
+      peakLoadKW,
+      totalEnergyKWh,
+      discomfortHours,
+    },
+  };
+
+  const buildingPerformance = buildBuildingPerformanceDiagnostics(
+    buildingModel,
+    thermalResultForPerformance,
+    model,
+    options,
+    derived,
+    { ...performanceOptions, timestepSeconds },
+    adjacency,
+    zones
+  );
 
   return {
     engineering,
     building,
     zones,
+    derived,
+    buildingPerformance,
     metricCards,
   };
 }

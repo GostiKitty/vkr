@@ -1,11 +1,6 @@
 import type { ReportBaseData } from "./buildReportBaseData";
 import type { ReportExportDocumentMeta } from "../types";
-import { formatDynamicMetricValue } from "../helpers";
-
-const NO_DATA = "недостаточно данных";
-const DASH = "—";
-const SOLAR_GAIN_STATUS =
-  "требует уточнения методики расчёта солнечных теплопоступлений";
+import { REPORT_EXPORT_DASH, REPORT_EXPORT_NO_DATA } from "../helpers";
 
 export interface EnergyPassportRow {
   key: string;
@@ -30,8 +25,12 @@ export interface EnergyPassportInfoRow {
 export interface EnergyPassportData {
   meta: ReportExportDocumentMeta;
   expertise: ReportBaseData["expertise"];
+  preflight: ReportBaseData["preflight"];
+  showFactColumn: boolean;
+  factColumnNote: string;
   documentInfo: EnergyPassportInfoRow[];
   sourceInfo: EnergyPassportInfoRow[];
+  basisInfo: EnergyPassportInfoRow[];
   generalInfo: EnergyPassportSection;
   designConditions: EnergyPassportSection;
   geometryIndicators: EnergyPassportSection;
@@ -44,60 +43,46 @@ export interface EnergyPassportData {
 }
 
 export function buildEnergyPassportData(base: ReportBaseData): EnergyPassportData {
-  const { passport, sp50Report, meta, expertise } = base;
-  const energy = sp50Report?.energy ?? null;
-  const building = sp50Report?.building ?? null;
-  const climate = passport.climate;
-  const summary = passport.summary;
-  const operation = passport.operation;
-  const dynamicState = base.source.dynamicResultState;
+  const { meta, expertise, preflight, reportMetrics } = base;
+  const showFactColumn = false;
 
   const documentInfo: EnergyPassportInfoRow[] = [
-    { label: "Наименование документа", value: "Энергетический паспорт здания" },
+    { label: "Наименование документа", value: "Энергетический паспорт проекта здания" },
     { label: "Шифр документа", value: expertise.fieldMap.projectCipher.value },
+    { label: "Стадия", value: expertise.fieldMap.documentStage.value },
     { label: "Дата формирования", value: meta.generatedAtLabel },
     { label: "Версия расчётной модели", value: meta.modelVersion },
+    { label: "Статус документа", value: preflight.statusLabel },
   ];
 
   const sourceInfo: EnergyPassportInfoRow[] = [
+    { label: "Режим комплекта", value: expertise.fieldMap.exportMode.value },
     {
-      label: "Режим комплекта",
-      value:
-        expertise.exportMode === "strict-expertise"
-          ? "строгий комплект для экспертизы"
-          : expertise.exportMode === "vkr-brief"
-            ? "краткий комплект для ВКР"
-            : "демонстрационный комплект",
+      label: "Источник данных",
+      value: "Исходные реквизиты проекта, цифровая модель здания, расчёт тепловой защиты и результаты расчётного сценария",
     },
     {
-      label: "Источник заполнения данных",
-      value: "пользовательские реквизиты, данные модели, расчётного сценария и расчётные показатели",
+      label: "Климатическая база",
+      value: reportMetrics.climateCity ?? REPORT_EXPORT_NO_DATA,
     },
-    {
-      label: "Фактические значения",
-      value: "не заполняются на проектной стадии",
-    },
-    {
-      label: "Солнечные теплопоступления",
-      value:
-        expertise.solarGainsMode === "manual"
-          ? "задано пользователем в исходных данных для экспертизы"
-          : expertise.solarGainsMode === "omit"
-            ? SOLAR_GAIN_STATUS
-            : "автоматически, если расчёт доступен",
-    },
+  ];
+
+  const basisInfo: EnergyPassportInfoRow[] = [
+    { label: "Основание заполнения", value: "СП 50.13330.2024" },
+    { label: "Расчётная основа", value: "Расчёт тепловой защиты здания" },
+    { label: "Источник геометрии и состава", value: "Данные цифровой модели" },
   ];
 
   const generalInfo: EnergyPassportSection = {
     id: "ep-1",
     title: "1 Общая информация",
     rows: [
-      row("ep-1-object", "Наименование объекта", "", DASH, expertise.fieldMap.projectName.value, DASH),
-      row("ep-1-address", "Адрес объекта", "", DASH, expertise.fieldMap.objectAddress.value, DASH),
-      row("ep-1-purpose", "Назначение здания", "", DASH, expertise.fieldMap.buildingPurpose.value, DASH),
-      row("ep-1-developer", "Разработчик документации", "", DASH, expertise.fieldMap.developerOrg.value, DASH),
-      row("ep-1-customer", "Заказчик", "", DASH, expertise.fieldMap.customerOrg.value, DASH),
-      row("ep-1-stage", "Стадия документации", "", DASH, expertise.fieldMap.documentStage.value, DASH),
+      row("ep-1-object", "Наименование объекта", "", REPORT_EXPORT_DASH, expertise.fieldMap.projectName.value, REPORT_EXPORT_DASH),
+      row("ep-1-address", "Адрес объекта", "", REPORT_EXPORT_DASH, expertise.fieldMap.objectAddress.value, REPORT_EXPORT_DASH),
+      row("ep-1-purpose", "Назначение здания", "", REPORT_EXPORT_DASH, expertise.fieldMap.buildingPurpose.value, REPORT_EXPORT_DASH),
+      row("ep-1-customer", "Заказчик", "", REPORT_EXPORT_DASH, expertise.fieldMap.customerOrg.value, REPORT_EXPORT_DASH),
+      row("ep-1-developer", "Проектная организация", "", REPORT_EXPORT_DASH, expertise.fieldMap.developerOrg.value, REPORT_EXPORT_DASH),
+      row("ep-1-stage", "Стадия проектирования", "", REPORT_EXPORT_DASH, expertise.fieldMap.documentStage.value, REPORT_EXPORT_DASH),
     ],
   };
 
@@ -105,48 +90,13 @@ export function buildEnergyPassportData(base: ReportBaseData): EnergyPassportDat
     id: "ep-2",
     title: "2 Расчётные условия",
     rows: [
-      row("ep-2-city", "Город / климатическая база", "", DASH, expertise.fieldMap.climateCity.value, DASH),
-      row(
-        "ep-2-outdoorDesign",
-        "Расчётная температура наружного воздуха для проектирования отопления",
-        "°C",
-        DASH,
-        expertise.fieldMap.outdoorDesignTemperatureC.value,
-        DASH
-      ),
-      row(
-        "ep-2-outdoorAverage",
-        "Средняя температура наружного воздуха отопительного периода",
-        "°C",
-        DASH,
-        expertise.fieldMap.outdoorHeatingAverageC.value,
-        DASH
-      ),
-      row(
-        "ep-2-heatingDays",
-        "Продолжительность отопительного периода",
-        "сут.",
-        DASH,
-        expertise.fieldMap.heatingDurationDays.value,
-        DASH
-      ),
-      row("ep-2-gsop", "ГСОП", "°C·сут.", DASH, expertise.fieldMap.gsop.value, DASH),
-      row(
-        "ep-2-indoor",
-        "Расчётная внутренняя температура",
-        "°C",
-        DASH,
-        expertise.fieldMap.indoorDesignTemperatureC.value,
-        DASH
-      ),
-      row(
-        "ep-2-humidity",
-        "Расчётная относительная влажность",
-        "%",
-        DASH,
-        expertise.fieldMap.indoorRelativeHumidityPercent.value,
-        DASH
-      ),
+      row("ep-2-city", "Город / климатическая база", "", REPORT_EXPORT_DASH, reportMetrics.climateCity ?? REPORT_EXPORT_NO_DATA, REPORT_EXPORT_DASH),
+      row("ep-2-outdoorDesign", "Расчётная наружная температура", "°C", REPORT_EXPORT_DASH, formatValue(reportMetrics.outdoorDesignTemperatureC, 1), REPORT_EXPORT_DASH),
+      row("ep-2-outdoorAverage", "Средняя температура отопительного периода", "°C", REPORT_EXPORT_DASH, formatValue(reportMetrics.outdoorHeatingAverageC, 1), REPORT_EXPORT_DASH),
+      row("ep-2-heatingDays", "Продолжительность отопительного периода", "сут.", REPORT_EXPORT_DASH, formatValue(reportMetrics.heatingDurationDays, 0), REPORT_EXPORT_DASH),
+      row("ep-2-gsop", "ГСОП", "°C·сут.", REPORT_EXPORT_DASH, formatValue(reportMetrics.gsop, 0), REPORT_EXPORT_DASH),
+      row("ep-2-indoor", "Внутренняя расчётная температура", "°C", REPORT_EXPORT_DASH, formatValue(reportMetrics.indoorDesignTemperatureC, 1), REPORT_EXPORT_DASH),
+      row("ep-2-humidity", "Относительная влажность", "%", REPORT_EXPORT_DASH, formatValue(reportMetrics.indoorRelativeHumidityPercent, 0), REPORT_EXPORT_DASH),
     ],
   };
 
@@ -154,18 +104,11 @@ export function buildEnergyPassportData(base: ReportBaseData): EnergyPassportDat
     id: "ep-3",
     title: "3 Геометрические показатели",
     rows: [
-      row("ep-3-storeys", "Этажность", "эт.", DASH, expertise.fieldMap.floorsCount.value, DASH),
-      row("ep-3-area", "Отапливаемая площадь", "м²", DASH, expertise.fieldMap.heatedArea.value, DASH),
-      row("ep-3-volume", "Отапливаемый объём", "м³", DASH, expertise.fieldMap.heatedVolume.value, DASH),
-      row(
-        "ep-3-compactness",
-        "Показатель компактности",
-        "1/м",
-        DASH,
-        valueOrNoData(building?.compactness_1_m, 3),
-        DASH
-      ),
-      row("ep-3-rooms", "Количество помещений", "шт.", DASH, expertise.fieldMap.roomsCount.value, DASH),
+      row("ep-3-storeys", "Этажность", "эт.", REPORT_EXPORT_DASH, expertise.fieldMap.floorsCount.value, REPORT_EXPORT_DASH),
+      row("ep-3-area", "Отапливаемая площадь", "м²", REPORT_EXPORT_DASH, formatValue(reportMetrics.heatedAreaM2, 2), REPORT_EXPORT_DASH),
+      row("ep-3-volume", "Отапливаемый объём", "м³", REPORT_EXPORT_DASH, formatValue(reportMetrics.heatedVolumeM3, 2), REPORT_EXPORT_DASH),
+      row("ep-3-rooms", "Количество помещений", "шт.", REPORT_EXPORT_DASH, formatValue(reportMetrics.roomCount, 0), REPORT_EXPORT_DASH),
+      row("ep-3-levels", "Количество уровней", "шт.", REPORT_EXPORT_DASH, formatValue(reportMetrics.levelCount, 0), REPORT_EXPORT_DASH),
     ],
   };
 
@@ -177,25 +120,33 @@ export function buildEnergyPassportData(base: ReportBaseData): EnergyPassportDat
         "ep-4-kob",
         "Удельная теплозащитная характеристика kоб",
         "Вт/(м³·К)",
-        valueOrNoData(building?.kobNorm_W_m3K, 3),
-        valueOrNoData(building?.kob_W_m3K, 3),
-        DASH
+        formatValue(reportMetrics.kobNorm_W_m3K, 3),
+        formatValue(reportMetrics.kobActual_W_m3K, 3),
+        REPORT_EXPORT_DASH
       ),
       row(
-        "ep-4-kOverall",
-        "Удельная теплозащитная характеристика наружных ограждений",
-        "Вт/(м²·К)",
-        DASH,
-        valueOrNoData(building?.kOverall_W_m2K, 3),
-        DASH
+        "ep-4-kobStatus",
+        "Статус проверки kоб",
+        "",
+        REPORT_EXPORT_DASH,
+        reportMetrics.kobStatus,
+        REPORT_EXPORT_DASH
       ),
       row(
-        "ep-4-airExchange",
-        "Средняя кратность воздухообмена",
-        "1/ч",
-        DASH,
-        valueOrNoData(energy?.averageAirExchange_1_h, 3, { treatZeroAsNoData: true }),
-        DASH
+        "ep-4-qHeating",
+        "Удельная характеристика расхода тепловой энергии qот",
+        "Вт/(м³·К)",
+        REPORT_EXPORT_DASH,
+        formatValue(reportMetrics.qHeatingCharacteristic_W_m3K, 3),
+        REPORT_EXPORT_DASH
+      ),
+      row(
+        "ep-4-qHeatingStatus",
+        "Статус проверки qот",
+        "",
+        REPORT_EXPORT_DASH,
+        reportMetrics.qHeatingStatus,
+        REPORT_EXPORT_DASH
       ),
     ],
   };
@@ -204,34 +155,11 @@ export function buildEnergyPassportData(base: ReportBaseData): EnergyPassportDat
     id: "ep-5",
     title: "5 Вспомогательные показатели",
     rows: [
-      row(
-        "ep-5-density",
-        "Средняя плотность воздуха в отопительный период",
-        "кг/м³",
-        DASH,
-        valueOrNoData(energy?.averageAirDensity_kg_m3, 3, { treatZeroAsNoData: true }),
-        DASH
-      ),
-      row(
-        "ep-5-internalGain",
-        "Удельная характеристика теплопоступлений",
-        "Вт/(м³·К)",
-        DASH,
-        expertise.fieldMap.internalGains.isFilled
-          ? expertise.fieldMap.internalGains.value
-          : valueOrNoData(energy?.internalGainCharacteristic_W_m3K, 3, {
-              treatZeroAsNoData: true,
-            }),
-        DASH
-      ),
-      row(
-        "ep-5-solarGain",
-        "Удельная характеристика солнечных теплопоступлений",
-        "Вт/(м³·К)",
-        DASH,
-        resolveSolarGainValue(base),
-        DASH
-      ),
+      row("ep-5-ventilation", "Кратность вентиляции", "1/ч", REPORT_EXPORT_DASH, formatValue(reportMetrics.ventilationAch, 3), REPORT_EXPORT_DASH),
+      row("ep-5-infiltration", "Кратность инфильтрации", "1/ч", REPORT_EXPORT_DASH, formatValue(reportMetrics.infiltrationAch, 3), REPORT_EXPORT_DASH),
+      row("ep-5-mechanicalVentilation", "Механическая вентиляция", "", REPORT_EXPORT_DASH, reportMetrics.mechanicalVentilation === null ? REPORT_EXPORT_NO_DATA : reportMetrics.mechanicalVentilation ? "да" : "нет", REPORT_EXPORT_DASH),
+      row("ep-5-heatRecovery", "Коэффициент рекуперации", "доля", REPORT_EXPORT_DASH, formatValue(reportMetrics.heatRecoveryFactor, 2), REPORT_EXPORT_DASH),
+      row("ep-5-solarGain", "Солнечные теплопоступления", "", REPORT_EXPORT_DASH, resolveSolarGainValue(base), REPORT_EXPORT_DASH),
     ],
   };
 
@@ -239,38 +167,11 @@ export function buildEnergyPassportData(base: ReportBaseData): EnergyPassportDat
     id: "ep-6",
     title: "6 Удельные характеристики",
     rows: [
-      row(
-        "ep-6-qHeating",
-        "Удельная характеристика расхода тепловой энергии на отопление и вентиляцию",
-        "Вт/(м³·К)",
-        DASH,
-        valueOrNoData(energy?.qHeatingCharacteristic_W_m3K, 3),
-        DASH
-      ),
-      row(
-        "ep-6-qNorm",
-        "Нормативное значение qот",
-        "кВт·ч/м²",
-        valueOrNoData(energy?.qHeatingNorm_kWh_m2, 2),
-        DASH,
-        DASH
-      ),
-      row(
-        "ep-6-qByArea",
-        "Удельный расход тепловой энергии по площади",
-        "кВт·ч/м²",
-        DASH,
-        valueOrNoData(energy?.qByArea_kWh_m2, 2),
-        DASH
-      ),
-      row(
-        "ep-6-qByVolume",
-        "Удельный расход тепловой энергии по объёму",
-        "кВт·ч/м³",
-        DASH,
-        valueOrNoData(energy?.qByVolume_kWh_m3, 3),
-        DASH
-      ),
+      row("ep-6-qNorm", "Нормируемое значение qот", "кВт·ч/м²", formatValue(reportMetrics.qHeatingNorm_kWh_m2, 2), REPORT_EXPORT_DASH, REPORT_EXPORT_DASH),
+      row("ep-6-qByArea", "Удельный расход по площади", "кВт·ч/м²", REPORT_EXPORT_DASH, formatValue(reportMetrics.qByArea_kWh_m2, 2), REPORT_EXPORT_DASH),
+      row("ep-6-qByVolume", "Удельный расход по объёму", "кВт·ч/м³", REPORT_EXPORT_DASH, formatValue(reportMetrics.qByVolume_kWh_m3, 3), REPORT_EXPORT_DASH),
+      row("ep-6-specificPeak", "Удельная пиковая нагрузка", "Вт/м²", REPORT_EXPORT_DASH, formatValue(reportMetrics.specificPeakLoad_W_m2, 1), REPORT_EXPORT_DASH),
+      row("ep-6-specificEnergy", "Удельная энергия за расчётный период", "кВт·ч/м²", REPORT_EXPORT_DASH, formatValue(reportMetrics.specificEnergyKWh_m2, 2), REPORT_EXPORT_DASH),
     ],
   };
 
@@ -278,24 +179,8 @@ export function buildEnergyPassportData(base: ReportBaseData): EnergyPassportDat
     id: "ep-7",
     title: "7 Коэффициенты",
     rows: [
-      row(
-        "ep-7-beta",
-        "Коэффициент использования теплопоступлений",
-        "доля",
-        DASH,
-        valueOrNoData(energy?.betaGainUseFactor, 2),
-        DASH
-      ),
-      row(
-        "ep-7-heatRecovery",
-        "Коэффициент рекуперации тепла вентиляции",
-        "доля",
-        DASH,
-        operation.heatRecoveryFactor === null
-          ? expertise.fieldMap.heatRecoveryEfficiencyPercent.value
-          : valueOrNoData(operation.heatRecoveryFactor, 2),
-        DASH
-      ),
+      row("ep-7-operationCondition", "Условия эксплуатации по СП 50", "", REPORT_EXPORT_DASH, expertise.fieldMap.operationCondition.value, REPORT_EXPORT_DASH),
+      row("ep-7-status", "Статус выпуска комплекта", "", REPORT_EXPORT_DASH, preflight.statusLabel, REPORT_EXPORT_DASH),
     ],
   };
 
@@ -303,22 +188,8 @@ export function buildEnergyPassportData(base: ReportBaseData): EnergyPassportDat
     id: "ep-8",
     title: "8 Комплексные показатели расхода тепловой энергии",
     rows: [
-      row(
-        "ep-8-annualHeating",
-        "Годовой расход тепловой энергии на отопление и вентиляцию",
-        "кВт·ч",
-        DASH,
-        valueOrNoData(energy?.annualHeatingEnergy_kWh, 1),
-        DASH
-      ),
-      row(
-        "ep-8-annualLosses",
-        "Годовые теплопотери оболочки",
-        "кВт·ч",
-        DASH,
-        valueOrNoData(energy?.annualTotalLosses_kWh, 1),
-        DASH
-      ),
+      row("ep-8-annualHeating", "Годовой расход тепловой энергии", "кВт·ч", REPORT_EXPORT_DASH, formatValue(reportMetrics.annualHeatingEnergy_kWh, 1), REPORT_EXPORT_DASH),
+      row("ep-8-annualLosses", "Годовые теплопотери оболочки", "кВт·ч", REPORT_EXPORT_DASH, formatValue(reportMetrics.annualEnvelopeLosses_kWh, 1), REPORT_EXPORT_DASH),
     ],
   };
 
@@ -326,49 +197,21 @@ export function buildEnergyPassportData(base: ReportBaseData): EnergyPassportDat
     id: "ep-9",
     title: "9 Энергетические нагрузки здания",
     rows: [
-      row(
-        "ep-9-peakLoad",
-        "Расчётная пиковая тепловая нагрузка",
-        "кВт",
-        DASH,
-        formatDynamicMetricValue(passport.thermalResults.peakLoadKW, dynamicState, { digits: 2 }),
-        DASH
-      ),
-      row(
-        "ep-9-specificPeak",
-        "Удельная пиковая нагрузка",
-        "Вт/м²",
-        DASH,
-        formatDynamicMetricValue(passport.thermalResults.specificPeakLoad_W_m2, dynamicState, { digits: 1 }),
-        DASH
-      ),
-      row(
-        "ep-9-totalEnergy",
-        "Тепловая энергия за расчётный период",
-        "кВт·ч",
-        DASH,
-        formatDynamicMetricValue(passport.thermalResults.totalEnergyKWh, dynamicState, { digits: 1 }),
-        DASH
-      ),
-      row(
-        "ep-9-specificEnergy",
-        "Удельная тепловая энергия за расчётный период",
-        "кВт·ч/м²",
-        DASH,
-        formatDynamicMetricValue(passport.thermalResults.specificEnergyKWh_m2, dynamicState, { digits: 2 }),
-        DASH
-      ),
+      row("ep-9-peakLoad", "Расчётная пиковая тепловая нагрузка", "кВт", REPORT_EXPORT_DASH, formatValue(reportMetrics.peakHeatLoadKW, 2), REPORT_EXPORT_DASH),
+      row("ep-9-totalEnergy", "Тепловая энергия за расчётный период", "кВт·ч", REPORT_EXPORT_DASH, formatValue(reportMetrics.totalHeatEnergyKWh, 1), REPORT_EXPORT_DASH),
     ],
   };
-
-  void climate;
-  void summary;
 
   return {
     meta,
     expertise,
+    preflight,
+    showFactColumn,
+    factColumnNote:
+      "Колонка «Фактическое значение» не применяется на стадии проектной документации и заполняется только при наличии обследования объекта.",
     documentInfo,
     sourceInfo,
+    basisInfo,
     generalInfo,
     designConditions,
     geometryIndicators,
@@ -383,25 +226,24 @@ export function buildEnergyPassportData(base: ReportBaseData): EnergyPassportDat
 
 function resolveSolarGainValue(base: ReportBaseData): string {
   const energy = base.sp50Report?.energy ?? null;
-  const expertise = base.expertise;
   if (
-    expertise.solarGainsMode === "manual" &&
-    expertise.solarGainsManualValue.trim()
+    base.expertise.solarGainsMode === "manual" &&
+    base.expertise.solarGainsManualValue.trim()
   ) {
-    return `${expertise.solarGainsManualValue.trim()} (задано пользователем в исходных данных для экспертизы)`;
+    return `${base.expertise.solarGainsManualValue.trim()} (задано пользователем)`;
   }
-  if (expertise.solarGainsMode === "omit") {
-    return SOLAR_GAIN_STATUS;
+  if (base.expertise.solarGainsMode === "omit") {
+    return "не применяется без подтверждённой методики расчёта";
   }
-  if (energy?.solarGainCharacteristic_W_m3K === null || energy?.solarGainCharacteristic_W_m3K === undefined) {
-    return SOLAR_GAIN_STATUS;
+  if (
+    energy?.solarGainCharacteristic_W_m3K === null ||
+    energy?.solarGainCharacteristic_W_m3K === undefined
+  ) {
+    return "требует уточнения методики расчёта солнечных теплопоступлений";
   }
-  const formatted = new Intl.NumberFormat("ru-RU", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 3,
-  }).format(energy.solarGainCharacteristic_W_m3K);
+  const formatted = formatValue(energy.solarGainCharacteristic_W_m3K, 3);
   if (/^[−\-]?0([.,]0+)?$/.test(formatted.trim())) {
-    return SOLAR_GAIN_STATUS;
+    return "требует уточнения методики расчёта солнечных теплопоступлений";
   }
   return formatted;
 }
@@ -417,20 +259,12 @@ function row(
   return { key, label, unit, normValue, designValue, factValue };
 }
 
-function valueOrNoData(
-  value: number | null | undefined,
-  digits: number,
-  options: { treatZeroAsNoData?: boolean } = {}
-): string {
+function formatValue(value: number | null | undefined, digits: number): string {
   if (value === null || value === undefined || !Number.isFinite(value)) {
-    return NO_DATA;
+    return REPORT_EXPORT_NO_DATA;
   }
-  const formatted = new Intl.NumberFormat("ru-RU", {
+  return new Intl.NumberFormat("ru-RU", {
     minimumFractionDigits: 0,
     maximumFractionDigits: digits,
   }).format(value);
-  if (options.treatZeroAsNoData && /^[−\-]?0([.,]0+)?$/.test(formatted.trim())) {
-    return NO_DATA;
-  }
-  return formatted;
 }

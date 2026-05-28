@@ -11,6 +11,7 @@ import {
   transmissionLoss,
   uValue,
 } from "../formulas";
+import { resolveBuildingInfiltration } from "../infiltration";
 import { buildThermalPhysicsModel } from "../physics";
 import type { ThermalSimulationOptions, ThermalSimulationResult } from "../solver";
 import {
@@ -273,7 +274,25 @@ function evaluateEngineeringState(
   const outdoorTemperatureC = overrides.outdoorTemperatureC ?? options.outdoor.baseC + (options.outdoor.seasonalOffsetC ?? 0);
   const solarGainFactor = buildSolarGainFactor(resolvedOptions);
   const renderGeometry = buildGeometryRenderModel(model);
-  const infiltrationACH = overrides.infiltrationACH ?? options.infiltrationACH ?? 0.5;
+  const infiltrationCalculation = resolveBuildingInfiltration(
+    model,
+    overrides.infiltrationACH != null
+      ? {
+          infiltrationMode: "manualAch",
+          infiltrationACH: overrides.infiltrationACH,
+        }
+      : options.infiltration ?? {
+          infiltrationMode: "manualAch",
+          infiltrationACH: options.infiltrationACH,
+        },
+    {
+      indoorTemperatureC: targetTemperatureC,
+      outdoorTemperatureC,
+      mechanicalVentilationACH: resolvedOptions.ventilationACH,
+      mechanicalVentilationEnabled: options.mechanicalVentilationEnabled ?? resolvedOptions.ventilationACH > 0,
+    }
+  );
+  const infiltrationACH = infiltrationCalculation.calculatedACH;
   const physics = buildThermalPhysicsModel(
     model,
     {
@@ -284,6 +303,7 @@ function evaluateEngineeringState(
       occupancyGain_W_m2: resolvedOptions.occupancyGain_W_m2,
       infiltrationACH,
       ventilationACH: resolvedOptions.ventilationACH,
+      heatRecoveryFactor: options.heatRecoveryFactor,
       supplyAirTemperatureC: resolvedOptions.supplyAirTemperatureC,
       radiatorPowerMultiplier: resolvedOptions.radiatorPowerMultiplier,
       equipmentGainMultiplier: resolvedOptions.equipmentGainMultiplier,

@@ -1,4 +1,8 @@
 import type { BuildingModel } from "../entities/geometry/types";
+/**
+ * Legacy compatibility module.
+ * User-facing code should import canonical demo scenario symbols from `demoHouseScenario.ts`.
+ */
 import { buildDemoSp50RunResult, type DemoSp50RunResult } from "./sampleBuildingSP50";
 import {
   buildTransientScenarioPreset,

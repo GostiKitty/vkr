@@ -1,8 +1,5 @@
 import type { ReportBaseData } from "./buildReportBaseData";
-import {
-  buildExportEnvelopeView,
-  type ExportEnvelopeElement,
-} from "./buildExportEnvelopeView";
+import type { ExportEnvelopeElement } from "./buildExportEnvelopeView";
 import { humanizeProjectText } from "./exportText";
 import {
   REPORT_EXPORT_NEEDS_CLARIFICATION,
@@ -23,9 +20,13 @@ export interface ThermalProtectionResistanceRow {
   typeLabel: string;
   area: string;
   actualResistance: string;
+  reducedResistance: string;
   requiredResistance: string;
   uValue: string;
+  nt: string;
   status: string;
+  requiredResistanceBasis: string;
+  sourceData: string;
 }
 
 export interface ThermalProtectionFragmentRow {
@@ -50,15 +51,8 @@ export interface ThermalProtectionAppendixLayerRow {
   modelId: string;
 }
 
-export interface ThermalProtectionAppendixEnvelopeRow {
-  key: string;
-  designation: string;
-  name: string;
-  typeLabel: string;
-  area: string;
-  actualResistance: string;
-  requiredResistance: string;
-  status: string;
+export interface ThermalProtectionAppendixEnvelopeRow
+  extends ThermalProtectionResistanceRow {
   internalSurfaceTemperature: string;
   modelId: string;
   note: string;
@@ -67,6 +61,7 @@ export interface ThermalProtectionAppendixEnvelopeRow {
 export interface ThermalProtectionData {
   meta: ReportBaseData["meta"];
   expertise: ReportBaseData["expertise"];
+  preflight: ReportBaseData["preflight"];
   toc: Array<{ id: string; label: string }>;
   climateRows: ThermalProtectionMetricRow[];
   geometryRows: ThermalProtectionMetricRow[];
@@ -88,82 +83,42 @@ export interface ThermalProtectionData {
 }
 
 export function buildThermalProtectionData(base: ReportBaseData): ThermalProtectionData {
-  const { passport, sp50Report, meta, expertise } = base;
-  const climate = passport.climate;
-  const summary = passport.summary;
-  const sp50Source = sp50Report?.sourceData;
-  const sp50Energy = sp50Report?.energy ?? null;
-  const envelopeView = buildExportEnvelopeView({
-    model: base.source.model,
-    constructions: sp50Report?.constructions ?? [],
-    heatedVolumeM3: summary.totalVolumeM3,
-    kobNorm: sp50Report?.building.kobNorm_W_m3K ?? null,
-    outdoorDesignTemperatureC: climate.outdoorDesignTemperatureC,
-  });
-
-  const climateRows: ThermalProtectionMetricRow[] = [
-    metric("city", "Город / климатическая база", "", expertise.fieldMap.climateCity.value),
-    metric("outdoorDesign", "Расчётная наружная температура", "°C", formatValue(climate.outdoorDesignTemperatureC, 1)),
-    metric(
-      "outdoorAverage",
-      "Средняя температура отопительного периода",
-      "°C",
-      expertise.fieldMap.outdoorHeatingAverageC.value
-    ),
-    metric(
-      "heatingDays",
-      "Длительность отопительного периода",
-      "сут.",
-      expertise.fieldMap.heatingDurationDays.value
-    ),
-    metric("gsop", "ГСОП", "°C·сут.", expertise.fieldMap.gsop.value),
-    metric("indoor", "Внутренняя температура", "°C", expertise.fieldMap.indoorDesignTemperatureC.value),
-    metric(
-      "indoorHumidity",
-      "Относительная влажность внутреннего воздуха",
-      "%",
-      expertise.fieldMap.indoorRelativeHumidityPercent.value
-    ),
-    metric("humidityZone", "Зона влажности района строительства", "", expertise.fieldMap.humidityZone.value),
-  ];
-
-  climateRows[1].value = expertise.fieldMap.outdoorDesignTemperatureC.value;
-
-  const geometryRows: ThermalProtectionMetricRow[] = [
-    metric("storeys", "Этажность", "эт.", expertise.fieldMap.floorsCount.value),
-    metric("area", "Отапливаемая площадь Aот", "м²", expertise.fieldMap.heatedArea.value),
-    metric("volume", "Отапливаемый объём Vот", "м³", expertise.fieldMap.heatedVolume.value),
-    metric(
-      "envelopeCount",
-      "Количество элементов наружной тепловой оболочки",
-      "шт.",
-      formatValue(envelopeView.includedElements.length, 0)
-    ),
-  ];
-
-  const envelopeCompositionRows = buildCompositionSummary(envelopeView.includedElements);
+  const { meta, expertise, preflight, reportMetrics, envelopeView, sp50Report } = base;
   const totalEnvelopeArea = envelopeView.includedElements.reduce(
     (sum, element) => sum + (element.areaM2 ?? 0),
     0
   );
 
-  const envelopeResistanceRows = envelopeView.includedElements.map((entry) => ({
-    key: entry.key,
-    designation: entry.designation,
-    name: entry.name,
-    typeLabel: entry.typeLabel,
-    area: formatValue(entry.areaM2, 2),
-    actualResistance: formatValue(entry.actualResistance, 2),
-    requiredResistance: formatRequiredResistance(entry),
-    uValue: formatValue(entry.uValue, 3),
-    status: entry.status,
-  }));
+  const climateRows: ThermalProtectionMetricRow[] = [
+    metric("city", "Город / климатическая база", "", reportMetrics.climateCity ?? REPORT_EXPORT_NO_DATA),
+    metric("outdoorDesign", "Расчётная наружная температура", "°C", formatValue(reportMetrics.outdoorDesignTemperatureC, 1)),
+    metric("outdoorAverage", "Средняя температура отопительного периода", "°C", formatValue(reportMetrics.outdoorHeatingAverageC, 1)),
+    metric("heatingDays", "Продолжительность отопительного периода", "сут.", formatValue(reportMetrics.heatingDurationDays, 0)),
+    metric("gsop", "ГСОП", "°C·сут.", formatValue(reportMetrics.gsop, 0)),
+    metric("indoor", "Внутренняя расчётная температура", "°C", formatValue(reportMetrics.indoorDesignTemperatureC, 1)),
+    metric("humidity", "Относительная влажность внутреннего воздуха", "%", formatValue(reportMetrics.indoorRelativeHumidityPercent, 0)),
+    metric("humidityZone", "Зона влажности района строительства", "", reportMetrics.humidityZone ?? REPORT_EXPORT_NO_DATA),
+    metric("operationCondition", "Условия эксплуатации по СП 50", "", expertise.fieldMap.operationCondition.value),
+  ];
 
+  const geometryRows: ThermalProtectionMetricRow[] = [
+    metric("storeys", "Этажность", "эт.", expertise.fieldMap.floorsCount.value),
+    metric("levels", "Количество уровней", "шт.", formatValue(reportMetrics.levelCount, 0)),
+    metric("rooms", "Количество помещений", "шт.", formatValue(reportMetrics.roomCount, 0)),
+    metric("area", "Отапливаемая площадь Aот", "м²", formatValue(reportMetrics.heatedAreaM2, 2)),
+    metric("volume", "Отапливаемый объём Vот", "м³", formatValue(reportMetrics.heatedVolumeM3, 2)),
+    metric("envelopeCount", "Количество элементов наружной оболочки", "шт.", formatValue(envelopeView.includedElements.length, 0)),
+  ];
+
+  const envelopeCompositionRows = buildCompositionSummary(envelopeView.includedElements);
+  const envelopeResistanceRows = envelopeView.includedElements.map((entry) =>
+    mapResistanceRow(entry)
+  );
   const kobFragmentRows = buildKobFragmentRows(envelopeView.includedElements, totalEnvelopeArea);
   const kobSummary = {
-    kobActual: formatValue(envelopeView.kobActual, 3),
-    kobNorm: formatValue(envelopeView.kobNorm, 3),
-    status: envelopeView.kobStatus,
+    kobActual: formatValue(reportMetrics.kobActual_W_m3K, 3),
+    kobNorm: formatValue(reportMetrics.kobNorm_W_m3K, 3),
+    status: reportMetrics.kobStatus,
   };
 
   const energyCharacteristicRows: ThermalProtectionMetricRow[] = [
@@ -171,55 +126,62 @@ export function buildThermalProtectionData(base: ReportBaseData): ThermalProtect
       "qHeating",
       "Удельная характеристика расхода тепловой энергии qот",
       "Вт/(м³·К)",
-      formatValue(sp50Energy?.qHeatingCharacteristic_W_m3K, 3)
+      formatValue(reportMetrics.qHeatingCharacteristic_W_m3K, 3)
     ),
     metric(
       "qNorm",
-      "Нормативное значение qот",
+      "Нормируемое значение qот",
       "кВт·ч/м²",
-      formatValue(sp50Energy?.qHeatingNorm_kWh_m2, 2)
+      formatValue(reportMetrics.qHeatingNorm_kWh_m2, 2)
     ),
     metric(
       "annualHeating",
-      "Годовой расход тепловой энергии на отопление",
+      "Годовой расход тепловой энергии",
       "кВт·ч",
-      formatValue(sp50Energy?.annualHeatingEnergy_kWh, 1)
+      formatValue(reportMetrics.annualHeatingEnergy_kWh, 1)
     ),
     metric(
       "annualLosses",
       "Годовые теплопотери оболочки",
       "кВт·ч",
-      formatValue(sp50Energy?.annualTotalLosses_kWh, 1)
+      formatValue(reportMetrics.annualEnvelopeLosses_kWh, 1)
     ),
-    metric("qByArea", "Удельный расход по площади", "кВт·ч/м²", formatValue(sp50Energy?.qByArea_kWh_m2, 2)),
-    metric("qByVolume", "Удельный расход по объёму", "кВт·ч/м³", formatValue(sp50Energy?.qByVolume_kWh_m3, 3)),
+    metric(
+      "qByArea",
+      "Удельный расход по площади",
+      "кВт·ч/м²",
+      formatValue(reportMetrics.qByArea_kWh_m2, 2)
+    ),
+    metric(
+      "qByVolume",
+      "Удельный расход по объёму",
+      "кВт·ч/м³",
+      formatValue(reportMetrics.qByVolume_kWh_m3, 3)
+    ),
   ];
 
   const complianceRows: ThermalProtectionMetricRow[] = [
-    metric("kobStatus", "Удельная теплозащитная характеристика kоб", "", kobSummary.status),
+    metric("kobStatus", "Проверка удельной теплозащитной характеристики kоб", "", reportMetrics.kobStatus),
+    metric("qHeatingStatus", "Проверка удельного расхода тепловой энергии qот", "", reportMetrics.qHeatingStatus),
     metric(
-      "energyStatus",
-      "Удельный расход тепловой энергии qот",
+      "elementStatus",
+      "Поэлементная проверка оболочки",
       "",
-      mapEnergyStatus(sp50Energy?.status, sp50Energy?.complies)
+      summarizeEnvelopeStatus(base)
     ),
-    metric(
-      "constructionsStatus",
-      "Конструкции по сопротивлению теплопередаче",
-      "",
-      summarizeConstructionsStatus(envelopeView.includedElements)
-    ),
+    metric("releaseStatus", "Статус выпуска комплекта", "", preflight.statusLabel),
   ];
 
   return {
     meta,
     expertise,
+    preflight,
     toc: [
       { id: "tp-registry", label: "Ведомость исходных данных" },
       { id: "tp-1", label: "1 Исходные климатические данные" },
       { id: "tp-2", label: "2 Геометрические показатели здания" },
       { id: "tp-3", label: "3 Состав наружных ограждающих конструкций" },
-      { id: "tp-4", label: "4 Расчёт сопротивления теплопередаче" },
+      { id: "tp-4", label: "4 Проверка сопротивления теплопередаче" },
       { id: "tp-5", label: "5 Проверка приведённого сопротивления теплопередаче" },
       { id: "tp-6", label: "6 Расчёт удельной теплозащитной характеристики kоб" },
       { id: "tp-7", label: "7 Расчёт энергетической характеристики qот" },
@@ -228,7 +190,7 @@ export function buildThermalProtectionData(base: ReportBaseData): ThermalProtect
       { id: "tp-10", label: "10 Перечень данных, требующих уточнения" },
       { id: "tp-app-a", label: "Приложение А. Послойный состав конструкций" },
       { id: "tp-app-b", label: "Приложение Б. Ведомость элементов оболочки" },
-      { id: "tp-app-v", label: "Приложение В. Расчётные фрагменты оболочки здания" },
+      { id: "tp-app-v", label: "Приложение В. Расчётные фрагменты оболочки" },
     ],
     climateRows,
     geometryRows,
@@ -238,21 +200,14 @@ export function buildThermalProtectionData(base: ReportBaseData): ThermalProtect
     kobSummary,
     energyCharacteristicRows,
     complianceRows,
-    conclusions: buildConclusions(base, kobSummary.status),
+    conclusions: buildConclusions(base),
     appendixComposition: buildCompositionAppendix(
       sp50Report?.constructions ?? [],
       envelopeView.includedElements,
       expertise.showTechnicalIdsInAppendix
     ),
     appendixEnvelopeRows: envelopeView.appendixElements.map((entry) => ({
-      key: entry.key,
-      designation: entry.designation,
-      name: entry.name,
-      typeLabel: entry.typeLabel,
-      area: formatValue(entry.areaM2, 2),
-      actualResistance: formatValue(entry.actualResistance, 2),
-      requiredResistance: formatRequiredResistance(entry),
-      status: entry.status,
+      ...mapResistanceRow(entry),
       internalSurfaceTemperature: entry.internalSurfaceTemperature,
       modelId: expertise.showTechnicalIdsInAppendix ? entry.modelId : "—",
       note: entry.classificationNote,
@@ -260,9 +215,9 @@ export function buildThermalProtectionData(base: ReportBaseData): ThermalProtect
     appendixFragments: kobFragmentRows,
     notesMissingData: uniqueMessages(base.source.model, [
       ...expertise.clarificationLines,
-      ...buildDoorClarificationLines(envelopeView.includedElements),
+      ...preflight.issues.map((issue) => issue.message),
       ...(sp50Report?.missingData ?? []),
-      ...(sp50Energy?.placeholderWarnings ?? []),
+      ...(sp50Report?.energy?.placeholderWarnings ?? []),
       ...envelopeView.warnings,
     ]),
   };
@@ -270,32 +225,18 @@ export function buildThermalProtectionData(base: ReportBaseData): ThermalProtect
 
 function buildCompositionSummary(elements: ExportEnvelopeElement[]): ThermalProtectionMetricRow[] {
   if (!elements.length) {
-    return [
-      metric(
-        "composition",
-        "Состав наружных ограждающих конструкций",
-        "",
-        REPORT_EXPORT_NO_DATA
-      ),
-    ];
+    return [metric("composition-empty", "Состав наружной оболочки", "", REPORT_EXPORT_NO_DATA)];
   }
-  const grouped = new Map<string, { label: string; count: number; area: number }>();
-  for (const element of elements) {
-    const entry = grouped.get(element.typeLabel) ?? {
-      label: element.typeLabel,
-      count: 0,
-      area: 0,
-    };
-    entry.count += 1;
-    entry.area += element.areaM2 ?? 0;
-    grouped.set(element.typeLabel, entry);
-  }
-  return Array.from(grouped.values()).map((entry, index) => ({
-    key: `comp-${index}`,
-    label: entry.label,
-    unit: "шт. / м²",
-    value: `${entry.count} / ${formatValue(entry.area, 2)}`,
-  }));
+  const groups = new Map<string, { count: number; area: number }>();
+  elements.forEach((element) => {
+    const group = groups.get(element.typeLabel) ?? { count: 0, area: 0 };
+    group.count += 1;
+    group.area += element.areaM2 ?? 0;
+    groups.set(element.typeLabel, group);
+  });
+  return Array.from(groups.entries()).map(([label, group], index) =>
+    metric(`composition-${index}`, label, "шт. / м²", `${group.count} / ${formatValue(group.area, 2)}`)
+  );
 }
 
 function buildCompositionAppendix(
@@ -303,31 +244,31 @@ function buildCompositionAppendix(
   includedElements: ExportEnvelopeElement[],
   showTechnicalIdsInAppendix: boolean
 ): ThermalProtectionAppendixLayerRow[] {
-  const designationById = new Map(includedElements.map((entry) => [entry.key, entry]));
+  const byId = new Map(includedElements.map((element) => [element.key, element]));
   const rows: ThermalProtectionAppendixLayerRow[] = [];
   constructions.forEach((construction) => {
-    const exportEntry = designationById.get(construction.id);
-    if (!exportEntry) {
+    const matched = byId.get(construction.id);
+    if (!matched) {
       return;
     }
     if (!construction.layers.length) {
       rows.push({
         key: `${construction.id}-no-layers`,
-        designation: exportEntry.designation,
-        constructionLabel: exportEntry.name,
+        designation: matched.designation,
+        constructionLabel: matched.name,
         layerLabel: REPORT_EXPORT_NO_DATA,
         thicknessMm: REPORT_EXPORT_NO_DATA,
         conductivity: REPORT_EXPORT_NO_DATA,
         resistance: formatValue(construction.actualResistance_m2K_W, 2),
-        modelId: showTechnicalIdsInAppendix ? exportEntry.modelId : "—",
+        modelId: showTechnicalIdsInAppendix ? matched.modelId : "—",
       });
       return;
     }
     construction.layers.forEach((layer, index) => {
       rows.push({
         key: `${construction.id}-${index}`,
-        designation: exportEntry.designation,
-        constructionLabel: exportEntry.name,
+        designation: matched.designation,
+        constructionLabel: matched.name,
         layerLabel: layer.materialLabel,
         thicknessMm:
           Number.isFinite(layer.thicknessM) && layer.thicknessM > 0
@@ -335,11 +276,29 @@ function buildCompositionAppendix(
             : REPORT_EXPORT_NO_DATA,
         conductivity: formatValue(layer.conductivity_W_mK, 3),
         resistance: formatValue(layer.resistance_m2K_W, 3),
-        modelId: showTechnicalIdsInAppendix ? exportEntry.modelId : "—",
+        modelId: showTechnicalIdsInAppendix ? matched.modelId : "—",
       });
     });
   });
   return rows;
+}
+
+function mapResistanceRow(entry: ExportEnvelopeElement): ThermalProtectionResistanceRow {
+  return {
+    key: entry.key,
+    designation: entry.designation,
+    name: entry.name,
+    typeLabel: entry.typeLabel,
+    area: formatValue(entry.areaM2, 2),
+    actualResistance: formatValue(entry.actualResistance, 2),
+    reducedResistance: formatValue(entry.reducedResistance, 2),
+    requiredResistance: formatRequiredResistance(entry),
+    uValue: formatValue(entry.uValue, 3),
+    nt: formatValue(entry.nt, 2),
+    status: entry.status,
+    requiredResistanceBasis: buildRequiredResistanceBasis(entry),
+    sourceData: buildSourceDataLabel(entry),
+  };
 }
 
 function buildKobFragmentRows(
@@ -365,87 +324,100 @@ function buildKobFragmentRows(
   }));
 }
 
-function buildConclusions(base: ReportBaseData, kobStatus: string): string[] {
+function buildConclusions(base: ReportBaseData): string[] {
   const lines: string[] = [];
-  const energy = base.sp50Report?.energy ?? null;
-  const dynamics = base.passport.thermalResults;
-  const dynamicComfort =
-    dynamics.available &&
-    dynamics.averageRoomTemperatureC !== null &&
-    dynamics.averageRoomTemperatureC >= 20 &&
-    dynamics.averageRoomTemperatureC <= 24;
+  const metrics = base.reportMetrics;
+  const failedElements = metrics.envelopeElementFailures;
+  const integralPass =
+    metrics.kobStatus === "соответствует" &&
+    metrics.qHeatingStatus === "соответствует";
 
-  if (dynamicComfort && kobStatus === "не соответствует") {
+  if (integralPass && failedElements.length > 0) {
     lines.push(
-      "По результатам динамической RC-оценки температура воздуха в расчётном сценарии находится в комфортном диапазоне. При этом нормативная проверка теплозащиты выявила несоответствие отдельных ограждающих конструкций требованиям по сопротивлению теплопередаче."
+      `Соответствует по интегральным показателям. Требуется устранить несоответствие поэлементной проверки: ${failedElements
+        .map((entry) => `${entry.designation} (${entry.typeLabel})`)
+        .join(", ")}.`
     );
-  } else if (kobStatus === "соответствует") {
+  } else if (integralPass) {
     lines.push(
-      "Удельная теплозащитная характеристика kоб не превышает нормативное значение."
+      "Расчётные интегральные показатели тепловой защиты и энергоэффективности соответствуют нормативным требованиям."
     );
-  } else if (kobStatus === "не соответствует") {
+  } else if (
+    metrics.kobStatus === "не соответствует" ||
+    metrics.qHeatingStatus === "не соответствует"
+  ) {
     lines.push(
-      "Удельная теплозащитная характеристика kоб превышает нормативное значение; требуется усиление теплозащиты отдельных ограждающих конструкций."
+      "Требуется корректировка проектных решений по тепловой оболочке и/или инженерным параметрам для достижения нормативных показателей."
     );
   } else {
     lines.push(
-      "Сводная проверка kоб не завершена из-за неполноты исходных данных либо неоднозначной классификации части элементов."
+      "Окончательный нормативный вывод не может быть сделан до устранения замечаний по исходным данным и поэлементной проверке."
     );
   }
 
-  if (energy?.status === "pass") {
+  if (metrics.usesPlaceholderInputs) {
     lines.push(
-      "Удельный расход тепловой энергии на отопление и вентиляцию находится в пределах нормативных требований."
+      "Энергетические показатели сформированы на неполной исходной базе и подлежат уточнению после задания проектных параметров вентиляции и инфильтрации."
     );
-  } else if (energy?.status === "fail" || energy?.complies === false) {
+  }
+
+  if (base.preflight.status === "not-ready") {
     lines.push(
-      "Удельный расход тепловой энергии требует оптимизации проектных решений."
+      "Финальный статус комплекта: НЕ ГОТОВО К ВЫПУСКУ ДО УСТРАНЕНИЯ ЗАМЕЧАНИЙ."
     );
+  } else if (base.preflight.status === "ready") {
+    lines.push("Комплект расчётно-пояснительных материалов готов к выпуску.");
   } else {
-    lines.push(
-      "Часть исходных данных по вентиляции и инфильтрации не задана. Энергетические показатели требуют уточнения после ввода проектных параметров воздухообмена."
-    );
+    lines.push("Документ сформирован как черновой / проверочный экземпляр.");
   }
 
-  lines.push(
-    "Расчёт выполнен средствами расчётного модуля программного комплекса и используется в качестве расчётно-пояснительного материала."
-  );
   return lines;
 }
 
-function mapEnergyStatus(
-  status: "pass" | "fail" | "insufficient_data" | null | undefined,
-  complies: boolean | null | undefined
-): string {
-  if (complies === true || status === "pass") {
-    return "соответствует";
+function summarizeEnvelopeStatus(base: ReportBaseData): string {
+  const failed = base.reportMetrics.envelopeElementFailures;
+  if (failed.length > 0) {
+    return `не соответствует: ${failed
+      .map((entry) => entry.designation)
+      .join(", ")}`;
   }
-  if (complies === false || status === "fail") {
-    return "не соответствует";
+  if (base.reportMetrics.envelopeElementsNeedingClarification.length > 0) {
+    return REPORT_EXPORT_NEEDS_CLARIFICATION;
   }
-  if (status === "insufficient_data") {
-    return REPORT_EXPORT_NO_DATA;
-  }
-  return REPORT_EXPORT_NEEDS_CLARIFICATION;
+  return "соответствует";
 }
 
-function summarizeConstructionsStatus(elements: ExportEnvelopeElement[]): string {
-  if (!elements.length) {
-    return REPORT_EXPORT_NO_DATA;
+function buildRequiredResistanceBasis(entry: ExportEnvelopeElement): string {
+  switch (entry.category) {
+    case "external-wall":
+    case "roof":
+    case "ground-floor":
+    case "floor-over-unheated":
+      return "СП 50.13330.2024 по ГСОП и типу ограждающей конструкции";
+    case "window":
+      return "СП 50.13330.2024 для светопрозрачных ограждений";
+    case "external-door":
+      return entry.normalizedResistance === null
+        ? "Нормативное значение для двери не задано в исходных данных"
+        : "СП 50.13330.2024 для наружных дверей";
+    default:
+      return REPORT_EXPORT_NEEDS_CLARIFICATION;
   }
-  const failed = elements.filter((entry) => entry.status === "не соответствует").length;
-  const unclear = elements.filter((entry) => entry.status === "требует проверки классификации").length;
-  const needsClarification = elements.filter((entry) => entry.status === "требует уточнения").length;
-  if (failed > 0) {
-    return `несоответствие выявлено по ${failed} элементам`;
+}
+
+function buildSourceDataLabel(entry: ExportEnvelopeElement): string {
+  switch (entry.category) {
+    case "window":
+    case "external-door":
+      return "Карточка проёма и параметры теплотехнического элемента";
+    case "roof":
+    case "ground-floor":
+    case "floor-over-unheated":
+    case "external-wall":
+      return "Цифровая модель и состав ограждающей конструкции";
+    default:
+      return "Цифровая модель";
   }
-  if (needsClarification > 0) {
-    return `${needsClarification} элементов требуют уточнения`;
-  }
-  if (unclear > 0) {
-    return `${unclear} элементов требуют проверки классификации`;
-  }
-  return "соответствуют";
 }
 
 function formatRequiredResistance(entry: ExportEnvelopeElement): string {
@@ -453,20 +425,6 @@ function formatRequiredResistance(entry: ExportEnvelopeElement): string {
     return "требуется задание нормативного значения";
   }
   return formatValue(entry.normalizedResistance, 2);
-}
-
-function buildDoorClarificationLines(elements: ExportEnvelopeElement[]): string[] {
-  return elements
-    .filter(
-      (entry) =>
-        entry.category === "external-door" &&
-        entry.includeInEnvelope &&
-        entry.normalizedResistance === null
-    )
-    .map(
-      (entry) =>
-        `Для наружной двери ${entry.designation || entry.name} требуется задание нормативного сопротивления теплопередаче или подтверждение принятого значения.`
-    );
 }
 
 function formatValue(value: number | null | undefined, digits = 1): string {
@@ -479,7 +437,12 @@ function formatValue(value: number | null | undefined, digits = 1): string {
   }).format(value);
 }
 
-function metric(key: string, label: string, unit: string, value: string): ThermalProtectionMetricRow {
+function metric(
+  key: string,
+  label: string,
+  unit: string,
+  value: string
+): ThermalProtectionMetricRow {
   return { key, label, unit, value };
 }
 
@@ -493,7 +456,7 @@ function uniqueMessages(
     if (!value) {
       continue;
     }
-    const cleaned = humanizeMessage(value, model);
+    const cleaned = humanizeProjectText(value, model);
     if (!cleaned || seen.has(cleaned)) {
       continue;
     }
@@ -501,41 +464,4 @@ function uniqueMessages(
     result.push(cleaned);
   }
   return result;
-}
-
-function humanizeMessage(
-  message: string,
-  model: ReportBaseData["source"]["model"]
-): string {
-  const normalized = message.toLowerCase();
-  if (normalized.includes("monte carlo")) {
-    return "";
-  }
-  if (
-    normalized.includes("lvent") ||
-    normalized.includes("nvent") ||
-    normalized.includes("ventilationach")
-  ) {
-    return "Часть исходных данных по вентиляции не задана. Энергетические показатели требуют уточнения после ввода проектных параметров воздухообмена.";
-  }
-  if (
-    normalized.includes("ginf") ||
-    normalized.includes("ninf") ||
-    normalized.includes("infiltrationach")
-  ) {
-    return "Не заданы или не проверены данные по инфильтрации. Энергетические показатели требуют уточнения.";
-  }
-  if (normalized.includes("beta")) {
-    return "Не задан коэффициент использования теплопоступлений. Энергетические показатели требуют уточнения.";
-  }
-  if (
-    normalized.includes("межэтаж") &&
-    (normalized.includes("перекрыт") || normalized.includes("плита"))
-  ) {
-    return "Межэтажное перекрытие не включено в наружную тепловую оболочку, так как относится к внутренним конструкциям.";
-  }
-  if (/^перекрытие\s+межэтажное\s+перекрытие/i.test(message.trim())) {
-    return "Межэтажное перекрытие не включено в наружную тепловую оболочку, так как относится к внутренним конструкциям.";
-  }
-  return humanizeProjectText(message, model);
 }

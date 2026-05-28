@@ -5,6 +5,7 @@ import { loadReportMeta } from "../build/reports/reportMetaPersistence";
 import { useTwinStore } from "../../entities/twin/twin.store";
 import { useWorkflowStore } from "../../entities/workflow/workflow.store";
 import { useWorkspaceStore } from "../../entities/workspace/workspace.store";
+import { getResultSyncState } from "../../shared/utils/modelSync";
 import { buildThermalProtectionReportData } from "./buildThermalProtectionReportData";
 import NormativeDocumentPage from "./NormativeDocumentPage";
 import ProjectDocumentToolbar, {
@@ -19,6 +20,7 @@ import {
   REPORT_EXPORT_WORKSPACE_COMMAND,
   type ReportExportKind,
 } from "./exports/types";
+import { buildFinalReleaseAudit } from "./exports/exportReportDocument";
 import {
   useExpertiseInputsStore,
 } from "./exports/store/expertiseInputs.store";
@@ -28,12 +30,22 @@ interface ProjectDocumentationPageProps {
   projectId: string | null;
 }
 
-export function ProjectDocumentationPage({ projectId }: ProjectDocumentationPageProps) {
+/**
+ * Temporarily hidden from UI. Will be restored after project documentation export redesign.
+ *
+ * Видимый компонент рендерит нейтральную заглушку (см. экспорт по умолчанию ниже),
+ * а вся прежняя логика сохранена в `LegacyProjectDocumentationPage` и доступна
+ * для восстановления — здесь не удалены ни импорты, ни вычисления, ни обработчики.
+ */
+export function LegacyProjectDocumentationPage({ projectId }: ProjectDocumentationPageProps) {
   const model = useBuildStore((state) => state.model);
   const projectKey = useBuildStore((state) => state.projectKey);
+  const modelRevision = useBuildStore((state) => state.modelRevision);
   const thermalResult = useTwinStore((state) => state.lastThermalResult);
+  const thermalResultBinding = useTwinStore((state) => state.lastThermalResultBinding);
   const scenarioConfig = useWorkflowStore((state) => state.scenarioConfig);
   const monteCarloResult = useWorkflowStore((state) => state.monteCarloResult);
+  const monteCarloResultBinding = useWorkflowStore((state) => state.monteCarloResultBinding);
   const applyDemoDefaults = useWorkspaceStore((state) => state.applyDemoDefaults);
   const dispatchProjectCommand = useWorkspaceStore((state) => state.dispatchProjectCommand);
   const [generatedAt, setGeneratedAt] = useState(() => new Date());
@@ -51,6 +63,20 @@ export function ProjectDocumentationPage({ projectId }: ProjectDocumentationPage
   const closeCompletenessSummary = useExpertiseInputsStore((state) => state.closeCompletenessSummary);
   const getInputs = useExpertiseInputsStore((state) => state.getInputs);
   const resolvedProjectKey = projectKey || projectId || "local-project";
+  const thermalResultState = getResultSyncState(
+    Boolean(thermalResult),
+    thermalResultBinding,
+    projectKey,
+    modelRevision
+  );
+  const monteCarloResultState = getResultSyncState(
+    Boolean(monteCarloResult),
+    monteCarloResultBinding,
+    projectKey,
+    modelRevision
+  );
+  const visibleThermalResult = thermalResultState === "current" ? thermalResult : null;
+  const visibleMonteCarloResult = monteCarloResultState === "current" ? monteCarloResult : null;
 
   const reportMeta = useMemo(
     () => loadReportMeta(resolvedProjectKey),
@@ -58,49 +84,59 @@ export function ProjectDocumentationPage({ projectId }: ProjectDocumentationPage
   );
   const expertiseInputs = useMemo(() => getInputs(resolvedProjectKey), [getInputs, resolvedProjectKey]);
 
-  const data = useMemo(
-    () =>
-      buildThermalProtectionReportData({
+  const reportBuild = useMemo(() => {
+    try {
+      const data = buildThermalProtectionReportData({
         model,
         projectId,
         scenarioConfig,
-        thermalResult,
-        monteCarloResult,
+        thermalResult: visibleThermalResult,
+        monteCarloResult: visibleMonteCarloResult,
         reportMeta,
         generatedAt,
-      }),
-    [generatedAt, model, monteCarloResult, projectId, reportMeta, scenarioConfig, thermalResult]
-  );
-
-  const exportBase = useMemo(() => {
-    const prepared = prepareExportReportInput(
-      {
-        model,
-        projectId,
-        scenarioConfig,
-        thermalResult,
-        monteCarloResult,
-        reportMeta,
-        generatedAt,
-        expertiseInputs,
-      },
-      { applyDemoDefaults }
-    );
-    return buildReportBaseData({
-      ...prepared.input,
-      appliedAssumptions: prepared.appliedAssumptions,
-    });
+      });
+      const prepared = prepareExportReportInput(
+        {
+          model,
+          projectId,
+          scenarioConfig,
+          thermalResult: visibleThermalResult,
+          monteCarloResult: visibleMonteCarloResult,
+          reportMeta,
+          generatedAt,
+          expertiseInputs,
+        },
+        { applyDemoDefaults }
+      );
+      const exportBase = buildReportBaseData({
+        ...prepared.input,
+        appliedAssumptions: prepared.appliedAssumptions,
+      });
+      return { data, exportBase, error: null as string | null };
+    } catch (error) {
+      console.error("ProjectDocumentationPage build failed", error);
+      return {
+        data: null,
+        exportBase: null,
+        error: error instanceof Error ? error.message : "Не удалось подготовить данные документов.",
+      };
+    }
   }, [
     applyDemoDefaults,
     expertiseInputs,
     generatedAt,
     model,
-    monteCarloResult,
     projectId,
     reportMeta,
     scenarioConfig,
-    thermalResult,
+    visibleMonteCarloResult,
+    visibleThermalResult,
   ]);
+  const { data, exportBase, error: reportBuildError } = reportBuild;
+  const preflight = useMemo(
+    () => (exportBase ? buildFinalReleaseAudit(exportBase) : null),
+    [exportBase]
+  );
 
   useEffect(() => {
     hydrateProject(resolvedProjectKey);
@@ -135,6 +171,10 @@ export function ProjectDocumentationPage({ projectId }: ProjectDocumentationPage
   };
 
   const handleExportCommand = (kind: ReportExportKind, mode: "download" | "print") => {
+    if (!exportBase) {
+      setPdfNote("Ошибка подготовки данных документов. Проверьте исходные данные проекта.");
+      return;
+    }
     if (!canProceedWithExport(exportBase, handleOpenExpertiseInputs)) {
       return;
     }
@@ -146,6 +186,10 @@ export function ProjectDocumentationPage({ projectId }: ProjectDocumentationPage
   };
 
   const handleDownloadAll = () => {
+    if (!exportBase) {
+      setPdfNote("Ошибка подготовки данных документов. Проверьте исходные данные проекта.");
+      return;
+    }
     if (!canProceedWithExport(exportBase, handleOpenExpertiseInputs)) {
       return;
     }
@@ -203,6 +247,16 @@ export function ProjectDocumentationPage({ projectId }: ProjectDocumentationPage
 
   return (
     <div className="space-y-4">
+      {reportBuildError ? (
+        <div className="rounded-2xl border border-[color:var(--danger-border)] bg-[color:var(--danger-bg)] px-4 py-3 text-sm text-[color:var(--danger-fg)]">
+          Не удалось подготовить данные раздела «Документы». {reportBuildError}
+        </div>
+      ) : null}
+      {thermalResultState === "stale" || monteCarloResultState === "stale" ? (
+        <div className="rounded-2xl border border-[color:var(--warning-border)] bg-[color:var(--warning-bg)] px-4 py-3 text-sm text-[color:var(--warning-fg)]">
+          Модель изменилась после последнего расчёта. Документы строятся по текущей модели, но расчётные показатели нужно обновить повторным запуском расчёта.
+        </div>
+      ) : null}
       <section className="ui-panel document-print-hidden space-y-4 p-4 sm:p-5">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
           <div>
@@ -220,17 +274,44 @@ export function ProjectDocumentationPage({ projectId }: ProjectDocumentationPage
           </div>
           <div className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] px-4 py-3">
             <p className="text-xs uppercase tracking-[0.08em] text-[color:var(--text-soft)]">
-              Готовность комплекта
+              Статус комплекта
             </p>
             <p className="mt-1 text-lg font-semibold">
-              {exportBase.expertise.readiness.percent}%
+              {preflight?.statusLabel ?? "Черновик"}
             </p>
             <p className="text-sm text-[color:var(--text-muted)]">
-              Заполнено: {exportBase.expertise.readiness.filledTotal} из{" "}
-              {exportBase.expertise.readiness.trackedTotal} обязательных и рекомендуемых полей
+              {preflight?.summary ??
+                "Проверка статуса станет доступна после подготовки данных документов."}
+            </p>
+            <p className="mt-1 text-sm text-[color:var(--text-muted)]">
+              Заполнено: {exportBase?.expertise.readiness.filledTotal ?? 0} из{" "}
+              {exportBase?.expertise.readiness.trackedTotal ?? 0} обязательных и рекомендуемых полей
             </p>
           </div>
         </div>
+
+        {preflight ? (
+          <div className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)] p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-[color:var(--text-base)]">
+                  Preflight финальной выгрузки
+                </p>
+                <p className="mt-1 text-sm text-[color:var(--text-muted)]">{preflight.summary}</p>
+              </div>
+              <div className="text-sm text-[color:var(--text-muted)]">
+                Ошибки: {preflight.blockingIssues.length} · Предупреждения: {preflight.warningIssues.length}
+              </div>
+            </div>
+            {preflight.blockingIssues.length ? (
+              <ul className="mt-3 space-y-1 text-sm text-[color:var(--text-muted)]">
+                {preflight.blockingIssues.map((issue) => (
+                  <li key={issue.code}>{issue.message}</li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        ) : null}
 
         <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_auto]">
           <div className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] p-3">
@@ -299,10 +380,10 @@ export function ProjectDocumentationPage({ projectId }: ProjectDocumentationPage
                   Проверка комплектности
                 </p>
                 <p className="mt-1 text-sm text-[color:var(--text-muted)]">
-                  Обязательные поля: {exportBase.expertise.readiness.requiredFilled}/
-                  {exportBase.expertise.readiness.requiredTotal}. Рекомендуемые поля:{" "}
-                  {exportBase.expertise.readiness.recommendedFilled}/
-                  {exportBase.expertise.readiness.recommendedTotal}.
+                  Обязательные поля: {exportBase?.expertise.readiness.requiredFilled ?? 0}/
+                  {exportBase?.expertise.readiness.requiredTotal ?? 0}. Рекомендуемые поля:{" "}
+                  {exportBase?.expertise.readiness.recommendedFilled ?? 0}/
+                  {exportBase?.expertise.readiness.recommendedTotal ?? 0}.
                 </p>
               </div>
               <button
@@ -316,12 +397,12 @@ export function ProjectDocumentationPage({ projectId }: ProjectDocumentationPage
             <div className="mt-3 grid gap-3 lg:grid-cols-2">
               <div>
                 <p className="text-sm font-semibold text-[color:var(--text-base)]">
-                  Критичные незаполненные поля
+                  Критичные замечания preflight
                 </p>
-                {exportBase.expertise.readiness.criticalMissing.length ? (
+                {preflight && preflight.blockingIssues.length ? (
                   <ul className="mt-2 space-y-1 text-sm text-[color:var(--text-muted)]">
-                    {exportBase.expertise.readiness.criticalMissing.map((field) => (
-                      <li key={field.key}>{field.label}</li>
+                    {preflight.blockingIssues.map((issue) => (
+                      <li key={issue.code}>{issue.message}</li>
                     ))}
                   </ul>
                 ) : (
@@ -335,7 +416,7 @@ export function ProjectDocumentationPage({ projectId }: ProjectDocumentationPage
                   Данные, требующие уточнения
                 </p>
                 <ul className="mt-2 space-y-1 text-sm text-[color:var(--text-muted)]">
-                  {exportBase.expertise.clarificationLines.map((line, index) => (
+                  {(exportBase?.expertise.clarificationLines ?? []).map((line, index) => (
                     <li key={`${index}-${line}`}>{line}</li>
                   ))}
                 </ul>
@@ -357,11 +438,15 @@ export function ProjectDocumentationPage({ projectId }: ProjectDocumentationPage
 
       {viewMode === "reference" ? (
         <NormativeDocumentPage />
-      ) : (
+      ) : data ? (
         <ThermalProtectionReport data={data} sheetRef={sheetRef} />
+      ) : (
+        <div className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)] px-4 py-3 text-sm text-[color:var(--text-muted)]">
+          Просмотр документа временно недоступен: не удалось собрать данные отчёта.
+        </div>
       )}
 
-      {isInputsPanelOpen ? (
+      {isInputsPanelOpen && exportBase ? (
         <>
           <div
             className="fixed inset-0 z-30 bg-black/30 backdrop-blur-[1px]"
@@ -385,32 +470,41 @@ function buildPdfFilename(generatedAt: Date) {
   return `thermal-protection-report-${year}${month}${day}.pdf`;
 }
 
+// Temporarily hidden from UI. Will be restored after project documentation export redesign.
+// Видимый компонент-заглушка. Старый полный экран остаётся в `LegacyProjectDocumentationPage`
+// в этом же файле и при восстановлении нужно вернуть строку:
+//   `export default ProjectDocumentationPage;`
+// на вариант, который маршрутизирует на legacy-реализацию.
+export function ProjectDocumentationPage(_props: ProjectDocumentationPageProps) {
+  return (
+    <section className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)] p-6 text-sm text-[color:var(--text-muted)]">
+      <p className="text-base font-semibold text-[color:var(--text-base)]">Раздел временно скрыт</p>
+      <p className="mt-2 max-w-2xl">
+        Выгрузка проектной документации будет доступна после доработки. Расчётные отчёты, тепловая карта,
+        графики и таблицы по-прежнему доступны на других вкладках.
+      </p>
+    </section>
+  );
+}
+
 export default ProjectDocumentationPage;
 
 function canProceedWithExport(
   base: ReturnType<typeof buildReportBaseData>,
   openInputsPanel: () => void
 ): boolean {
-  if (
-    base.expertise.exportMode !== "strict-expertise" ||
-    base.expertise.readiness.criticalMissing.length === 0
-  ) {
+  if (base.preflight.generationMode !== "final" || base.preflight.blockingIssues.length === 0) {
     return true;
   }
   if (typeof window === "undefined") {
     return false;
   }
-  const fields = base.expertise.readiness.criticalMissing
-    .map((field) => `• ${field.label}`)
+  const fields = base.preflight.blockingIssues
+    .map((issue) => `• ${issue.message}`)
     .join("\n");
-  const fillNow = window.confirm(
-    `Для формирования комплекта требуется заполнить следующие поля:\n\n${fields}\n\nНажмите OK, чтобы открыть форму заполнения.`
+  window.alert(
+    `Финальная выгрузка заблокирована. Устраните следующие замечания:\n\n${fields}`
   );
-  if (fillNow) {
-    openInputsPanel();
-    return false;
-  }
-  return window.confirm(
-    "Сформировать документы с пометками «требует уточнения» для незаполненных полей?"
-  );
+  openInputsPanel();
+  return false;
 }
