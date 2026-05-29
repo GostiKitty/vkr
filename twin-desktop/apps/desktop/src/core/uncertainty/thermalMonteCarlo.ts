@@ -82,6 +82,17 @@ export interface CdfPoint {
   probability: number;
 }
 
+export interface PercentileTimePoint {
+  /** Момент времени, часы от начала сценария. */
+  timeHours: number;
+  /** 10-й перцентиль суммарной мощности отопления по прогонам, кВт. */
+  p10: number;
+  /** 50-й перцентиль (медиана) суммарной мощности отопления, кВт. */
+  p50: number;
+  /** 90-й перцентиль суммарной мощности отопления, кВт. */
+  p90: number;
+}
+
 export interface DistributionSummary {
   mean: number;
   stdDev: number;
@@ -173,6 +184,8 @@ export interface ThermalMonteCarloResult {
   sensitivityMethodLabel?: string;
   /** Агрегаты по помещениям, если удалось собрать температурные ряды по зонам. */
   roomRiskSummary?: ThermalMonteCarloRoomRiskSummary[];
+  /** Квантили мощности отопления P10/P50/P90 по каждому временному шагу — данные для веерного графика. */
+  percentilesByTime?: PercentileTimePoint[];
   exceedanceProbability?: number;
   varLevel: number;
 }
@@ -264,6 +277,10 @@ interface MonteCarloCollected {
   exceedCount: number;
   durationDays: number;
   varLevel: number;
+  /** Моменты времени для каждого шага (общие для всех прогонов). */
+  stepTimeHours: number[];
+  /** Суммарная мощность отопления по зонам, кВт, для каждого шага и каждого прогона. */
+  stepHeatingKW: number[][];
 }
 
 interface CollectedRoomRiskAccumulator {
@@ -297,6 +314,8 @@ function collectThermalMonteCarloSamplesSync(
   const durationDays = options.baseOptions.duration === "7d" ? 7 : 1;
   let exceedCount = 0;
   let underheatingBelow20Count = 0;
+  const stepTimeHours: number[] = [];
+  const stepHeatingKW: number[][] = [];
 
   for (let run = 0; run < options.runs; run++) {
     const uniforms = correlator(rng);
@@ -304,6 +323,7 @@ function collectThermalMonteCarloSamplesSync(
     samples.push(sample);
     const simOptions = applySampleToOptions(options.baseOptions, sample);
     const result = runThermalSimulation(options.model, simOptions, adjacency);
+    updateStepAccumulator(result.timeline, stepTimeHours, stepHeatingKW);
     const metrics = extractMetrics(result, durationDays);
     peakLoadsKW.push(metrics.peakLoadKW);
     totalEnergiesKWh.push(metrics.totalEnergyKWh);
@@ -334,6 +354,8 @@ function collectThermalMonteCarloSamplesSync(
     exceedCount,
     durationDays,
     varLevel,
+    stepTimeHours,
+    stepHeatingKW,
   };
 }
 
@@ -357,6 +379,8 @@ async function collectThermalMonteCarloSamplesAsync(
   const durationDays = options.baseOptions.duration === "7d" ? 7 : 1;
   let exceedCount = 0;
   let underheatingBelow20Count = 0;
+  const stepTimeHours: number[] = [];
+  const stepHeatingKW: number[][] = [];
 
   for (let run = 0; run < options.runs; run++) {
     const uniforms = correlator(rng);
@@ -364,6 +388,7 @@ async function collectThermalMonteCarloSamplesAsync(
     samples.push(sample);
     const simOptions = applySampleToOptions(options.baseOptions, sample);
     const result = runThermalSimulation(options.model, simOptions, adjacency);
+    updateStepAccumulator(result.timeline, stepTimeHours, stepHeatingKW);
     const metrics = extractMetrics(result, durationDays);
     peakLoadsKW.push(metrics.peakLoadKW);
     totalEnergiesKWh.push(metrics.totalEnergyKWh);
@@ -397,6 +422,8 @@ async function collectThermalMonteCarloSamplesAsync(
     exceedCount,
     durationDays,
     varLevel,
+    stepTimeHours,
+    stepHeatingKW,
   };
 }
 
@@ -435,6 +462,7 @@ function finalizeThermalMonteCarloResult(
     ),
     sensitivityMethodLabel: THERMAL_MONTE_CARLO_SENSITIVITY_METHOD_LABEL_RU,
     roomRiskSummary: buildRoomRiskSummary(collected.roomRiskAccumulator),
+    percentilesByTime: buildPercentilesByTime(collected.stepTimeHours, collected.stepHeatingKW, 80),
     exceedanceProbability:
       options.heatingThresholdKW === undefined ? undefined : collected.exceedCount / options.runs,
     varLevel: collected.varLevel,
@@ -649,6 +677,49 @@ function buildRoomRiskSummary(
     .filter((value): value is ThermalMonteCarloRoomRiskSummary => value !== null)
     .sort((left, right) => right.underheatingRisk - left.underheatingRisk || left.roomId.localeCompare(right.roomId));
   return rows.length ? rows : undefined;
+}
+
+/** Накапливает суммарную мощность отопления (кВт) по временным шагам из очередного прогона. */
+function updateStepAccumulator(
+  timeline: ThermalSimulationResult["timeline"],
+  stepTimeHours: number[],
+  stepHeatingKW: number[][]
+): void {
+  if (!timeline.length) return;
+  if (stepTimeHours.length === 0) {
+    timeline.forEach((pt) => {
+      stepTimeHours.push(pt.timeHours);
+      stepHeatingKW.push([]);
+    });
+  }
+  timeline.forEach((pt, i) => {
+    if (i < stepHeatingKW.length) {
+      const totalKW =
+        Object.values(pt.rooms).reduce((sum, r) => sum + (r.heatingPowerW ?? 0), 0) / 1000;
+      stepHeatingKW[i].push(totalKW);
+    }
+  });
+}
+
+/** Строит массив квантилей мощности отопления P10/P50/P90 по временным шагам, не более maxPoints точек. */
+function buildPercentilesByTime(
+  timeHours: number[],
+  stepHeatingKW: number[][],
+  maxPoints: number
+): PercentileTimePoint[] {
+  if (!timeHours.length || !stepHeatingKW.length) return [];
+  const step = Math.max(1, Math.floor(timeHours.length / maxPoints));
+  const result: PercentileTimePoint[] = [];
+  const pushPoint = (i: number) => {
+    const vals = stepHeatingKW[i];
+    if (!vals?.length) return;
+    const sorted = [...vals].sort((a, b) => a - b);
+    result.push({ timeHours: timeHours[i], p10: quantile(sorted, 0.1), p50: quantile(sorted, 0.5), p90: quantile(sorted, 0.9) });
+  };
+  for (let i = 0; i < timeHours.length; i += step) pushPoint(i);
+  const lastIdx = timeHours.length - 1;
+  if (result.length > 0 && result[result.length - 1].timeHours !== timeHours[lastIdx]) pushPoint(lastIdx);
+  return result;
 }
 
 export function getThermalMonteCarloTargetMetricDefinition(

@@ -24,6 +24,12 @@ import type { DuctNetwork, Equipment, PipeNetwork, SensorDevice } from "../entit
 import { DEFAULT_OPERATIONAL_SCENARIOS } from "../entities/networks/types";
 import { runThermalSimulation, type ThermalSimulationOptions, type ThermalSimulationResult } from "../core/thermal/solver";
 import { getSp131CityClimate } from "../norms/sp131_2025/climate";
+import {
+  deriveVideoDemoExteriorWallThermalBridges,
+  deriveVideoDemoFloorOnGroundThermalBridges,
+  deriveVideoDemoRoofThermalBridges,
+  envelopeFragmentHasThermalBridgeData,
+} from "./deriveExteriorWallThermalBridges";
 
 const LEVEL_1_ID = "video-level-1";
 const LEVEL_2_ID = "video-level-2";
@@ -322,7 +328,6 @@ export function buildVideoDemoScenarioConfig(): ScenarioConfig {
       roomOverrides: buildRoomOverrides(),
     },
     materials: {
-      bridgeAccountingMode: "disabled",
       homogeneityCoefficient: null,
       windowUValue_W_m2K: TYPICAL_PVC_WINDOW_U_W_M2K,
       doorUValue_W_m2K: TYPICAL_INSULATED_DOOR_U_W_M2K,
@@ -976,7 +981,7 @@ function buildSensors(): SensorDevice[] {
   ];
 }
 
-function buildThermalProtection(model: BuildingModel): BuildingModel["thermalProtection"] {
+export function buildVideoDemoThermalProtection(model: BuildingModel): BuildingModel["thermalProtection"] {
   const climate = getSp131CityClimate("moscow");
   const heatedAreaM2 = model.rooms.reduce((sum, room) => sum + roomAreaM2(room), 0);
   const heatedVolumeM3 = heatedAreaM2 * LEVEL_HEIGHT_M;
@@ -994,17 +999,29 @@ function buildThermalProtection(model: BuildingModel): BuildingModel["thermalPro
   const groundFloorArea = (model.floorSlabs ?? [])
     .filter((slab) => slab.kind === "ground")
     .reduce((sum, slab) => sum + slabAreaM2(slab), 0);
-  const envelope: Sp50EnvelopeFragmentInput[] = [
-    {
-      id: "video-ext-walls",
-      label: "Наружные стены",
-      constructionType: "wall",
-      areaM2: Number(exteriorWallAreaM2.toFixed(2)),
-      conditionedAreaM2: Number(heatedAreaM2.toFixed(2)),
-      conditionedVolumeM3: Number(heatedVolumeM3.toFixed(2)),
+  const operationCondition = "B" as const;
+  const exteriorWallFragment: Sp50EnvelopeFragmentInput = {
+    id: "video-ext-walls",
+    label: "Наружные стены",
+    constructionType: "wall",
+    areaM2: Number(exteriorWallAreaM2.toFixed(2)),
+    conditionedAreaM2: Number(heatedAreaM2.toFixed(2)),
+    conditionedVolumeM3: Number(heatedVolumeM3.toFixed(2)),
+    layers: EXTERIOR_WALL_LAYERS,
+    riskZones: ["углы фасада", "примыкания окон", "узел входной двери"],
+  };
+  if (!envelopeFragmentHasThermalBridgeData(exteriorWallFragment)) {
+    exteriorWallFragment.heterogeneity = deriveVideoDemoExteriorWallThermalBridges(model, {
       layers: EXTERIOR_WALL_LAYERS,
-      riskZones: ["углы фасада", "примыкания окон", "узел входной двери"],
-    },
+      operationCondition,
+      storeys: 2,
+      levelHeightM: LEVEL_HEIGHT_M,
+      grossWallAreaM2: exteriorWallAreaM2,
+    });
+  }
+
+  const envelope: Sp50EnvelopeFragmentInput[] = [
+    exteriorWallFragment,
     {
       id: "video-windows",
       label: "Окна",
@@ -1035,22 +1052,47 @@ function buildThermalProtection(model: BuildingModel): BuildingModel["thermalPro
         runtimeU_W_m2K: TYPICAL_INSULATED_DOOR_U_W_M2K,
       },
     },
-    {
-      id: "video-roof",
-      label: "Скатная кровля",
-      constructionType: "covering",
-      areaM2: Number(roofArea.toFixed(2)),
-      layers: ROOF_LAYERS,
-      riskZones: ["конёк", "примыкание к стенам"],
-    },
-    {
-      id: "video-floor-ground",
-      label: "Пол по грунту",
-      constructionType: "floorOnGround",
-      areaM2: Number(groundFloorArea.toFixed(2)),
-      layers: FLOOR_GROUND_LAYERS,
-      riskZones: ["контур наружных стен"],
-    },
+    (() => {
+      const roofFragment: Sp50EnvelopeFragmentInput = {
+        id: "video-roof",
+        label: "Скатная кровля",
+        constructionType: "covering",
+        areaM2: Number(roofArea.toFixed(2)),
+        layers: ROOF_LAYERS,
+        riskZones: ["конёк", "примыкание к стенам"],
+      };
+      if (!envelopeFragmentHasThermalBridgeData(roofFragment)) {
+        roofFragment.heterogeneity = deriveVideoDemoRoofThermalBridges({
+          roofLayers: ROOF_LAYERS,
+          wallLayers: EXTERIOR_WALL_LAYERS,
+          operationCondition,
+          footprintWidthM: FOOTPRINT.width,
+          footprintDepthM: FOOTPRINT.depth,
+          risePerMeter: model.roofs?.[0]?.slope?.risePerMeter ?? 0.16,
+        });
+      }
+      return roofFragment;
+    })(),
+    (() => {
+      const floorFragment: Sp50EnvelopeFragmentInput = {
+        id: "video-floor-ground",
+        label: "Пол по грунту",
+        constructionType: "floorOnGround",
+        areaM2: Number(groundFloorArea.toFixed(2)),
+        layers: FLOOR_GROUND_LAYERS,
+        riskZones: ["контур наружных стен"],
+      };
+      if (!envelopeFragmentHasThermalBridgeData(floorFragment)) {
+        floorFragment.heterogeneity = deriveVideoDemoFloorOnGroundThermalBridges({
+          floorLayers: FLOOR_GROUND_LAYERS,
+          wallLayers: EXTERIOR_WALL_LAYERS,
+          operationCondition,
+          footprintWidthM: FOOTPRINT.width,
+          footprintDepthM: FOOTPRINT.depth,
+        });
+      }
+      return floorFragment;
+    })(),
   ];
 
   return {
@@ -1060,7 +1102,7 @@ function buildThermalProtection(model: BuildingModel): BuildingModel["thermalPro
     heatedVolumeM3: Number(heatedVolumeM3.toFixed(2)),
     residentialAreaM2: Number((heatedAreaM2 - utilityAreaM2).toFixed(2)),
     occupiedAreaM2: Number(heatedAreaM2.toFixed(2)),
-    operationCondition: "B",
+    operationCondition,
     moistureMode: "normal",
     climate: {
       city: climate?.label ?? "Москва",
@@ -1178,7 +1220,7 @@ function buildVideoDemoModelInternal(): BuildingModel {
       ],
     },
   };
-  preparedModel.thermalProtection = buildThermalProtection(preparedModel);
+  preparedModel.thermalProtection = buildVideoDemoThermalProtection(preparedModel);
   return applyDefaultOpeningEnvelopeToModel(preparedModel);
 }
 

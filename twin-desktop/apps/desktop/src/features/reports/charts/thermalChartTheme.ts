@@ -101,6 +101,19 @@ export function heatCellTextClass(ratio: number): string {
   return ratio > 0.55 ? "font-semibold text-white" : "font-semibold text-slate-900";
 }
 
+export function formatZoneStatusLabel(status: "ok" | "attention" | "risk" | null): string {
+  switch (status) {
+    case "ok":
+      return "Норма";
+    case "attention":
+      return "Внимание";
+    case "risk":
+      return "Риск";
+    default:
+      return THERMAL_CHART_NOT_SET;
+  }
+}
+
 export function statusBadgeClass(status: "ok" | "attention" | "risk" | null): string {
   if (status === "risk") {
     return "inline-flex rounded-full border border-[color:var(--danger-border)] bg-[color:var(--danger-bg)] px-2 py-0.5 text-[11px] font-medium text-[color:var(--danger-fg)]";

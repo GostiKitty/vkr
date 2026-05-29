@@ -220,12 +220,16 @@ export function UncertaintyWorkspacePage() {
       <ResultSummaryCard
         totalHeatLossKW={monteCarloResult?.peakLoad.p50 ?? null}
         specificHeatLoss={null}
-        weakElement={
-          monteCarloResult?.roomRiskSummary
+        weakElementLabel="Наиболее уязвимое помещение"
+        weakElement={(() => {
+          const weakest = monteCarloResult?.roomRiskSummary
             ?.slice()
-            .sort((a, b) => b.underheatingRisk - a.underheatingRisk)[0]
-            ?.roomId ?? null
-        }
+            .sort((a, b) => b.underheatingRisk - a.underheatingRisk)[0];
+          if (!weakest) {
+            return null;
+          }
+          return buildModel.rooms.find((room) => room.id === weakest.roomId)?.name?.trim() || weakest.roomId;
+        })()}
         recommendation={
           monteCarloResult
             ? "Снизьте неопределённость по ACH и уставкам — это обычно сильнее всего влияет на разброс теплопотребления."

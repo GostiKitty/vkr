@@ -14,6 +14,18 @@ test("OrientationHelper3D renders compass block without duplicating the level la
         throw new Error("Orientation helper should not duplicate the level label in the top overlay.");
     }
 });
+test("OrientationHelper3D rotates the needle from camera azimuth", () => {
+    const markup = renderToStaticMarkup(_jsx(OrientationHelper3D, { cameraState: {
+            position: { x: 0, y: 10, z: 10 },
+            target: { x: 0, y: 0, z: 0 },
+            azimuthRad: Math.PI / 2,
+            polarRad: Math.PI / 4,
+            distance: 14,
+        }, levelName: "\u0423\u0440\u043E\u0432\u0435\u043D\u044C 1" }));
+    if (!markup.includes('rotate(-90 50 50)')) {
+        throw new Error("Orientation helper should rotate the needle from the camera azimuth.");
+    }
+});
 test("ThreeDControlPanel keeps only active controls in the main 3D UI", () => {
     const markup = renderToStaticMarkup(_jsx(ThreeDControlPanel, { activeLevelName: "\u0423\u0440\u043E\u0432\u0435\u043D\u044C 1", selectedElementLabel: null, workflowMode: "navigation", toolGuide: { title: "Навигация", description: "desc", hint: "hint" }, canFocusSelection: false, onWorkflowModeChange: () => { }, onZoomToFit: () => { }, onResetView: () => { }, onTopView: () => { }, onFocusSelection: () => { }, onToggleFullscreen: () => { }, onClose: () => { }, viewer: DEFAULT_STABLE_VIEWER_OPTIONS, onViewerChange: () => { }, engineeringOverviewActive: false, onApplyEngineeringOverview: () => { }, onResetEngineeringOverview: () => { }, thermalDisplay: {
             ...DEFAULT_THERMAL_DISPLAY_OPTIONS,

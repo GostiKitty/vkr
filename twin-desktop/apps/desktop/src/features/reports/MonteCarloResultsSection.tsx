@@ -1,10 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  Area,
+  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
   Cell,
+  ComposedChart,
   Label,
+  Line,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -16,18 +21,18 @@ import {
   buildSensitivityFactors,
   getThermalMonteCarloTargetMetricDefinition,
   getThermalMonteCarloTargetMetricValues,
-  THERMAL_MONTE_CARLO_SENSITIVITY_METHOD_LABEL_RU,
   THERMAL_MONTE_CARLO_UNDERHEAT_THRESHOLD_C,
   type ThermalMonteCarloTargetMetricId,
   type DistributionSummary,
   type ThermalMonteCarloResult,
   type ThermalMonteCarloSensitivityFactor,
 } from "../../core/uncertainty/thermalMonteCarlo";
-import { Badge, EmptyState, EngineeringCallout, MetricInfoTooltip } from "../../shared/ui";
+import { Badge, CollapsibleSection, EmptyState, MetricInfoTooltip } from "../../shared/ui";
 import { formatEnergy, formatNumber, formatPercentage } from "../../shared/utils/format";
 import { getRoomDisplayName } from "../../shared/utils/roomNames";
 import { MonteCarloChart } from "./charts/MonteCarloChart";
 import { MonteCarloScatterChart } from "./charts/MonteCarloScatterChart";
+import { ThermalTimeSeriesChartBlock } from "./charts/ThermalTimeSeriesChartBlock";
 import { resultsMetricInfo, type MetricInfoDefinition } from "./resultsMetricInfo";
 
 interface MonteCarloResultsSectionProps {
@@ -37,6 +42,7 @@ interface MonteCarloResultsSectionProps {
   climateLabel: string | null;
   monteCarloResult: ThermalMonteCarloResult | null;
   onEditUncertainty?: () => void;
+  onRunCalculation?: () => void;
 }
 
 type RiskStatus = "низкий" | "средний" | "высокий";
@@ -65,12 +71,30 @@ interface UncertaintyMetricRow {
   info: MetricInfoDefinition;
   unit: string;
   decimals: number;
+  p5: number | null;
   p10: number | null;
   p50: number | null;
   p90: number | null;
+  p95: number | null;
   spread: number | null;
   relativeSpreadPercent: number | null;
   cvPercent: number | null;
+  ciLower: number | null;
+  ciUpper: number | null;
+}
+
+interface TailRiskCard {
+  id: string;
+  label: string;
+  valueAtRisk: number | null;
+  conditionalValueAtRisk: number | null;
+  unit: string;
+  decimals: number;
+}
+
+interface CdfPointView {
+  value: number;
+  probabilityPercent: number;
 }
 
 interface MonteCarloPresentation {
@@ -81,11 +105,13 @@ interface MonteCarloPresentation {
   topRiskRooms: RoomRiskRow[];
   riskiestRoom: RoomRiskRow | null;
   uncertaintyRows: UncertaintyMetricRow[];
+  tailRiskCards: TailRiskCard[];
+  varLevelPercent: number;
+  energyCdf: CdfPointView[];
   underheatingRisk: number | null;
   stabilityIndexPercent: number | null;
   peakExceedanceProbability: number | null;
   energyGrowthProbability: number | null;
-  conclusionText: string;
 }
 
 const ROOM_RISK_EMPTY_TEXT =
@@ -100,6 +126,7 @@ export function MonteCarloResultsSection({
   climateLabel,
   monteCarloResult,
   onEditUncertainty,
+  onRunCalculation,
 }: MonteCarloResultsSectionProps) {
   const roomNameMap = useMemo(() => {
     const map = new Map<string, string>();
@@ -194,20 +221,20 @@ export function MonteCarloResultsSection({
         buildUncertaintyMetricRow("peak", "Пиковая нагрузка", monteCarloResult.peakLoad, "кВт", 2, resultsMetricInfo.peakLoad),
         buildUncertaintyMetricRow("discomfort", "Дискомфорт", monteCarloResult.discomfort, "ч", 1, resultsMetricInfo.discomfort),
       ],
+      tailRiskCards: [
+        buildTailRiskCard("energy", "Энергия отопления", monteCarloResult.totalEnergy, "кВт·ч", 1),
+        buildTailRiskCard("peak", "Пиковая нагрузка", monteCarloResult.peakLoad, "кВт", 2),
+      ],
+      varLevelPercent: roundValue(monteCarloResult.varLevel * 100, 0),
+      energyCdf: buildCdfView(monteCarloResult.totalEnergy.cdf),
       underheatingRisk,
       stabilityIndexPercent,
       peakExceedanceProbability,
       energyGrowthProbability,
-      conclusionText: buildConclusion({
-        climateLabel,
-        mainFactorLabel: sensitivity[0]?.label ?? null,
-        underheatingRisk: underheatingRisk ?? 0,
-      }),
     };
   }, [
     baseOptions,
     baseResult,
-    climateLabel,
     monteCarloResult,
     peakThresholdKW,
     roomNameMap,
@@ -215,9 +242,37 @@ export function MonteCarloResultsSection({
     selectedTargetMetricValues,
   ]);
 
+  const fanChartData = useMemo(() => {
+    const pts = monteCarloResult?.percentilesByTime;
+    if (!pts?.length) return [];
+    const baseTl = baseResult?.timeline ?? [];
+    const baseMap = new Map<number, number>();
+    baseTl.forEach((pt) => {
+      const totalKW = Object.values(pt.rooms).reduce((sum, r) => sum + (r.heatingPowerW ?? 0), 0) / 1000;
+      baseMap.set(Math.round(pt.timeHours * 100), totalKW);
+    });
+    const getBase = (t: number): number | null => {
+      const key = Math.round(t * 100);
+      if (baseMap.has(key)) return baseMap.get(key)!;
+      for (let d = 1; d <= 10; d++) {
+        if (baseMap.has(key + d)) return baseMap.get(key + d)!;
+        if (baseMap.has(key - d)) return baseMap.get(key - d)!;
+      }
+      return null;
+    };
+    return pts.map((pt) => ({
+      timeHours: pt.timeHours,
+      p10: pt.p10,
+      bandWidth: Math.max(0, pt.p90 - pt.p10),
+      p50: pt.p50,
+      p90: pt.p90,
+      baseline: baseTl.length > 0 ? getBase(pt.timeHours) : null,
+    }));
+  }, [monteCarloResult?.percentilesByTime, baseResult?.timeline]);
+
   if (!monteCarloResult) {
     return (
-      <div className="space-y-3">
+      <div className="space-y-5" data-testid="monte-carlo-results-section">
         <EmptyState
           title="Вероятностный анализ ещё не выполнен"
           message="Перейдите в раздел «Вероятностный анализ» и запустите Monte Carlo поверх нестационарного RC-расчёта."
@@ -227,6 +282,7 @@ export function MonteCarloResultsSection({
             Перейти к вероятностному анализу
           </button>
         ) : null}
+        <ThermalTimeSeriesChartBlock heatingDisplay="raw" onRunCalculation={onRunCalculation} />
       </div>
     );
   }
@@ -247,13 +303,7 @@ export function MonteCarloResultsSection({
     <section className="space-y-5" data-testid="monte-carlo-results-section">
       <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
         <div>
-          <p className="ui-soft-kicker">Вероятностный анализ</p>
           <h3 className="ui-heading-panel">Monte Carlo поверх нестационарного RC-расчёта</h3>
-          <p className="text-sm text-[color:var(--text-muted)]">
-            Каждый сценарий повторно запускает тот же временной RC-расчёт с вариацией входных параметров. Ниже показаны
-            диапазоны P10/P50/P90, гистограмму, чувствительность, риск по помещениям и дополнительные метрики
-            неопределённости.
-          </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Badge tone="accent">{formatNumber(monteCarloResult.runs, { maximumFractionDigits: 0 })} сценариев</Badge>
@@ -285,49 +335,49 @@ export function MonteCarloResultsSection({
         />
       </div>
 
-      <section className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)] p-4">
-        <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-          <div>
-            <div className="flex items-center gap-1.5">
-              <p className="text-sm font-semibold text-[color:var(--text-base)]">Инженерные метрики неопределённости</p>
-              <MetricInfoTooltip {...resultsMetricInfo.coefficientOfVariation} />
-            </div>
-            <p className="mt-1 text-sm text-[color:var(--text-muted)]">
-              Производные метрики считаются по уже сохранённым сводкам распределения и сценариям без повторного расчёта
-              и без временного веерного графика.
-            </p>
-          </div>
-          <div className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] p-3 xl:min-w-[280px]">
-            <div className="flex items-center gap-1.5">
-              <p className="text-sm font-semibold text-[color:var(--text-base)]">
-                Порог пиковой мощности, кВт
-              </p>
-              <MetricInfoTooltip {...resultsMetricInfo.exceedanceProbability} />
-            </div>
-            <div className="mt-2 flex items-center gap-2">
-              <input
-                type="number"
-                min={0}
-                step="0.1"
-                value={peakThresholdInput}
-                onChange={(event) => setPeakThresholdInput(event.target.value)}
-                className="ui-field min-w-0 flex-1 px-3 py-2 text-sm shadow-inner"
-              />
-              <button
-                type="button"
-                className="rounded-full border border-[color:var(--border-soft)] px-3 py-1.5 text-sm font-semibold text-[color:var(--text-muted)] transition hover:bg-[color:var(--surface-elevated)]"
-                onClick={() => setPeakThresholdInput(formatInputNumber(defaultPeakThresholdKW))}
-              >
-                1,2× база
-              </button>
-            </div>
-            <p className="mt-2 text-xs text-[color:var(--text-soft)]">
-              По умолчанию используется 120% от базовой пиковой нагрузки. Если поле пустое, вероятность превышения не вычисляется.
-            </p>
-          </div>
-        </div>
+      <div className="space-y-2">
+        <p className="text-sm font-semibold text-[color:var(--text-base)]">Базовый нестационарный RC (исходные шаги)</p>
+        <ThermalTimeSeriesChartBlock heatingDisplay="raw" onRunCalculation={onRunCalculation} />
+      </div>
 
-        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+      <section className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)] p-4">
+        <div className="mb-1 flex items-center gap-1.5">
+          <p className="text-sm font-semibold text-[color:var(--text-base)]">
+            Хвостовые риски VaR / CVaR (уровень {formatNumber(presentation.varLevelPercent, { maximumFractionDigits: 0 })}%)
+          </p>
+          <MetricInfoTooltip {...resultsMetricInfo.valueAtRisk} />
+        </div>
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {presentation.tailRiskCards.flatMap((card) => [
+            <SummaryStripItem
+              key={`${card.id}-var`}
+              label={`VaR · ${card.label}`}
+              value={formatMetricValue(card.valueAtRisk, card.unit, card.decimals)}
+              hint={`P${formatNumber(presentation.varLevelPercent, { maximumFractionDigits: 0 })} — не превышается в ${formatNumber(
+                presentation.varLevelPercent,
+                { maximumFractionDigits: 0 }
+              )}% сценариев`}
+              info={resultsMetricInfo.valueAtRisk}
+            />,
+            <SummaryStripItem
+              key={`${card.id}-cvar`}
+              label={`CVaR · ${card.label}`}
+              value={formatMetricValue(card.conditionalValueAtRisk, card.unit, card.decimals)}
+              hint={`Среднее в худших ${formatNumber(100 - presentation.varLevelPercent, {
+                maximumFractionDigits: 0,
+              })}% сценариев`}
+              info={resultsMetricInfo.conditionalValueAtRisk}
+            />,
+          ])}
+        </div>
+      </section>
+
+      <CollapsibleSection
+        title="Инженерные метрики неопределённости"
+        titleAddon={<MetricInfoTooltip {...resultsMetricInfo.coefficientOfVariation} />}
+      >
+        <div className="space-y-4 pt-3">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           <SummaryStripItem
             label="P50 энергии"
             value={formatEnergy(monteCarloResult.totalEnergy.p50, "кВт·ч")}
@@ -352,6 +402,34 @@ export function MonteCarloResultsSection({
             hint={describeStability(presentation.stabilityIndexPercent).label}
             info={resultsMetricInfo.stabilityIndex}
           />
+          <div className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] px-4 py-3">
+            <div className="flex items-center gap-1.5">
+              <p className="text-sm font-semibold text-[color:var(--text-muted)]">
+                Порог пиковой мощности, кВт
+              </p>
+              <MetricInfoTooltip {...resultsMetricInfo.exceedanceProbability} />
+            </div>
+            <div className="mt-2 flex items-center gap-2">
+              <input
+                type="number"
+                min={0}
+                step="0.1"
+                value={peakThresholdInput}
+                onChange={(event) => setPeakThresholdInput(event.target.value)}
+                className="ui-field min-w-0 flex-1 px-3 py-2 text-sm shadow-inner"
+              />
+              <button
+                type="button"
+                className="shrink-0 rounded-full border border-[color:var(--border-soft)] px-3 py-1.5 text-sm font-semibold text-[color:var(--text-muted)] transition hover:bg-[color:var(--surface-elevated)]"
+                onClick={() => setPeakThresholdInput(formatInputNumber(defaultPeakThresholdKW))}
+              >
+                1,2× база
+              </button>
+            </div>
+            <p className="mt-2 text-xs text-[color:var(--text-muted)]">
+              По умолчанию 120% от базовой пиковой нагрузки. Пустое поле — вероятность превышения не считается.
+            </p>
+          </div>
           <SummaryStripItem
             label="Риск превышения пика"
             value={formatPercentage(presentation.peakExceedanceProbability)}
@@ -378,15 +456,28 @@ export function MonteCarloResultsSection({
           />
         </div>
 
-        <div className="mt-4 overflow-x-auto rounded-2xl border border-[color:var(--border-soft)]">
-          <table className="w-full text-left text-sm">
+        <CollapsibleSection title="Детализация по показателям">
+          <div className="overflow-x-auto pt-3">
+            <table className="w-full text-left text-sm">
             <thead>
               <tr className="text-sm text-[color:var(--text-soft)]">
                 <th className="px-4 py-2 font-semibold">Показатель</th>
                 <th className="px-4 py-2 font-semibold">P50</th>
                 <th className="px-4 py-2 font-semibold">P10–P90</th>
+                <th className="px-4 py-2 font-semibold">
+                  <span className="inline-flex items-center gap-1.5">
+                    <span>P5–P95</span>
+                    <MetricInfoTooltip {...resultsMetricInfo.percentileCorridorP5P95} />
+                  </span>
+                </th>
                 <th className="px-4 py-2 font-semibold">Ширина</th>
                 <th className="px-4 py-2 font-semibold">CV</th>
+                <th className="px-4 py-2 font-semibold">
+                  <span className="inline-flex items-center gap-1.5">
+                    <span>95% ДИ μ</span>
+                    <MetricInfoTooltip {...resultsMetricInfo.confidenceIntervalMean} />
+                  </span>
+                </th>
                 <th className="px-4 py-2 font-semibold">Интерпретация</th>
               </tr>
             </thead>
@@ -403,6 +494,7 @@ export function MonteCarloResultsSection({
                     </td>
                     <td className="px-4 py-2">{formatMetricValue(row.p50, row.unit, row.decimals)}</td>
                     <td className="px-4 py-2">{formatRangeValue(row.p10, row.p90, row.unit, row.decimals)}</td>
+                    <td className="px-4 py-2">{formatRangeValue(row.p5, row.p95, row.unit, row.decimals)}</td>
                     <td className="px-4 py-2">
                       <div className="flex items-center gap-1.5">
                         <span>{formatMetricValue(row.spread, row.unit, row.decimals)}</span>
@@ -416,6 +508,7 @@ export function MonteCarloResultsSection({
                         <MetricInfoTooltip {...resultsMetricInfo.coefficientOfVariation} />
                       </div>
                     </td>
+                    <td className="px-4 py-2">{formatRangeValue(row.ciLower, row.ciUpper, row.unit, row.decimals)}</td>
                     <td className="px-4 py-2">
                       <Badge tone={cvInfo.tone}>{cvInfo.label}</Badge>
                     </td>
@@ -424,12 +517,14 @@ export function MonteCarloResultsSection({
               })}
             </tbody>
           </table>
+          </div>
+        </CollapsibleSection>
         </div>
-      </section>
+      </CollapsibleSection>
 
-      <section className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)] p-4">
-        <div className="mb-3 flex items-center gap-1.5">
-          <p className="text-sm font-semibold text-[color:var(--text-base)]">Базовый расчёт и квантили P10 / P50 / P90</p>
+      <CollapsibleSection
+        title="Базовый расчёт и квантили P10 / P50 / P90"
+        titleAddon={
           <MetricInfoTooltip
             title="Квантили Monte Carlo"
             meaning="Сравнение базового детерминированного сценария с распределением вероятностного результата."
@@ -437,8 +532,9 @@ export function MonteCarloResultsSection({
             inputs={["baseResult.summary", "scenarioSeries"]}
             calculatedIn="src/core/uncertainty/thermalMonteCarlo.ts"
           />
-        </div>
-        <div className="overflow-x-auto rounded-2xl border border-[color:var(--border-soft)]">
+        }
+      >
+        <div className="overflow-x-auto pt-3">
           <table className="w-full text-left text-sm">
             <thead>
               <tr className="text-sm text-[color:var(--text-soft)]">
@@ -477,7 +573,7 @@ export function MonteCarloResultsSection({
             </tbody>
           </table>
         </div>
-      </section>
+      </CollapsibleSection>
 
       <div className="grid gap-4 xl:grid-cols-[1.2fr,0.8fr]">
         <MonteCarloChart result={monteCarloResult} baselineEnergyKWh={baseResult.summary.totalEnergyKWh} />
@@ -486,10 +582,6 @@ export function MonteCarloResultsSection({
             <p className="text-sm font-semibold text-[color:var(--text-base)]">Чувствительность факторов</p>
             <MetricInfoTooltip {...resultsMetricInfo.sensitivity} />
           </div>
-          <p className="mb-3 text-sm text-[color:var(--text-muted)]">
-            Оценка влияния факторов на выбранную целевую метрику.
-          </p>
-          <p className="mb-3 text-xs text-[color:var(--text-soft)]">{THERMAL_MONTE_CARLO_SENSITIVITY_METHOD_LABEL_RU}</p>
           {presentation.sensitivity.length ? (
             <>
               <div className="h-80">
@@ -530,9 +622,6 @@ export function MonteCarloResultsSection({
                   </BarChart>
                 </ResponsiveContainer>
               </div>
-              <p className="mt-3 text-sm text-[color:var(--text-muted)]">
-                Главный фактор: <span className="font-semibold text-[color:var(--text-base)]">{presentation.mainFactor?.label ?? "не определён"}</span>
-              </p>
             </>
           ) : (
             <EmptyState
@@ -547,6 +636,78 @@ export function MonteCarloResultsSection({
         </section>
       </div>
 
+      <section className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)] p-4">
+        <div className="mb-1 flex items-center gap-1.5">
+          <p className="text-sm font-semibold text-[color:var(--text-base)]">Кривая вероятности энергии (CDF)</p>
+          <MetricInfoTooltip {...resultsMetricInfo.cumulativeDistribution} />
+        </div>
+        {presentation.energyCdf.length ? (
+          <div className="h-72">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={presentation.energyCdf} margin={{ top: 8, right: 16, bottom: 8, left: 8 }}>
+                <defs>
+                  <linearGradient id="mc-cdf-fill" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="var(--accent-base)" stopOpacity={0.35} />
+                    <stop offset="100%" stopColor="var(--accent-base)" stopOpacity={0.02} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid stroke="var(--chart-grid)" strokeDasharray="3 3" />
+                <XAxis
+                  type="number"
+                  dataKey="value"
+                  domain={["dataMin", "dataMax"]}
+                  tick={{ fill: "var(--text-soft)", fontSize: 11 }}
+                  tickFormatter={(value) => formatNumber(Number(value), { maximumFractionDigits: 0 })}
+                >
+                  <Label value="Энергия отопления, кВт·ч" position="insideBottom" offset={-4} fill="var(--text-soft)" fontSize={11} />
+                </XAxis>
+                <YAxis
+                  domain={[0, 100]}
+                  tick={{ fill: "var(--text-soft)", fontSize: 11 }}
+                  tickFormatter={(value) => `${Math.round(Number(value))}%`}
+                >
+                  <Label
+                    value="P(E ≤ x), %"
+                    angle={-90}
+                    position="insideLeft"
+                    style={{ textAnchor: "middle", fill: "var(--text-soft)", fontSize: 11 }}
+                  />
+                </YAxis>
+                <Tooltip
+                  contentStyle={tooltipStyle}
+                  formatter={(value: number) => [`${formatNumber(value, { maximumFractionDigits: 1 })}%`, "Вероятность"]}
+                  labelFormatter={(label) => `${formatNumber(Number(label), { maximumFractionDigits: 0 })} кВт·ч`}
+                />
+                {([
+                  { value: monteCarloResult.totalEnergy.p10, label: "P10" },
+                  { value: monteCarloResult.totalEnergy.p50, label: "P50" },
+                  { value: monteCarloResult.totalEnergy.p90, label: "P90" },
+                ] as const).map((marker) =>
+                  Number.isFinite(marker.value) ? (
+                    <ReferenceLine
+                      key={marker.label}
+                      x={marker.value}
+                      stroke="var(--chart-line-muted)"
+                      strokeDasharray="4 4"
+                      label={{ value: marker.label, position: "top", fill: "var(--text-soft)", fontSize: 10 }}
+                    />
+                  ) : null
+                )}
+                <Area
+                  type="monotone"
+                  dataKey="probabilityPercent"
+                  stroke="var(--accent-base)"
+                  strokeWidth={2}
+                  fill="url(#mc-cdf-fill)"
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        ) : (
+          <EmptyState message="Кривая вероятности появится после накопления сценариев Monte Carlo." />
+        )}
+      </section>
+
       <MonteCarloScatterChart
         result={monteCarloResult}
         baseOptions={baseOptions}
@@ -554,9 +715,9 @@ export function MonteCarloResultsSection({
         onTargetMetricChange={setSelectedTargetMetric}
       />
 
-      <section className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)] p-4">
-        <div className="mb-3 flex items-center gap-1.5">
-          <p className="text-sm font-semibold text-[color:var(--text-base)]">Риск по помещениям</p>
+      <CollapsibleSection
+        title="Риск по помещениям"
+        titleAddon={
           <MetricInfoTooltip
             title="Риск по помещениям"
             meaning="Показывает медианную температуру, холодный хвост и вероятность недогрева по помещениям."
@@ -564,9 +725,11 @@ export function MonteCarloResultsSection({
             inputs={["roomRiskSummary.temperatureP50C", "roomRiskSummary.minimumTemperatureP10C", "roomRiskSummary.underheatingRisk"]}
             calculatedIn="src/core/uncertainty/thermalMonteCarlo.ts → roomRiskSummary"
           />
-        </div>
+        }
+      >
+        <div className="space-y-3 pt-3">
         {presentation.topRiskRooms.length ? (
-          <div className="mb-3 flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2">
             {presentation.topRiskRooms.map((room, index) => (
               <div
                 key={`${room.roomId}-${index}`}
@@ -580,7 +743,7 @@ export function MonteCarloResultsSection({
           </div>
         ) : null}
         {presentation.roomRows.length ? (
-          <div className="overflow-x-auto rounded-2xl border border-[color:var(--border-soft)]">
+          <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead>
                 <tr className="text-sm text-[color:var(--text-soft)]">
@@ -616,31 +779,147 @@ export function MonteCarloResultsSection({
         ) : (
           <EmptyState message={ROOM_RISK_EMPTY_TEXT} />
         )}
-      </section>
-
-      <section className="rounded-2xl border border-dashed border-[color:var(--border-base)] bg-[color:var(--surface-muted)] p-4">
-        <div className="flex items-center gap-1.5">
-          <p className="text-sm font-semibold text-[color:var(--text-base)]">Веерный график по времени</p>
-          <MetricInfoTooltip
-            title="Веерный график по времени"
-            meaning="Показывает временные P10/P50/P90 для температуры или мощности по каждому шагу времени."
-            formula="percentilesByTime[t] = quantile(metric_scenario(t), q)"
-            inputs={["trajectories per scenario", "или percentilesByTime"]}
-            calculatedIn="Пока не сохраняется в ThermalMonteCarloResult"
-            notes="Станет доступен после сохранения percentilesByTime в Monte Carlo result."
-          />
         </div>
-        <p className="mt-2 text-sm text-[color:var(--text-muted)]">
-          Веерный график по времени появится после сохранения квантилей по шагам в результате Monte Carlo.
-        </p>
-      </section>
+      </CollapsibleSection>
 
       <section className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)] p-4">
         <div className="mb-3 flex items-center gap-1.5">
-          <p className="text-sm font-semibold text-[color:var(--text-base)]">Риски сценариев</p>
-          <MetricInfoTooltip {...resultsMetricInfo.underheatingRisk} />
+          <p className="text-sm font-semibold text-[color:var(--text-base)]">Веерный график мощности отопления</p>
+          <MetricInfoTooltip title="Веерный график по времени" />
         </div>
-        <div className="overflow-x-auto rounded-2xl border border-[color:var(--border-soft)]">
+        {fanChartData.length > 0 ? (
+          <>
+            <div className="h-[260px] rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] p-3">
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart data={fanChartData} margin={{ top: 8, right: 16, bottom: 24, left: 4 }}>
+                  <CartesianGrid stroke="var(--chart-grid)" strokeDasharray="3 3" />
+                  <XAxis
+                    dataKey="timeHours"
+                    type="number"
+                    domain={["dataMin", "dataMax"]}
+                    tickFormatter={(v: number) =>
+                      v < 24 ? `${Math.round(v)}ч` : `д${Math.floor(v / 24) + 1}`
+                    }
+                    tick={{ fill: "var(--text-soft)", fontSize: 11 }}
+                  >
+                    <Label value="Время" position="insideBottom" offset={-12} fill="var(--text-soft)" fontSize={11} />
+                  </XAxis>
+                  <YAxis
+                    tick={{ fill: "var(--text-soft)", fontSize: 11 }}
+                    tickFormatter={(v: number) => formatNumber(v, { maximumFractionDigits: 1 })}
+                    width={52}
+                  >
+                    <Label
+                      value="кВт"
+                      angle={-90}
+                      position="insideLeft"
+                      style={{ textAnchor: "middle", fill: "var(--text-soft)", fontSize: 11 }}
+                    />
+                  </YAxis>
+                  <Tooltip
+                    content={({ active, payload }) => {
+                      if (!active || !payload?.length) return null;
+                      const d = payload[0]?.payload as typeof fanChartData[number];
+                      if (!d) return null;
+                      return (
+                        <div
+                          style={{
+                            background: "var(--surface-elevated)",
+                            border: "1px solid var(--border-soft)",
+                            borderRadius: 12,
+                            padding: "8px 12px",
+                            fontSize: 12,
+                          }}
+                        >
+                          <p style={{ color: "var(--text-soft)", marginBottom: 4 }}>
+                            t = {formatNumber(d.timeHours, { maximumFractionDigits: 1 })} ч
+                          </p>
+                          <p>P10: {formatNumber(d.p10, { maximumFractionDigits: 2 })} кВт</p>
+                          <p>P50: {formatNumber(d.p50, { maximumFractionDigits: 2 })} кВт</p>
+                          <p>P90: {formatNumber(d.p90, { maximumFractionDigits: 2 })} кВт</p>
+                          {d.baseline != null && (
+                            <p>База: {formatNumber(d.baseline, { maximumFractionDigits: 2 })} кВт</p>
+                          )}
+                        </div>
+                      );
+                    }}
+                  />
+                  {/* Полоса P10–P90: прозрачная база до P10, затем цветная ширина до P90 */}
+                  <Area
+                    type="monotone"
+                    dataKey="p10"
+                    stackId="fan"
+                    fill="transparent"
+                    stroke="none"
+                    isAnimationActive={false}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="bandWidth"
+                    stackId="fan"
+                    fill="var(--accent-soft)"
+                    fillOpacity={0.45}
+                    stroke="none"
+                    isAnimationActive={false}
+                  />
+                  {/* Медиана P50 */}
+                  <Line
+                    type="monotone"
+                    dataKey="p50"
+                    stroke="var(--accent-base)"
+                    strokeWidth={2}
+                    dot={false}
+                    isAnimationActive={false}
+                  />
+                  {/* Базовый сценарий */}
+                  {baseResult ? (
+                    <Line
+                      type="monotone"
+                      dataKey="baseline"
+                      stroke="var(--danger-border)"
+                      strokeWidth={1.5}
+                      strokeDasharray="5 3"
+                      dot={false}
+                      isAnimationActive={false}
+                      connectNulls={false}
+                    />
+                  ) : null}
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-3 text-xs text-[color:var(--text-muted)]">
+              <span className="flex items-center gap-1.5">
+                <span
+                  className="inline-block h-3 w-5 rounded-sm"
+                  style={{ background: "var(--accent-soft)", opacity: 0.6 }}
+                />
+                P10–P90 (80% сценариев)
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="inline-block h-0.5 w-5" style={{ background: "var(--accent-base)" }} />
+                P50 — медиана
+              </span>
+              {baseResult ? (
+                <span className="flex items-center gap-1.5">
+                  <span
+                    className="inline-block h-0.5 w-5"
+                    style={{ background: "var(--danger-border)", borderTop: "2px dashed var(--danger-border)" }}
+                  />
+                  Базовый сценарий
+                </span>
+              ) : null}
+            </div>
+          </>
+        ) : (
+          <EmptyState message="Запустите Monte Carlo заново, чтобы построить веерный график по временным шагам." />
+        )}
+      </section>
+
+      <CollapsibleSection
+        title="Риски сценариев"
+        titleAddon={<MetricInfoTooltip {...resultsMetricInfo.underheatingRisk} />}
+      >
+        <div className="overflow-x-auto pt-3">
           <table className="w-full text-left text-sm">
             <thead>
               <tr className="text-sm text-[color:var(--text-soft)]">
@@ -662,7 +941,7 @@ export function MonteCarloResultsSection({
             </tbody>
           </table>
         </div>
-      </section>
+      </CollapsibleSection>
 
     </section>
   );
@@ -811,29 +1090,42 @@ function buildUncertaintyMetricRow(
     info,
     unit,
     decimals,
+    p5: summary.p5,
     p10: summary.p10,
     p50: summary.p50,
     p90: summary.p90,
+    p95: summary.p95,
     spread: summary.spreadP10P90,
     relativeSpreadPercent: summary.relativeSpreadPercent,
     cvPercent: summary.coefficientOfVariationPercent,
+    ciLower: summary.confidenceIntervalMean95?.lower ?? null,
+    ciUpper: summary.confidenceIntervalMean95?.upper ?? null,
   };
 }
 
-function buildConclusion(input: {
-  climateLabel: string | null;
-  mainFactorLabel: string | null;
-  underheatingRisk: number;
-}): string {
-  const driver = input.mainFactorLabel ? `Основной риск: ${input.mainFactorLabel.toLowerCase()}.` : "";
-  const climate = input.climateLabel ? ` Климатический сценарий: ${input.climateLabel}.` : "";
-  if (input.underheatingRisk >= 0.3) {
-    return `${driver} Вероятность недогрева повышенная.${climate}`.trim();
-  }
-  if (input.underheatingRisk >= 0.1) {
-    return `${driver} Риск недогрева умеренный, имеет смысл проверить диапазоны инфильтрации и уставок.${climate}`.trim();
-  }
-  return `${driver} Критических рисков по вероятностному анализу не выявлено.${climate}`.trim();
+function buildTailRiskCard(
+  id: string,
+  label: string,
+  summary: DistributionSummary,
+  unit: string,
+  decimals: number
+): TailRiskCard {
+  return {
+    id,
+    label,
+    valueAtRisk: Number.isFinite(summary.valueAtRisk) ? summary.valueAtRisk : null,
+    conditionalValueAtRisk: Number.isFinite(summary.conditionalValueAtRisk)
+      ? summary.conditionalValueAtRisk
+      : null,
+    unit,
+    decimals,
+  };
+}
+
+function buildCdfView(cdf: { value: number; probability: number }[]): CdfPointView[] {
+  return cdf
+    .filter((point) => Number.isFinite(point.value) && Number.isFinite(point.probability))
+    .map((point) => ({ value: point.value, probabilityPercent: point.probability * 100 }));
 }
 
 function probabilityOf(values: number[], predicate: (value: number) => boolean): number | null {
@@ -893,16 +1185,6 @@ function describeStability(value: number | null): { label: string; tone: MetricT
     return { label: "Требуется проверка", tone: "warning" };
   }
   return { label: "Высокий риск", tone: "accent" };
-}
-
-function resolveCalloutVariant(probability: number): "info" | "attention" | "risk" {
-  if (probability >= 0.3) {
-    return "risk";
-  }
-  if (probability >= 0.1) {
-    return "attention";
-  }
-  return "info";
 }
 
 function formatPercentValue(value: number | null): string {

@@ -1,4 +1,12 @@
-import type { BuildingModel, Door, Window } from "../../entities/geometry/types";
+import type { SolarTimeInput } from "../../core/solar/solarShading";
+import {
+  buildSolarShadingNote,
+  combineArchitecturalAndSolarShading,
+  computeFacadeSolarAccessFactor,
+  resolveSolarPositionFromTime,
+  resolveWindowFacadeAzimuthDeg,
+} from "../../core/solar/solarShading";
+import type { BuildingModel, Door, Sp50ConstructionType, Window } from "../../entities/geometry/types";
 import {
   applyEnvelopePresetToDoor,
   applyEnvelopePresetToWindow,
@@ -17,8 +25,51 @@ export const TYPICAL_INSULATED_DOOR_U_W_M2K = 1.2;
 const WINDOW_PRESET_ID = resolveDefaultPresetId("window");
 const DOOR_PRESET_ID = resolveDefaultPresetId("door");
 
-function openingAreaM2(opening: { width_m: number; height_m: number }): number {
-  return Math.max(0, opening.width_m) * Math.max(0, opening.height_m);
+export function openingAreaM2(opening: { width_m?: number | null; height_m?: number | null }): number {
+  const width = opening.width_m;
+  const height = opening.height_m;
+  if (width == null || height == null || !Number.isFinite(width) || !Number.isFinite(height)) {
+    return 0;
+  }
+  return Math.max(0, width) * Math.max(0, height);
+}
+
+function envelopeFragmentAreaM2(model: BuildingModel, constructionTypes: Sp50ConstructionType[]): number {
+  return (model.thermalProtection?.envelope ?? [])
+    .filter((fragment) => constructionTypes.includes(fragment.constructionType))
+    .reduce((sum, fragment) => sum + Math.max(0, fragment.areaM2 ?? 0), 0);
+}
+
+export function resolveModelWindowAreaM2(model: BuildingModel): number {
+  const fromOpenings = model.windows.reduce((sum, window) => sum + openingAreaM2(window), 0);
+  if (fromOpenings > 0) {
+    return fromOpenings;
+  }
+  return envelopeFragmentAreaM2(model, ["window", "lantern"]);
+}
+
+export function resolveModelDoorAreaM2(model: BuildingModel): number {
+  const fromOpenings = model.doors.reduce((sum, door) => sum + openingAreaM2(door), 0);
+  if (fromOpenings > 0) {
+    return fromOpenings;
+  }
+  return envelopeFragmentAreaM2(model, ["door"]);
+}
+
+export function hasModelWindowAreaSource(model: BuildingModel): boolean {
+  return (
+    model.windows.length > 0 ||
+    (model.thermalProtection?.envelope ?? []).some(
+      (fragment) => fragment.constructionType === "window" || fragment.constructionType === "lantern"
+    )
+  );
+}
+
+export function hasModelDoorAreaSource(model: BuildingModel): boolean {
+  return (
+    model.doors.length > 0 ||
+    (model.thermalProtection?.envelope ?? []).some((fragment) => fragment.constructionType === "door")
+  );
 }
 
 function averageOpeningU(
@@ -95,13 +146,98 @@ function finitePositive(value: unknown): number | null {
 }
 
 export function resolveModelWindowGValue(model: BuildingModel): number | null {
-  const value = model.meta?.windowGValue;
-  return finitePositive(value);
+  // 1. Явное значение из model.meta (задано пользователем)
+  const metaValue = finitePositive(model.meta?.windowGValue);
+  if (metaValue !== null) {
+    return metaValue;
+  }
+  // 2. Взвешенное среднее g-value из пресетов окон модели
+  let conductance = 0;
+  let area = 0;
+  model.windows.forEach((window) => {
+    const preset = getEnvelopePreset(window.envelopePresetId);
+    const g = preset?.gValue;
+    if (g == null || !(g > 0)) {
+      return;
+    }
+    const openingArea = openingAreaM2(window);
+    if (openingArea <= 0) {
+      return;
+    }
+    conductance += g * openingArea;
+    area += openingArea;
+  });
+  return area > 0 ? conductance / area : null;
 }
 
-export function resolveModelShadingFactor(model: BuildingModel): number | null {
-  const value = model.meta?.shadingFactor;
-  return finitePositive(value);
+function resolvePresetShadingFactor(preset: ReturnType<typeof getEnvelopePreset>): number | null {
+  if (!preset || preset.kind !== "window") {
+    return null;
+  }
+  return finitePositive(preset.shadingFactor) ?? TYPICAL_WINDOW_SHADING_FACTOR;
+}
+
+export interface ResolvedModelShadingFactor {
+  value: number | null;
+  usesSolarTime: boolean;
+  notes: string[];
+}
+
+export function resolveModelShadingFactor(
+  model: BuildingModel,
+  options?: { solarTime?: SolarTimeInput | null }
+): ResolvedModelShadingFactor {
+  const metaValue = finitePositive(model.meta?.shadingFactor);
+  if (metaValue !== null) {
+    return { value: metaValue, usesSolarTime: false, notes: [] };
+  }
+
+  const solarPosition = resolveSolarPositionFromTime(options?.solarTime ?? null);
+  const usesSolarTime = solarPosition != null;
+
+  let weightedSum = 0;
+  let totalArea = 0;
+  model.windows.forEach((window) => {
+    const preset = getEnvelopePreset(window.envelopePresetId);
+    const baseShading = resolvePresetShadingFactor(preset);
+    if (baseShading == null) {
+      return;
+    }
+    const areaM2 = openingAreaM2(window);
+    if (areaM2 <= 0) {
+      return;
+    }
+    let effectiveShading = baseShading;
+    if (solarPosition) {
+      const facadeAzimuthDeg = resolveWindowFacadeAzimuthDeg(model, window);
+      if (facadeAzimuthDeg != null) {
+        const solarAccess = computeFacadeSolarAccessFactor(solarPosition, facadeAzimuthDeg);
+        effectiveShading = combineArchitecturalAndSolarShading(baseShading, solarAccess);
+      }
+    }
+    weightedSum += effectiveShading * areaM2;
+    totalArea += areaM2;
+  });
+
+  const notes: string[] = [];
+  if (usesSolarTime && options?.solarTime && solarPosition) {
+    notes.push(buildSolarShadingNote(options.solarTime, solarPosition));
+    notes.push(
+      "Эффективное затенение: архитектурное из пресета + положение солнца и ориентация фасада окна (как в конструкторе)."
+    );
+  } else if (totalArea > 0) {
+    notes.push(shadingEnvelopeSourceNote());
+  }
+
+  return {
+    value: totalArea > 0 ? weightedSum / totalArea : null,
+    usesSolarTime,
+    notes,
+  };
+}
+
+export function shadingEnvelopeSourceNote(): string {
+  return "Площадно-взвешенное затенение по типам окон в модели (пресет; при отсутствии — типовое 0,9).";
 }
 
 export function setModelOpeningUValues(
@@ -158,8 +294,8 @@ export function setModelBridgeConductance(
   model: BuildingModel,
   input: { H_psi_W_K?: number | null; H_chi_W_K?: number | null }
 ): BuildingModel {
-  const hPsi = finitePositive(input.H_psi_W_K) ?? 0;
-  const hChi = finitePositive(input.H_chi_W_K) ?? 0;
+  const hPsi = finitePositive(input.H_psi_W_K);
+  const hChi = finitePositive(input.H_chi_W_K);
   const envelope = [...(model.thermalProtection?.envelope ?? [])];
   if (!envelope.length) {
     return model;
@@ -167,13 +303,26 @@ export function setModelBridgeConductance(
   const targetIndex = envelope.findIndex((fragment) => fragment.constructionType === "wall");
   const index = targetIndex >= 0 ? targetIndex : 0;
   const target = envelope[index]!;
+  const planar = target.heterogeneity?.planar;
+  const nextHeterogeneity =
+    hPsi != null || hChi != null
+      ? {
+          ...(planar?.length ? { planar } : {}),
+          linear:
+            hPsi != null
+              ? [{ lengthM: 1, psi_W_mK: hPsi, label: "Задано пользователем" }]
+              : [],
+          point:
+            hChi != null
+              ? [{ count: 1, chi_W_K: hChi, label: "Задано пользователем" }]
+              : [],
+        }
+      : planar?.length
+        ? { planar }
+        : undefined;
   envelope[index] = {
     ...target,
-    heterogeneity: {
-      ...(target.heterogeneity ?? {}),
-      linear: hPsi > 0 ? [{ lengthM: 1, psi_W_mK: hPsi, label: "Задано пользователем" }] : [],
-      point: hChi > 0 ? [{ count: 1, chi_W_K: hChi, label: "Задано пользователем" }] : [],
-    },
+    heterogeneity: nextHeterogeneity,
   };
   return {
     ...model,

@@ -10,6 +10,8 @@ import type { ProjectKind } from "../../entities/project/project.store";
 import type { RunResult, RunResultMetric } from "../../shared/api/types";
 import { ENGINE_RUN_PATH, runEngineSimulation } from "./runs.api";
 import { FormulaHint } from "../formulas/components/FormulaHint";
+import { openFormulaDrawer } from "../../entities/formulas/formulaDrawer.store";
+import { formulaMap } from "../../entities/formulas/registry";
 import { useWorkflowStore } from "../../entities/workflow/workflow.store";
 import { useEngineSettingsStore } from "../../entities/settings/engine.store";
 import { ApiError } from "../../shared/api/client";
@@ -464,7 +466,11 @@ export function SimulationPanel({
                         <p className="mt-1 text-xs text-[color:var(--text-muted)]">{result.diagnostics.engineering.infiltrationConductanceFormula}</p>
                         <p className="mt-4 text-sm font-semibold text-[color:var(--text-base)]">Контрольные показатели</p>
                         <ul className="mt-2 space-y-3">
-                          {result.diagnostics.metricCards.map((card) => (
+                          {result.diagnostics.metricCards.map((card) => {
+                            const linkedFormulaIds = result.diagnostics!.metricCards
+                              .map((entry) => entry.formulaId)
+                              .filter((id): id is string => typeof id === "string" && Boolean(formulaMap[id]));
+                            return (
                             <li key={card.title} className="rounded-xl border border-[color:var(--border-soft)] bg-[color:var(--surface-elevated)] p-3 shadow-sm">
                               <div className="flex flex-wrap items-baseline justify-between gap-2">
                                 <span className="font-medium text-[color:var(--text-base)]">{card.title}</span>
@@ -474,10 +480,20 @@ export function SimulationPanel({
                                 </span>
                               </div>
                               <p className="mt-1 text-xs text-[color:var(--text-soft)]">Формула: {card.formula}</p>
+                              {card.formulaId && formulaMap[card.formulaId] ? (
+                                <button
+                                  type="button"
+                                  className="mt-1 text-xs font-semibold text-[color:var(--accent-base)] underline-offset-2 hover:underline"
+                                  onClick={() => openFormulaDrawer(linkedFormulaIds, card.formulaId)}
+                                >
+                                  {formulaMap[card.formulaId].title} — открыть в реестре
+                                </button>
+                              ) : null}
                               <p className="mt-1 text-xs text-[color:var(--text-muted)]">{card.engineeringSenseRu}</p>
                               <p className="mt-1 text-xs text-[color:var(--text-muted)]">Допущения: {card.assumptionsRu}</p>
                             </li>
-                          ))}
+                            );
+                          })}
                         </ul>
                         <p className="mt-3 text-xs text-[color:var(--text-soft)]">{result.diagnostics.engineering.notSp50NormativeCheckRu}</p>
                         <p className="mt-1 text-xs text-[color:var(--text-soft)]">{result.diagnostics.engineering.notMonteCarloRu}</p>

@@ -134,7 +134,7 @@ test("demo and telemetry UI do not expose raw preset, localStorage or localdemo 
         throw new Error("Telemetry panel should map demo project ids to a readable project name.");
     }
 });
-test("formulas page explains calculation contours and updated formula statuses", () => {
+test("formulas page documents updated formula statuses", () => {
     const source = readFileSync(resolve(process.cwd(), "src/features/formulas/FormulasPage.tsx"), "utf8");
     const requiredStatuses = [
         "используется в RC-модели",
@@ -154,9 +154,6 @@ test("formulas page explains calculation contours and updated formula statuses",
     }
     if (!source.includes('"radiator_heat_output", "coolant_flow_rate"')) {
         throw new Error("Heating topic should expose the coolant formula as a future/reference model.");
-    }
-    if (!source.includes("Расчётные контуры проекта")) {
-        throw new Error("FormulasPage should explain the separate calculation contours.");
     }
 });
 test("results tab exposes active assumptions and ideal heater warning", () => {
@@ -179,9 +176,6 @@ test("results tab exposes engineering loss breakdown only from available diagnos
     if (!source.includes("Инженерное разложение потерь и нагрузок")) {
         throw new Error("MetricsResultsTab should show the engineering loss breakdown section.");
     }
-    if (!source.includes("Разложение строится по доступным результатам текущего расчётного контура")) {
-        throw new Error("MetricsResultsTab should explain that the breakdown depends on the current calculation contour.");
-    }
     if (!source.includes("zone.lossOpaqueW") || !source.includes("zone.lossInfiltrationW")) {
         throw new Error("MetricsResultsTab should render room loss rows from existing diagnostics fields.");
     }
@@ -192,26 +186,12 @@ test("results tab exposes engineering loss breakdown only from available diagnos
         throw new Error("MetricsResultsTab should show a fallback when the current contour lacks diagnostics data.");
     }
 });
-test("building performance section exposes source data completeness block", () => {
+test("building performance section exposes derived metric groups", () => {
     const source = readFileSync(resolve(process.cwd(), "src/features/reports/BuildingPerformanceResultsSection.tsx"), "utf8");
-    const requiredTokens = [
-        "Полнота исходных данных",
-        "Геометрия",
-        "Материалы",
-        "Климат",
-        "Эксплуатация",
-        "Воздухообмен",
-        "Влажность",
-        "Инженерные сети",
-        "Экономика",
-        "Экология",
-        "Валидация",
-        "dataRequirementsAudit",
-        "Интерфейс не рассчитывает формулы заново",
-    ];
+    const requiredTokens = ["Форма здания", "Теплопотери", "Комфорт", "Экология", "Валидация цифрового двойника"];
     for (const token of requiredTokens) {
         if (!source.includes(token)) {
-            throw new Error(`BuildingPerformanceResultsSection should expose completeness token: ${token}`);
+            throw new Error(`BuildingPerformanceResultsSection should expose metric group: ${token}`);
         }
     }
 });

@@ -62,7 +62,7 @@ export function buildAdjacencyGraph(model: BuildingModel): AdjacencyResult {
       graph.edges.push({ wallId: wall.id, roomA, roomB, area_m2: area });
     } else if (assignment.length === 1) {
       const roomId = assignment[0];
-      const orientation = estimateOrientation(wall);
+      const orientation = estimateWallOrientation(wall);
       const extEdge: ExternalWallEdge = {
         wallId: wall.id,
         roomId,
@@ -116,7 +116,7 @@ const normalize = (vec: Vec2): Vec2 => {
   return { x: vec.x / length, y: vec.y / length };
 };
 
-const estimateOrientation = (wall: Wall): Orientation => {
+export function estimateWallOrientation(wall: Wall): Orientation {
   const angle = angleBetween(wall.a, wall.b);
   const deg = ((angle * 180) / Math.PI + 360) % 360;
   if (deg >= 315 || deg < 45) {

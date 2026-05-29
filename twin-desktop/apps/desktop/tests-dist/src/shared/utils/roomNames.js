@@ -86,6 +86,27 @@ function getCandidateRoomName(room) {
     }
     return null;
 }
+/** Заменяет технические имена вроде Space 2 на локализованное «Помещение N». */
+export function normalizeStoredRoomName(room, index = 0) {
+    const raw = typeof room.name === "string" ? room.name.trim() : "";
+    if (!raw || !looksLikeTechnicalRoomId(raw)) {
+        return null;
+    }
+    const display = getRoomDisplayName(room, index);
+    return display !== raw ? display : null;
+}
+export function normalizeModelRoomNames(model) {
+    let changed = false;
+    const rooms = model.rooms.map((room, index) => {
+        const normalized = normalizeStoredRoomName(room, index);
+        if (!normalized) {
+            return room;
+        }
+        changed = true;
+        return { ...room, name: normalized };
+    });
+    return changed ? { ...model, rooms } : model;
+}
 export function getRoomDisplayName(room, index = 0) {
     const visibleName = getCandidateRoomName(room);
     const usageLabels = extractUsageLabels(room, visibleName);

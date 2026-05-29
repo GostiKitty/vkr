@@ -6,13 +6,12 @@ import { useBuildStore } from "../build/build.store";
 import {
   MetricCard,
   ResultSummaryCard,
-  StatusStrip,
   WorkspacePageHeader,
 } from "../../shared/ui";
-import { writeAgentDebugLog } from "../../shared/utils/agentDebugLog";
 import { getResultSyncState } from "../../shared/utils/modelSync";
 import { useTwin } from "../twin/useTwin";
 import ResultsPanel from "./ResultsPanel";
+import { resultsMetricInfo } from "./resultsMetricInfo";
 
 export function ResultsWorkspacePage() {
   const projectId = useProjectStore((state) => state.projectId);
@@ -49,7 +48,21 @@ export function ResultsWorkspacePage() {
   const airExchangeLossKW = visibleBuildingDiagnostics
     ? (visibleBuildingDiagnostics.totalInfiltrationLossW + visibleBuildingDiagnostics.totalMechanicalVentilationLossW) / 1000
     : null;
+  const totalHeatLossKW =
+    transmissionLossKW !== null && airExchangeLossKW !== null
+      ? transmissionLossKW + airExchangeLossKW
+      : null;
   const specificEnergyKWhM2 = visibleBuildingDiagnostics?.specificEnergyKWh_m2 ?? null;
+  const specificPeakLoadWM2 = visibleBuildingDiagnostics?.specificPeakLoad_W_m2 ?? null;
+
+  const rooms = useBuildStore((state) => state.model.rooms);
+  const weakestRoom =
+    visibleMonteCarloResult?.roomRiskSummary
+      ?.slice()
+      .sort((a, b) => b.underheatingRisk - a.underheatingRisk)[0] ?? null;
+  const weakestRoomLabel = weakestRoom
+    ? rooms.find((room) => room.id === weakestRoom.roomId)?.name?.trim() || weakestRoom.roomId
+    : null;
 
   useTwin(projectId ?? null, projectKind);
 
@@ -70,18 +83,11 @@ export function ResultsWorkspacePage() {
       rooms: useBuildStore.getState().model.rooms.length,
       walls: useBuildStore.getState().model.walls.length,
     });
-    // #region agent log
-    writeAgentDebugLog({sessionId:'c3d591',runId:'repro-4',hypothesisId:'H2',location:'ResultsWorkspacePage.tsx:results-state',message:'results page state snapshot',data:{projectKey,modelRevision,thermalResultState,monteCarloResultState,lastThermalResultBinding:lastThermalResultBinding?.modelRevision??null,lastMonteCarloResultBinding:monteCarloResultBinding?.modelRevision??null,rooms:useBuildStore.getState().model.rooms.length,walls:useBuildStore.getState().model.walls.length},timestamp:Date.now()});
-    // #endregion
   }, [modelRevision, monteCarloResultState, projectKey, thermalResultState]);
 
   return (
     <section className="w-full space-y-4 ui-page-enter">
-      <WorkspacePageHeader
-        kicker="Результаты"
-        title="Результаты расчёта"
-        description="Метрики, графики и отчёты."
-      />
+      <WorkspacePageHeader title="Результаты расчёта" />
 
       {thermalResultState === "stale" || monteCarloResultState === "stale" ? (
         <div className="rounded-2xl border border-[color:var(--warning-border)] bg-[color:var(--warning-bg)] px-4 py-3 text-sm text-[color:var(--warning-fg)]">
@@ -89,84 +95,48 @@ export function ResultsWorkspacePage() {
         </div>
       ) : null}
 
-      <StatusStrip
-        items={[
-          {
-            label: "Расчёт RC",
-            value:
-              thermalResultState === "current"
-                ? "Актуален"
-                : thermalResultState === "stale"
-                  ? "Устарел"
-                  : "Нет",
-            tone: thermalResultState === "current" ? "success" : "warning",
-          },
-          {
-            label: "Monte Carlo",
-            value:
-              monteCarloResultState === "current"
-                ? "Актуален"
-                : monteCarloResultState === "stale"
-                  ? "Устарел"
-                  : "Нет",
-            tone: monteCarloResultState === "current" ? "info" : "warning",
-          },
-          // Temporarily hidden from UI. Will be restored after project documentation export redesign.
-          // { label: "Документы", value: "Готово", tone: "success" },
-        ]}
-      />
-
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <MetricCard
           label="Суммарные теплопотери"
-          value={visibleThermalResult?.summary.peakLoadKW ?? null}
+          value={totalHeatLossKW}
           unit="кВт"
-          formula="Q"
           precision={2}
-          status={visibleThermalResult ? "success" : "warning"}
+          status={totalHeatLossKW !== null ? "success" : "warning"}
+          metricInfo={resultsMetricInfo.buildingTotalHeatLossKW}
         />
         <MetricCard
           label="Потери через ограждения"
           value={transmissionLossKW}
           unit="кВт"
-          formula="Qогр"
           precision={2}
           status={transmissionLossKW !== null ? "info" : "warning"}
+          metricInfo={resultsMetricInfo.buildingTransmissionLossKW}
         />
         <MetricCard
           label="Потери на воздухообмен"
           value={airExchangeLossKW}
           unit="кВт"
-          formula="Qвозд"
           precision={2}
           status={airExchangeLossKW !== null ? "info" : "warning"}
+          metricInfo={resultsMetricInfo.buildingAirExchangeLossKW}
         />
         <MetricCard
           label="Удельные потери"
           value={specificEnergyKWhM2}
           unit="кВт·ч/м²"
-          formula="q"
           precision={2}
           status={specificEnergyKWhM2 !== null ? "success" : "warning"}
-        />
-        <MetricCard
-          label="Проблемная конструкция"
-          value={visibleMonteCarloResult?.underheatingBelow20CProbability ?? null}
-          unit="%"
-          formula="P"
-          precision={2}
-          status={visibleMonteCarloResult ? "warning" : "neutral"}
-          subtitle="Вероятность недогрева"
+          metricInfo={resultsMetricInfo.buildingSpecificEnergyKWhM2}
         />
       </div>
 
       <ResultSummaryCard
-        totalHeatLossKW={visibleThermalResult?.summary.peakLoadKW ?? null}
-        specificHeatLoss={specificEnergyKWhM2}
-        weakElement={
-          visibleMonteCarloResult?.roomRiskSummary?.slice().sort((a, b) => b.underheatingRisk - a.underheatingRisk)[0]
-            ?.roomId ?? "Будет определена после расчёта"
-        }
+        totalHeatLossKW={totalHeatLossKW}
+        specificHeatLoss={specificPeakLoadWM2}
+        totalHeatLossMetricInfo={resultsMetricInfo.buildingTotalHeatLossKW}
+        specificHeatLossMetricInfo={resultsMetricInfo.peakLoad}
+        weakElementLabel="Наиболее уязвимое помещение"
+        weakElement={weakestRoomLabel ?? "Будет определено после расчёта"}
         recommendation={
           visibleThermalResult
             ? "Сфокусируйтесь на помещениях с высоким риском недогрева и проверьте теплотехнические свойства ограждений."

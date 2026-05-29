@@ -1,18 +1,37 @@
 import { polygonArea, segmentLength } from "../../../entities/geometry/geom";
 import type { BuildingModel, FloorSlab, Roof, Room, Sp50EnvelopeFragmentInput, Sp50EnvelopeFragmentMetadata, Wall } from "../../../entities/geometry/types";
 import { computeWallProperties, getMaterial } from "../../../entities/material/types";
+import type { SolarTimeInput } from "../../solar/solarShading";
 import type { ScenarioConfig } from "../../../entities/workflow/workflow.store";
+import {
+  estimateBuildingMeanMrtC,
+  estimateMrtFromEnvelope,
+  resolveComfortMaxC,
+  resolveComfortMinC,
+  resolveRelativeHumidityPercent,
+} from "../comfort/resolveScenarioComfort";
+import {
+  resolveScenarioEngineeringInputs,
+  summarizeModelEngineering,
+  type EngineeringInputSource,
+} from "../engineering/resolveScenarioEngineering";
 import { resolveScenarioConfig } from "../../../entities/workflow/workflow.store";
 import { getSp131CityClimate } from "../../../norms/sp131_2025/climate";
 import { getMaterialThermalProperties } from "../../../norms/sp50_2024/materialThermalProperties";
 import { isCanonicalDemoProjectModel } from "../../../shared/utils/demoProject";
 import {
+  applyDefaultOpeningEnvelopeToModel,
   resolveModelDoorU_W_m2K,
   resolveModelShadingFactor,
+  hasModelDoorAreaSource,
+  hasModelWindowAreaSource,
+  resolveModelDoorAreaM2,
+  resolveModelWindowAreaM2,
   resolveModelWindowGValue,
   resolveModelWindowU_W_m2K,
   TYPICAL_PVC_WINDOW_G_VALUE,
   TYPICAL_WINDOW_SHADING_FACTOR,
+  shadingEnvelopeSourceNote,
   windowEnvelopeSourceNote,
 } from "../../../shared/utils/openingThermalData";
 import { buildAdjacencyGraph } from "../../graph/adjacency";
@@ -36,6 +55,18 @@ import {
 } from "../formulas";
 import { resolveBuildingInfiltration } from "../infiltration";
 import type { ThermalSimulationResult } from "../solver";
+import { resolveScenarioEnergyTariff } from "../../economics/scenarioEnergyTariff";
+import { aggregateEnvelopeBridgeConductances } from "../../../demo/deriveExteriorWallThermalBridges";
+import { syncAndEnrichThermalProtection } from "../../../features/build/envelope/syncAndEnrichThermalProtection";
+import { ensureModelClimate, resolvePreferredClimateCityId } from "../climate/ensureModelClimate";
+import {
+  isOpaqueConstructionKind,
+  resolveBridgeAccountingMode,
+} from "../../../shared/utils/bridgeAccountingMode";
+import {
+  resolveFragmentHomogeneityCoefficient,
+  resolveModelHomogeneityCoefficient,
+} from "../../../shared/utils/homogeneityFromModel";
 import { calculateValidationMetrics } from "./buildingPerformanceMetrics";
 
 export type SourceDataSectionId =
@@ -168,7 +199,14 @@ export interface BuildSourceDataWorkspaceReportInput {
   scenarioConfig?: ScenarioConfig | null;
   thermalResult?: ThermalSimulationResult | null;
   reportInputs?: SourceDataReportMetadataInput | null;
+  /** Солнечное время из конструктора (виджет «Положение солнца»). */
+  solarTime?: SolarTimeInput | null;
 }
+
+import {
+  AUTO_CALCULATED_SOURCE_LABEL,
+  MODEL_SOURCE_LABEL,
+} from "../../../shared/constants/sourceDataLabels";
 
 const AIR_DENSITY_KG_M3 = 1.2;
 const AIR_HEAT_CAPACITY_J_KG_K = 1005;
@@ -194,15 +232,14 @@ const SECTION_LABELS: Record<SourceDataSectionId, string> = {
 function sourceLabel(source: SourceDataOrigin): string {
   switch (source) {
     case "model":
-      return "из модели";
+      return MODEL_SOURCE_LABEL;
     case "user":
       return "задано пользователем";
     case "scenario":
       return "задано пользователем";
     case "calculated":
-      return "рассчитано автоматически";
     case "result":
-      return "рассчитано автоматически";
+      return AUTO_CALCULATED_SOURCE_LABEL;
     case "sp50":
       return "из СП 50";
     case "sp131":
@@ -429,18 +466,29 @@ function resolveHumiditySource(
   scenario: ScenarioConfig,
   model: BuildingModel
 ): { value: number | null; source: SourceDataOrigin; warnings: string[] } {
-  const raw = scenarioConfig?.comfort?.relativeHumidityPercent;
-  if (raw != null && Number.isFinite(raw)) {
-    return { value: raw, source: "user", warnings: [] };
+  const resolved = resolveRelativeHumidityPercent(scenarioConfig, scenario, model);
+  const source: SourceDataOrigin =
+    resolved.source === "user"
+      ? "user"
+      : resolved.source === "model"
+        ? "sp50"
+        : "fallback";
+  const warnings =
+    resolved.explicit || resolved.source === "model"
+      ? []
+      : ["Влажность подставлена автоматически (модель или 50 % по умолчанию)."];
+  return { value: resolved.value, source, warnings };
+}
+
+function comfortBoundsOrigin(source: ReturnType<typeof resolveComfortMinC>["source"]): SourceDataOrigin {
+  switch (source) {
+    case "user":
+      return "user";
+    case "setpoints":
+      return "calculated";
+    default:
+      return "fallback";
   }
-  const fromSp50 = model.thermalProtection?.climate?.indoorRelativeHumidityPercent;
-  if (fromSp50 != null && Number.isFinite(fromSp50)) {
-    return { value: fromSp50, source: "sp50", warnings: [] };
-  }
-  if (scenario.comfort?.relativeHumidityPercent != null && Number.isFinite(scenario.comfort.relativeHumidityPercent)) {
-    return { value: scenario.comfort.relativeHumidityPercent, source: "fallback", warnings: ["Используется значение влажности по умолчанию."] };
-  }
-  return { value: null, source: "missing", warnings: ["Относительная влажность не задана."] };
 }
 
 function resolveIndoorTemperatureC(
@@ -486,60 +534,69 @@ function resolveClimateMeta(
   source: SourceDataOrigin;
   warnings: string[];
 } {
-  const rawCityId = scenarioConfig?.climateCityId;
-  if (rawCityId) {
-    const city = getSp131CityClimate(rawCityId);
-    if (city) {
-      return {
-        cityLabel: city.label,
-        designOutdoorC: city.outdoorDesignTemperatureC,
-        heatingAverageC: city.outdoorHeatingPeriodAverageC,
-        heatingDurationDays: city.heatingPeriodDurationDays,
-        source: "sp131",
-        warnings: [],
-      };
-    }
-  }
-
   const manual = scenarioConfig?.climate?.manual;
-  if (
+  const hasManualOutdoor =
     manual &&
     (manual.outdoorDesignTemperatureC != null ||
       manual.outdoorHeatingAverageC != null ||
-      manual.heatingDurationDays != null)
-  ) {
+      manual.heatingDurationDays != null);
+
+  const sp50Climate = model.thermalProtection?.climate;
+  const hasModelOutdoor =
+    sp50Climate &&
+    (sp50Climate.outdoorDesignTemperatureC != null ||
+      sp50Climate.outdoorHeatingPeriodAverageC != null ||
+      sp50Climate.heatingPeriodDurationDays != null);
+
+  const preferredCityId = resolvePreferredClimateCityId(model, scenarioConfig);
+  const sp131City = getSp131CityClimate(preferredCityId);
+
+  if (hasManualOutdoor) {
     return {
-      cityLabel: null,
+      cityLabel: sp50Climate?.city ?? sp131City?.label ?? null,
       designOutdoorC:
         manual.outdoorDesignTemperatureC != null && Number.isFinite(manual.outdoorDesignTemperatureC)
           ? manual.outdoorDesignTemperatureC
-          : null,
+          : hasModelOutdoor
+            ? (sp50Climate?.outdoorDesignTemperatureC ?? sp131City?.outdoorDesignTemperatureC ?? null)
+            : (sp131City?.outdoorDesignTemperatureC ?? null),
       heatingAverageC:
         manual.outdoorHeatingAverageC != null && Number.isFinite(manual.outdoorHeatingAverageC)
           ? manual.outdoorHeatingAverageC
-          : null,
+          : hasModelOutdoor
+            ? (sp50Climate?.outdoorHeatingPeriodAverageC ?? sp131City?.outdoorHeatingPeriodAverageC ?? null)
+            : (sp131City?.outdoorHeatingPeriodAverageC ?? null),
       heatingDurationDays:
         manual.heatingDurationDays != null && Number.isFinite(manual.heatingDurationDays)
           ? manual.heatingDurationDays
-          : null,
+          : hasModelOutdoor
+            ? (sp50Climate?.heatingPeriodDurationDays ?? sp131City?.heatingPeriodDurationDays ?? null)
+            : (sp131City?.heatingPeriodDurationDays ?? null),
       source: "user",
       warnings: [],
     };
   }
 
-  const sp50Climate = model.thermalProtection?.climate;
-  if (
-    sp50Climate &&
-    (sp50Climate.outdoorDesignTemperatureC != null ||
-      sp50Climate.outdoorHeatingPeriodAverageC != null ||
-      sp50Climate.heatingPeriodDurationDays != null)
-  ) {
+  if (hasModelOutdoor) {
     return {
-      cityLabel: sp50Climate.city ?? null,
-      designOutdoorC: sp50Climate.outdoorDesignTemperatureC ?? null,
-      heatingAverageC: sp50Climate.outdoorHeatingPeriodAverageC ?? null,
-      heatingDurationDays: sp50Climate.heatingPeriodDurationDays ?? null,
-      source: "sp50",
+      cityLabel: sp50Climate?.city ?? sp131City?.label ?? null,
+      designOutdoorC: sp50Climate?.outdoorDesignTemperatureC ?? sp131City?.outdoorDesignTemperatureC ?? null,
+      heatingAverageC: sp50Climate?.outdoorHeatingPeriodAverageC ?? sp131City?.outdoorHeatingPeriodAverageC ?? null,
+      heatingDurationDays:
+        sp50Climate?.heatingPeriodDurationDays ?? sp131City?.heatingPeriodDurationDays ?? null,
+      source: "model",
+      warnings: [],
+    };
+  }
+
+  if (sp131City) {
+    const fromScenarioCity = Boolean(scenarioConfig?.climateCityId?.trim());
+    return {
+      cityLabel: sp131City.label,
+      designOutdoorC: sp131City.outdoorDesignTemperatureC,
+      heatingAverageC: sp131City.outdoorHeatingPeriodAverageC,
+      heatingDurationDays: sp131City.heatingPeriodDurationDays,
+      source: fromScenarioCity ? "sp131" : "fallback",
       warnings: [],
     };
   }
@@ -552,7 +609,7 @@ function resolveClimateMeta(
       heatingAverageC: fallbackCity.outdoorHeatingPeriodAverageC,
       heatingDurationDays: fallbackCity.heatingPeriodDurationDays,
       source: "fallback",
-      warnings: ["Климатические параметры используются по умолчанию для выбранного профиля."],
+      warnings: [],
     };
   }
 
@@ -635,8 +692,10 @@ function buildGeometrySection(model: BuildingModel): { section: SourceDataSectio
   const heatedAreaM2 = heatedRooms.reduce((sum, room) => sum + ((typeof room.areaM2.value === "number" ? room.areaM2.value : 0) || 0), 0);
   const heatedVolumeM3 = heatedRooms.reduce((sum, room) => sum + ((typeof room.volumeM3.value === "number" ? room.volumeM3.value : 0) || 0), 0);
   const facadeAreaM2 = adjacency.external.reduce((sum, edge) => sum + Math.max(0, edge.area_m2), 0);
-  const windowAreaM2 = geometryModel.windows.reduce((sum, window) => sum + Math.max(0, window.width_m) * Math.max(0, window.height_m), 0);
-  const doorAreaM2 = geometryModel.doors.reduce((sum, door) => sum + Math.max(0, door.width_m) * Math.max(0, door.height_m), 0);
+  const windowAreaM2 = resolveModelWindowAreaM2(geometryModel);
+  const doorAreaM2 = resolveModelDoorAreaM2(geometryModel);
+  const hasWindowArea = hasModelWindowAreaSource(geometryModel);
+  const hasDoorArea = hasModelDoorAreaSource(geometryModel);
   const roofAreaTotalM2 = (geometryModel.roofs ?? []).reduce((sum, roof) => sum + roofAreaM2(roof), 0);
   const floorAreaTotalM2 = (geometryModel.floorSlabs ?? []).reduce((sum, slab) => sum + slabAreaM2(slab), 0);
   const envelopeAreaM2 =
@@ -676,8 +735,8 @@ function buildGeometrySection(model: BuildingModel): { section: SourceDataSectio
     field("geometry.heated-area", "Отапливаемая площадь", heatedAreaM2 || null, "м²", heatedAreaM2 > 0 ? "calculated" : "missing", heatedAreaM2 > 0 ? [] : ["Нет данных об отапливаемых помещениях."]),
     field("geometry.heated-volume", "Отапливаемый объём", heatedVolumeM3 || null, "м³", heatedVolumeM3 > 0 ? "calculated" : "missing"),
     field("geometry.facade-area", "Площадь фасадов", facadeAreaM2 || null, "м²", facadeAreaM2 > 0 ? "calculated" : "missing"),
-    field("geometry.window-area", "Площадь окон", windowAreaM2 || null, "м²", geometryModel.windows.length ? "model" : "missing"),
-    field("geometry.door-area", "Площадь дверей", doorAreaM2 || null, "м²", geometryModel.doors.length ? "model" : "missing"),
+    field("geometry.window-area", "Площадь окон", hasWindowArea ? windowAreaM2 : null, "м²", hasWindowArea ? "model" : "missing"),
+    field("geometry.door-area", "Площадь дверей", hasDoorArea ? doorAreaM2 : null, "м²", hasDoorArea ? "model" : "missing"),
     field("geometry.roof-area", "Площадь кровли", roofAreaTotalM2 || null, "м²", (geometryModel.roofs ?? []).length ? "model" : "missing"),
     field("geometry.floor-slab-area", "Площадь пола/перекрытий", floorAreaTotalM2 || null, "м²", (geometryModel.floorSlabs ?? []).length ? "model" : "missing"),
     field("geometry.envelope-area", "Площадь наружной оболочки A_env", envelopeAreaM2 || null, "м²", envelopeAreaM2 > 0 ? "calculated" : "missing"),
@@ -778,16 +837,19 @@ function resolveOpeningUFields(
 function resolveOpeningOpticalFields(
   model: BuildingModel,
   scenarioConfig: ScenarioConfig | null | undefined,
-  scenario: ScenarioConfig
+  scenario: ScenarioConfig,
+  solarTime?: SolarTimeInput | null
 ): {
   windowG: number | null;
   windowGSource: SourceDataOrigin;
   shadingFactor: number | null;
   shadingFactorSource: SourceDataOrigin;
+  shadingNotes: string[];
 } {
   const hasWindows = model.windows.length > 0;
   const modelWindowG = resolveModelWindowGValue(model);
-  const modelShading = resolveModelShadingFactor(model);
+  const modelShadingResult = resolveModelShadingFactor(model, { solarTime });
+  const modelShading = modelShadingResult.value;
   const windowG =
     modelWindowG ??
     (scenarioConfig?.materials?.windowGValue != null
@@ -806,9 +868,33 @@ function resolveOpeningOpticalFields(
         ? TYPICAL_WINDOW_SHADING_FACTOR
         : null);
   const shadingFactorSource: SourceDataOrigin =
-    modelShading != null ? "model" : scenarioConfig?.materials?.shadingFactor != null ? "user" : shadingFactor != null ? "model" : "missing";
+    modelShading != null
+      ? scenarioConfig?.materials?.shadingFactor != null
+        ? "user"
+        : modelShadingResult.usesSolarTime
+          ? "calculated"
+          : "model"
+      : scenarioConfig?.materials?.shadingFactor != null
+        ? "user"
+        : shadingFactor != null
+          ? modelShadingResult.usesSolarTime
+            ? "calculated"
+            : "model"
+          : "missing";
+  const shadingNotes =
+    shadingFactorSource === "model" && scenarioConfig?.materials?.shadingFactor == null
+      ? modelShadingResult.notes.length
+        ? modelShadingResult.notes
+        : [shadingEnvelopeSourceNote()]
+      : [];
 
-  return { windowG, windowGSource, shadingFactor, shadingFactorSource };
+  return {
+    windowG,
+    windowGSource,
+    shadingFactor,
+    shadingFactorSource,
+    shadingNotes,
+  };
 }
 
 function resolveConstructionRows(
@@ -816,14 +902,24 @@ function resolveConstructionRows(
   scenarioConfig: ScenarioConfig | null | undefined,
   scenario: ScenarioConfig,
   designDeltaT: number | null,
-  thermalResult: ThermalSimulationResult | null | undefined
+  thermalResult: ThermalSimulationResult | null | undefined,
+  solarTime?: SolarTimeInput | null
 ): { rows: SourceDataConstructionRow[]; warnings: string[]; computedFields: SourceDataField[]; requirements: SourceDataRequirement[] } {
   const warnings: string[] = [];
   const rows: SourceDataConstructionRow[] = [];
   const openingU = resolveOpeningUFields(model, scenarioConfig, scenario);
-  const openingOptical = resolveOpeningOpticalFields(model, scenarioConfig, scenario);
-  const bridgeMode = scenario.materials?.bridgeAccountingMode ?? "disabled";
-  const homogeneityCoefficient = scenario.materials?.homogeneityCoefficient ?? null;
+  const openingOptical = resolveOpeningOpticalFields(model, scenarioConfig, scenario, solarTime);
+  const userHomogeneityCoefficient = scenarioConfig?.materials?.homogeneityCoefficient ?? null;
+  const modelHomogeneity = resolveModelHomogeneityCoefficient(model);
+  const homogeneityCoefficient = userHomogeneityCoefficient ?? modelHomogeneity.value;
+  const resolvedBridge = resolveBridgeAccountingMode({
+    userMode: scenarioConfig?.materials?.bridgeAccountingMode ?? scenario.materials?.bridgeAccountingMode,
+    userHomogeneityCoefficient,
+    model,
+  });
+  const bridgeMode = resolvedBridge.mode;
+  const bridgeModeOrigin = resolvedBridge.origin;
+  const bridgeAggregates = aggregateEnvelopeBridgeConductances(model);
   const { linear, point } = collectBridgeFragments(model);
   const explicitBridgeMode = bridgeMode === "explicitPsiChi";
   const homogeneityMode = bridgeMode === "homogeneityCoefficient";
@@ -854,15 +950,10 @@ function resolveConstructionRows(
     })
     .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
 
-  if (homogeneityMode && (linear.length > 0 || point.length > 0)) {
-    warnings.push("Одновременно заданы explicit ψ/χ и режим коэффициента однородности. Для одной конструкции эти способы не должны применяться вместе.");
+  if (explicitBridgeMode && userHomogeneityCoefficient != null && resolvedBridge.userMode === "explicitPsiChi") {
+    warnings.push("При explicit ψ/χ ручной коэффициент r не ухудшает R_red той же конструкции.");
   }
-  if (explicitBridgeMode && homogeneityCoefficient != null) {
-    warnings.push("При explicit ψ/χ коэффициент однородности не должен дополнительно ухудшать сопротивление той же конструкции.");
-  }
-  if (!explicitBridgeMode && (linear.length > 0 || point.length > 0)) {
-    warnings.push("Линейные и точечные мостики холода не суммируются, пока не выбран режим explicit ψ/χ.");
-  }
+  warnings.push(...resolvedBridge.notes);
 
   materialElements.forEach((element) => {
     const props = element.layers?.length
@@ -882,12 +973,35 @@ function resolveConstructionRows(
     const overrideU = presetRuntimeU ?? scenarioOverrideU;
     const derivedU = overrideU != null && overrideU > 0 ? overrideU : props?.uTotal_W_m2K ?? null;
     const r0 = overrideU != null && overrideU > 0 ? 1 / overrideU : props?.rTotal_m2K_W ?? null;
+    const fragmentFromModel = (model.thermalProtection?.envelope ?? []).find((entry) => entry.id === element.id);
+    const homogeneityForElement =
+      userHomogeneityCoefficient ??
+      (fragmentFromModel ? resolveFragmentHomogeneityCoefficient(fragmentFromModel, r0) : null) ??
+      modelHomogeneity.value ??
+      1;
+    const homogeneitySource: SourceDataOrigin =
+      userHomogeneityCoefficient != null
+        ? "user"
+        : fragmentFromModel &&
+            (fragmentFromModel.heterogeneity?.linear?.length ||
+              fragmentFromModel.heterogeneity?.point?.length ||
+              fragmentFromModel.heterogeneity?.planar?.length)
+          ? "model"
+          : modelHomogeneity.value != null
+            ? "model"
+            : "fallback";
     const rReduced =
-      homogeneityMode && r0 != null
-        ? reducedResistanceByHomogeneity(r0, homogeneityCoefficient ?? 1)
-        : r0;
-    if (homogeneityMode && homogeneityCoefficient == null) {
-      localWarnings.push("Коэффициент однородности не задан, принято r = 1 без учёта мостиков холода.");
+      homogeneityMode && r0 != null ? reducedResistanceByHomogeneity(r0, homogeneityForElement) : r0;
+    const transmissionU =
+      homogeneityMode && isOpaqueConstructionKind(element.kind) && rReduced != null && rReduced > 0
+        ? 1 / rReduced
+        : derivedU;
+    if (homogeneityMode && userHomogeneityCoefficient == null && homogeneityForElement === 1 && !modelHomogeneity.hasBridgeData) {
+      localWarnings.push("Коэффициент однородности не задан в сценарии и в модели нет ψ/χ — принято r = 1.");
+    } else if (homogeneityMode && userHomogeneityCoefficient == null && homogeneitySource === "model") {
+      localWarnings.push(
+        `r = ${homogeneityForElement.toFixed(3)} рассчитан из модели (ψ/χ или зоны неоднородности).`
+      );
     }
     if (element.metadata?.sourceType === "preset" && element.metadata.sourceNote) {
       localWarnings.push(`Типовой пресет: ${element.metadata.sourceNote}`);
@@ -990,16 +1104,22 @@ function resolveConstructionRows(
         "R_red",
         rReduced,
         "м²·К/Вт",
-        rReduced != null ? (homogeneityMode ? (homogeneityCoefficient == null ? "fallback" : "calculated") : r0 === rReduced ? "calculated" : "calculated") : "missing",
+        rReduced != null
+          ? homogeneityMode
+            ? homogeneitySource === "fallback"
+              ? "fallback"
+              : "calculated"
+            : "calculated"
+          : "missing",
         localWarnings,
         homogeneityMode ? ["Приведённое сопротивление учитывает неоднородность конструкции."] : []
       ),
       uValue_W_m2K: field(
         `${element.id}:u`,
         "U",
-        derivedU,
+        transmissionU,
         "Вт/(м²·К)",
-        derivedU != null
+        transmissionU != null
           ? presetRuntimeU != null
             ? "model"
             : overrideU != null && overrideU > 0
@@ -1013,7 +1133,14 @@ function resolveConstructionRows(
             ? ["Используется U, заданный для окна/двери в исходных данных."]
             : []
       ),
-      bridgeMode: field(`${element.id}:bridge-mode`, "Учёт мостиков холода", bridgeMode, null, scenarioConfig?.materials?.bridgeAccountingMode ? "user" : "fallback"),
+      bridgeMode: field(
+        `${element.id}:bridge-mode`,
+        "Учёт мостиков холода",
+        bridgeMode,
+        null,
+        bridgeModeOrigin === "user" ? "user" : "calculated",
+        resolvedBridge.notes
+      ),
       layers: rowLayers,
       warnings: localWarnings,
     });
@@ -1021,18 +1148,34 @@ function resolveConstructionRows(
 
   const validTransmissionElements = rows
     .filter((row) => typeof row.areaM2.value === "number" && typeof row.uValue_W_m2K.value === "number")
-    .map((row) => ({
-      id: row.id,
-      label: row.label,
-      areaM2: row.areaM2.value as number,
-      U_W_m2K: row.uValue_W_m2K.value as number,
-    }));
+    .map((row) => {
+      const areaM2 = row.areaM2.value as number;
+      const catalogU = row.uValue_W_m2K.value as number;
+      const r0 = row.resistanceR0_m2K_W.value;
+      const rRed = row.reducedResistance_m2K_W.value;
+      const U_W_m2K =
+        homogeneityMode &&
+        typeof r0 === "number" &&
+        typeof rRed === "number" &&
+        r0 > 0 &&
+        rRed > 0 &&
+        isOpaqueConstructionKind(row.kind)
+          ? 1 / rRed
+          : catalogU;
+      return {
+        id: row.id,
+        label: row.label,
+        areaM2,
+        U_W_m2K,
+      };
+    });
   const H_tr = validTransmissionElements.length
     ? heatLossCoefficientTransmission(validTransmissionElements)
     : null;
-  // Для 2D-модели без явных ψ/χ показываем нулевой вклад мостиков, а не "нет данных".
-  const H_psi = explicitBridgeMode ? (linear.length ? thermalBridgeLinearConductance(linear) : 0) : 0;
-  const H_chi = explicitBridgeMode ? (point.length ? thermalBridgePointConductance(point) : 0) : 0;
+  const modelH_psi = bridgeAggregates.H_psi;
+  const modelH_chi = bridgeAggregates.H_chi;
+  const H_psi = explicitBridgeMode ? (modelH_psi ?? 0) : 0;
+  const H_chi = explicitBridgeMode ? (modelH_chi ?? 0) : 0;
   const bridgeLossW =
     H_psi === 0 && H_chi === 0
       ? 0
@@ -1066,33 +1209,81 @@ function resolveConstructionRows(
     requirement(
       "materials.bridge-mode",
       "Способ учёта неоднородностей",
-      Boolean(scenarioConfig?.materials?.bridgeAccountingMode),
-      scenarioConfig?.materials?.bridgeAccountingMode ? "user" : "fallback",
-      scenarioConfig?.materials?.bridgeAccountingMode ? [] : ["Режим учёта мостиков холода использует значение по умолчанию."]
+      bridgeMode !== "disabled" || bridgeModeOrigin === "user",
+      bridgeModeOrigin === "user" ? "user" : bridgeMode === "disabled" ? "fallback" : "calculated",
+      bridgeModeOrigin === "user" ? [] : resolvedBridge.notes
     ),
     requirement(
       "materials.homogeneity-or-bridges",
       "Данные по неоднородностям",
       bridgeMode === "disabled" ||
-        (bridgeMode === "homogeneityCoefficient" && (scenarioConfig?.materials?.homogeneityCoefficient ?? null) != null) ||
+        (bridgeMode === "homogeneityCoefficient" &&
+          ((scenarioConfig?.materials?.homogeneityCoefficient ?? null) != null || modelHomogeneity.hasBridgeData)) ||
         (bridgeMode === "explicitPsiChi" && (linear.length > 0 || point.length > 0)),
-      bridgeMode === "explicitPsiChi" ? (linear.length > 0 || point.length > 0 ? "sp50" : "missing") : bridgeMode === "homogeneityCoefficient" ? ((scenarioConfig?.materials?.homogeneityCoefficient ?? null) != null ? "user" : "missing") : "calculated",
+      bridgeMode === "explicitPsiChi"
+        ? linear.length > 0 || point.length > 0
+          ? "sp50"
+          : "missing"
+        : bridgeMode === "homogeneityCoefficient"
+          ? (scenarioConfig?.materials?.homogeneityCoefficient ?? null) != null
+            ? "user"
+            : modelHomogeneity.hasBridgeData
+              ? "model"
+              : "calculated"
+          : "calculated",
       warnings
     ),
   ];
 
   const computedFields: SourceDataField[] = [
-    field("materials.bridge-mode", "Режим учёта мостиков холода", bridgeMode, null, scenarioConfig?.materials?.bridgeAccountingMode ? "user" : "fallback", warnings),
+    field(
+      "materials.bridge-mode",
+      "Режим учёта мостиков холода",
+      bridgeMode,
+      null,
+      bridgeModeOrigin === "user" ? "user" : "calculated",
+      warnings,
+      resolvedBridge.notes
+    ),
+    field(
+      "materials.homogeneity-coefficient",
+      "Коэффициент однородности r",
+      homogeneityCoefficient,
+      null,
+      userHomogeneityCoefficient != null ? "user" : modelHomogeneity.value != null ? "model" : "missing",
+      [],
+      modelHomogeneity.notes
+    ),
     field("materials.window-u", "U окна", openingU.windowU, "Вт/(м²·К)", openingU.windowUSource, openingU.windowUNotes),
     field("materials.door-u", "U двери", openingU.doorU, "Вт/(м²·К)", openingU.doorUSource, openingU.doorUNotes),
     field("materials.window-g", "g-value окна", openingOptical.windowG, null, openingOptical.windowGSource),
-    field("materials.shading-factor", "Shading factor", openingOptical.shadingFactor, null, openingOptical.shadingFactorSource),
+    field(
+      "materials.shading-factor",
+      "Shading factor",
+      openingOptical.shadingFactor,
+      null,
+      openingOptical.shadingFactorSource,
+      [],
+      openingOptical.shadingNotes
+    ),
     field("materials.u-eq", "U_eq", performance?.equivalentUValue.value ?? U_eq, "Вт/(м²·К)", performance?.equivalentUValue.value != null || U_eq != null ? "calculated" : "missing"),
     field("materials.h-tr", "H_tr", performance?.heatLossBreakdown.H_tr.value ?? H_tr, "Вт/К", performance?.heatLossBreakdown.H_tr.value != null || H_tr != null ? "calculated" : "missing"),
     field("materials.h-total", "H_total", performance?.heatLossBreakdown.H_total.value ?? H_total, "Вт/К", performance?.heatLossBreakdown.H_total.value != null || H_total != null ? "calculated" : "missing"),
     field("materials.q-tr", "Q_tr", Q_tr, "Вт", Q_tr != null ? "calculated" : "missing"),
-    field("materials.h-psi", "H_psi", H_psi, "Вт/К", explicitBridgeMode ? (linear.length ? "sp50" : "calculated") : "calculated"),
-    field("materials.h-chi", "H_chi", H_chi, "Вт/К", explicitBridgeMode ? (point.length ? "sp50" : "calculated") : "calculated"),
+    field(
+      "materials.h-psi",
+      "H_psi",
+      modelH_psi,
+      "Вт/К",
+      modelH_psi != null ? (bridgeAggregates.hasLinear ? "sp50" : "calculated") : "missing"
+    ),
+    field(
+      "materials.h-chi",
+      "H_chi",
+      modelH_chi,
+      "Вт/К",
+      modelH_chi != null ? (bridgeAggregates.hasPoint ? "sp50" : "calculated") : "missing"
+    ),
     field("materials.q-bridges", "Q_thermal_bridges", bridgeLossW, "Вт", bridgeLossW != null ? "calculated" : "missing"),
     field("materials.bridge-share", "Доля мостиков холода", bridgeSharePercent, "%", bridgeSharePercent != null ? "calculated" : "missing"),
   ];
@@ -1367,10 +1558,23 @@ function buildHumiditySection(
     indoor.value != null && humidity.value != null
       ? dewPointMagnusC(indoor.value, humidity.value / 100)
       : null;
-  const mrtC =
-    scenarioConfig?.comfort?.measuredMrtC != null ? scenarioConfig.comfort.measuredMrtC : null;
+  const measuredMrtC =
+    scenarioConfig?.comfort?.measuredMrtC != null && Number.isFinite(scenarioConfig.comfort.measuredMrtC)
+      ? scenarioConfig.comfort.measuredMrtC
+      : null;
+  const mrtFromRun = estimateBuildingMeanMrtC(thermalResult);
+  const mrtFromEnvelope =
+    indoor.value != null && outdoorDesignC != null
+      ? estimateMrtFromEnvelope(model, indoor.value, outdoorDesignC)
+      : null;
+  const estimatedMrtC = mrtFromRun ?? mrtFromEnvelope;
+  const mrtC = measuredMrtC ?? estimatedMrtC;
+  const mrtSource: SourceDataOrigin =
+    measuredMrtC != null ? "user" : mrtFromRun != null ? "result" : mrtFromEnvelope != null ? "calculated" : "missing";
   const operativeTemperatureC =
     indoor.value != null && mrtC != null ? (indoor.value + mrtC) / 2 : null;
+  const comfortMin = resolveComfortMinC(scenarioConfig, scenario);
+  const comfortMax = resolveComfortMaxC(scenarioConfig, scenario);
 
   const surfaceFragment = model.thermalProtection?.envelope?.find((fragment) => fragment.layers?.length);
   const surfaceProps =
@@ -1394,7 +1598,11 @@ function buildHumiditySection(
   ];
   const warnings = [...humidity.warnings];
   if (mrtC == null) {
-    warnings.push("MRT не задана. Оперативная температура T_op не рассчитывается.");
+    warnings.push("MRT не задана. Назначьте слои ограждения, запустите расчёт или укажите измеренную MRT.");
+  } else if (measuredMrtC == null && mrtFromRun != null) {
+    warnings.push("MRT оценена по результатам расчёта (среднее по зонам).");
+  } else if (measuredMrtC == null && mrtFromEnvelope != null) {
+    warnings.push("MRT оценена по τ_si ограждений при расчётном ΔT (до прогона).");
   }
   return {
     id: "humidity",
@@ -1403,13 +1611,37 @@ function buildHumiditySection(
     requirements,
     warnings,
     computedFields: [
-      field("humidity.rh", "Относительная влажность", humidity.value, "%", humidity.value != null ? humidity.source : "missing", humidity.warnings),
       field("humidity.dew-point", "Точка росы", dewPointC, "°C", dewPointC != null ? "calculated" : "missing", humidity.warnings),
       field("humidity.surface-temp", "Минимальная температура внутренней поверхности", tauSiC, "°C", tauSiC != null ? (scenarioConfig?.comfort?.measuredSurfaceTemperatureC != null ? "user" : minSurfaceFromDiagnostics != null ? "result" : "calculated") : "missing"),
       field("humidity.f-rsi", "f_Rsi", tauSiC != null && indoor.value != null && outdoorDesignC != null && Math.abs(indoor.value - outdoorDesignC) > 1e-6 ? (tauSiC - outdoorDesignC) / (indoor.value - outdoorDesignC) : null, null, tauSiC != null ? "calculated" : "missing"),
       field("humidity.condensation-margin", "Запас до точки росы", condensationMarginC, "°C", condensationMarginC != null ? "calculated" : "missing"),
       field("humidity.condensation-status", "Статус поверхности", condensationStatus, null, condensationStatus != null ? "calculated" : "missing"),
-      field("humidity.mrt", "Measured MRT", mrtC, "°C", mrtC != null ? "user" : "missing", mrtC == null ? ["MRT не задана."] : []),
+      field(
+        "humidity.comfort-min",
+        "Минимально допустимая температура",
+        comfortMin.value,
+        "°C",
+        comfortBoundsOrigin(comfortMin.source)
+      ),
+      field(
+        "humidity.comfort-max",
+        "Максимально допустимая температура",
+        comfortMax.value,
+        "°C",
+        comfortBoundsOrigin(comfortMax.source)
+      ),
+      field(
+        "humidity.mrt",
+        "Средняя радиационная температура",
+        mrtC,
+        "°C",
+        mrtSource,
+        measuredMrtC == null && mrtFromEnvelope != null && mrtFromRun == null
+          ? ["Оценка по ограждению до прогона."]
+          : measuredMrtC == null && mrtFromRun != null
+            ? ["Оценка по зонам после прогона."]
+            : []
+      ),
       field("humidity.t-op", "T_op = (T_air + T_mrt) / 2", operativeTemperatureC, "°C", operativeTemperatureC != null ? "calculated" : "missing", mrtC == null ? ["Без MRT оперативная температура не рассчитывается."] : []),
     ],
   };
@@ -1436,14 +1668,29 @@ function fluidProps(
   };
 }
 
+function engineeringInputOrigin(source: EngineeringInputSource): SourceDataOrigin {
+  switch (source) {
+    case "user":
+      return "user";
+    case "model":
+      return "model";
+    case "result":
+      return "result";
+    case "calculated":
+      return "calculated";
+    default:
+      return "fallback";
+  }
+}
+
 function buildEngineeringSection(
   model: BuildingModel,
   scenarioConfig: ScenarioConfig | null | undefined,
   scenario: ScenarioConfig,
   thermalResult: ThermalSimulationResult | null | undefined
 ): SourceDataSectionReport {
-  const fluid = fluidProps(scenario.engineeringSystems?.fluidType);
-  const totalPipeLengthM = model.pipes.reduce((sum, pipe) => sum + polylineLengthM(pipe.path), 0);
+  const modelSummary = summarizeModelEngineering(model);
+  const totalPipeLengthM = modelSummary.totalPipeLengthM;
   const diameters = Array.from(
     new Set(
       model.pipes
@@ -1452,17 +1699,33 @@ function buildEngineeringSection(
         .sort((left, right) => left - right)
     )
   );
-  const heatCarrierFromModel = model.pipes.find((pipe) => typeof pipe.heatCarrier === "string")?.heatCarrier ?? null;
   const insulatedPipeCount = model.pipes.filter((pipe) => (pipe.insulationThickness_mm ?? 0) > 0).length;
+  const requiredPowerW = thermalResult?.summary.peakLoadKW != null ? thermalResult.summary.peakLoadKW * 1000 : null;
+  const provisionalDeltaT =
+    scenario.engineeringSystems?.supplyTemperatureC != null &&
+    scenario.engineeringSystems?.returnTemperatureC != null
+      ? scenario.engineeringSystems.supplyTemperatureC - scenario.engineeringSystems.returnTemperatureC
+      : 20;
+  const provisionalRequiredMassFlowKgS =
+    requiredPowerW != null && provisionalDeltaT > 0
+      ? calculateRequiredHydronicMassFlow(requiredPowerW, provisionalDeltaT, fluidProps("water").cp)
+      : null;
+  const resolved = resolveScenarioEngineeringInputs(
+    scenarioConfig,
+    scenario,
+    model,
+    thermalResult,
+    provisionalRequiredMassFlowKgS
+  );
+  const fluid = fluidProps(resolved.fluidType);
   const hydronic = calculateHydronicHeatPower({
-    massFlowKgS: scenario.engineeringSystems?.massFlowKgS ?? null,
-    supplyTemperatureC: scenario.engineeringSystems?.supplyTemperatureC ?? null,
-    returnTemperatureC: scenario.engineeringSystems?.returnTemperatureC ?? null,
+    massFlowKgS: resolved.massFlowKgS.value,
+    supplyTemperatureC: resolved.supplyTemperatureC.value,
+    returnTemperatureC: resolved.returnTemperatureC.value,
     fluidDensityKgM3: fluid.density,
     fluidHeatCapacityJkgK: fluid.cp,
-    maxPowerW: scenario.engineeringSystems?.installedCapacityW ?? null,
+    maxPowerW: resolved.installedCapacityW.value,
   });
-  const requiredPowerW = thermalResult?.summary.peakLoadKW != null ? thermalResult.summary.peakLoadKW * 1000 : null;
   const requiredMassFlowKgS =
     requiredPowerW != null && hydronic.deltaT != null && hydronic.deltaT > 0
       ? calculateRequiredHydronicMassFlow(requiredPowerW, hydronic.deltaT, fluid.cp)
@@ -1471,6 +1734,8 @@ function buildEngineeringSection(
     requiredPowerW != null && hydronic.deltaT != null && hydronic.deltaT > 0
       ? calculateRequiredHydronicVolumeFlowM3H(requiredPowerW, hydronic.deltaT, fluid.density, fluid.cp)
       : null;
+  const installedCapacityW = resolved.installedCapacityW.value;
+  const capacityLimited = scenario.engineeringSystems?.heatingMode === "capacityLimited";
 
   const requirements: SourceDataRequirement[] = [
     requirement("engineering.heating-enabled", "Наличие системы отопления", true, scenarioConfig?.engineeringSystems?.heatingEnabled != null ? "user" : "fallback"),
@@ -1478,22 +1743,43 @@ function buildEngineeringSection(
     requirement(
       "engineering.capacity",
       "Установленная мощность",
-      scenario.engineeringSystems?.heatingMode !== "capacityLimited" || (scenario.engineeringSystems?.installedCapacityW ?? null) != null,
-      scenario.engineeringSystems?.heatingMode !== "capacityLimited"
+      !capacityLimited || installedCapacityW > 0,
+      !capacityLimited
         ? "calculated"
-        : scenarioConfig?.engineeringSystems?.installedCapacityW != null
+        : resolved.installedCapacityW.explicit
           ? "user"
-          : "missing",
-      scenario.engineeringSystems?.heatingMode === "capacityLimited" && (scenario.engineeringSystems?.installedCapacityW ?? null) == null
-        ? ["Для режима capacityLimited требуется установленная мощность."] : []
+          : resolved.installedCapacityW.source === "model" || resolved.installedCapacityW.source === "result"
+            ? engineeringInputOrigin(resolved.installedCapacityW.source)
+            : "missing",
+      capacityLimited && installedCapacityW <= 0
+        ? ["Для режима capacityLimited требуется установленная мощность (модель, сценарий или пик нагрузки)."]
+        : []
     ),
   ];
+
+  const autoFillNotes: string[] = [];
+  if (!resolved.supplyTemperatureC.explicit && resolved.supplyTemperatureC.source !== "fallback") {
+    autoFillNotes.push("Температура подачи подставлена из оборудования или труб модели.");
+  }
+  if (!resolved.returnTemperatureC.explicit && resolved.returnTemperatureC.source === "calculated") {
+    autoFillNotes.push("Температура обратки рассчитана как T_подачи − 20 K.");
+  }
+  if (!resolved.massFlowKgS.explicit && resolved.massFlowKgS.source !== "fallback") {
+    autoFillNotes.push("Массовый расход подставлен из оборудования или требуемого расхода по пику нагрузки.");
+  }
+  if (!resolved.installedCapacityW.explicit && resolved.installedCapacityW.source !== "fallback") {
+    autoFillNotes.push("Установленная мощность подставлена из оборудования модели или пика нагрузки.");
+  }
 
   const warnings = [
     ...(scenario.engineeringSystems?.heatingMode === "ideal"
       ? ["Режим ideal остаётся режимом solver по умолчанию: требуемая мощность не ограничивается."] : []),
+    ...autoFillNotes,
     ...fluid.warnings,
     ...hydronic.warnings,
+    ...(requiredPowerW != null && installedCapacityW > 0 && requiredPowerW > installedCapacityW
+      ? ["Пиковая нагрузка превышает установленную мощность — рассмотрите режим capacityLimited или увеличьте мощность."]
+      : []),
   ];
 
   return {
@@ -1505,23 +1791,23 @@ function buildEngineeringSection(
     computedFields: [
       field("engineering.heating-enabled", "Система отопления", scenario.engineeringSystems?.heatingEnabled ?? true, null, scenarioConfig?.engineeringSystems?.heatingEnabled != null ? "user" : "fallback"),
       field("engineering.heating-mode", "Режим отопления", scenario.engineeringSystems?.heatingMode ?? "ideal", null, scenarioConfig?.engineeringSystems?.heatingMode ? "user" : "fallback", scenario.engineeringSystems?.heatingMode === "ideal" ? ["ideal = требуемая мощность без ограничения."] : ["capacityLimited = расчёт с ограниченной доступной мощностью."]),
-      field("engineering.supply-temp", "Температура подачи", scenario.engineeringSystems?.supplyTemperatureC ?? null, "°C", scenarioConfig?.engineeringSystems?.supplyTemperatureC != null ? "user" : "missing"),
-      field("engineering.return-temp", "Температура обратки", scenario.engineeringSystems?.returnTemperatureC ?? null, "°C", scenarioConfig?.engineeringSystems?.returnTemperatureC != null ? "user" : "missing"),
+      field("engineering.supply-temp", "Температура подачи", resolved.supplyTemperatureC.value, "°C", engineeringInputOrigin(resolved.supplyTemperatureC.source)),
+      field("engineering.return-temp", "Температура обратки", resolved.returnTemperatureC.value, "°C", engineeringInputOrigin(resolved.returnTemperatureC.source)),
       field(
         "engineering.heat-carrier",
         "Теплоноситель",
-        scenario.engineeringSystems?.fluidType ?? heatCarrierFromModel,
+        resolved.fluidType,
         null,
-        scenarioConfig?.engineeringSystems?.fluidType != null ? "user" : heatCarrierFromModel ? "model" : "missing"
+        engineeringInputOrigin(resolved.fluidTypeSource)
       ),
       field("engineering.delta-t", "ΔT теплоносителя", hydronic.deltaT, "К", hydronic.deltaT != null ? "calculated" : "missing", hydronic.warnings),
-      field("engineering.mass-flow", "Заданный массовый расход", hydronic.massFlowKgS, "кг/с", hydronic.massFlowKgS != null ? (scenarioConfig?.engineeringSystems?.massFlowKgS != null ? "user" : "calculated") : "missing", hydronic.warnings),
+      field("engineering.mass-flow", "Заданный массовый расход", hydronic.massFlowKgS, "кг/с", hydronic.massFlowKgS != null ? engineeringInputOrigin(resolved.massFlowKgS.source) : "missing", hydronic.warnings),
       field("engineering.hydronic-capacity", "Q_hyd", hydronic.availablePowerW, "Вт", hydronic.availablePowerW != null ? "calculated" : "missing", ["Гидравлическая мощность рассчитана справочно и не ограничивает RC-solver без отдельного режима.", ...hydronic.warnings]),
       field("engineering.required-mass-flow", "Требуемый расход теплоносителя", requiredMassFlowKgS, "кг/с", requiredMassFlowKgS != null ? "calculated" : "missing"),
       field("engineering.required-volume-flow", "Требуемый объёмный расход", requiredVolumeFlowM3H, "м³/ч", requiredVolumeFlowM3H != null ? "calculated" : "missing"),
-      field("engineering.installed-capacity", "Установленная мощность", scenario.engineeringSystems?.installedCapacityW ?? null, "Вт", scenarioConfig?.engineeringSystems?.installedCapacityW != null ? "user" : "missing"),
+      field("engineering.installed-capacity", "Установленная мощность", installedCapacityW || null, "Вт", engineeringInputOrigin(resolved.installedCapacityW.source)),
       field("engineering.pipe-count", "Количество трубных участков", model.pipes.length || null, null, model.pipes.length ? "model" : "missing"),
-      field("engineering.pipe-total-length", "Суммарная длина труб", totalPipeLengthM || null, "м", totalPipeLengthM > 0 ? "calculated" : "missing"),
+      field("engineering.pipe-total-length", "Суммарная длина труб", totalPipeLengthM || null, "м", totalPipeLengthM > 0 ? "model" : "missing"),
       field(
         "engineering.pipe-diameter",
         "Диаметры труб",
@@ -1591,21 +1877,18 @@ function buildEconomySection(
   const periodEnergyKWh = thermalResult?.summary.totalEnergyKWh ?? null;
   const annualizedEnergyKWh =
     periodEnergyKWh != null && periodDays > 0 ? (periodEnergyKWh / periodDays) * 365 : null;
-  const tariff = scenario.economy?.tariffRubPerKWh ?? null;
+  const resolvedTariff = resolveScenarioEnergyTariff(scenario, model);
+  const tariff = resolvedTariff.tariffRubPerKWh;
   const annualCostRub =
-    tariff != null && annualizedEnergyKWh != null ? tariff * annualizedEnergyKWh : null;
+    annualizedEnergyKWh != null ? tariff * annualizedEnergyKWh : null;
   const requirements: SourceDataRequirement[] = [
-    requirement("economy.tariff", "Тариф", tariff != null, tariff != null ? "user" : "missing"),
+    requirement("economy.tariff", "Тариф", true, scenario.climateCityId ? "sp131" : "fallback"),
     requirement("economy.capex", "CAPEX мероприятий", (scenario.economy?.capexRub ?? null) != null, (scenario.economy?.capexRub ?? null) != null ? "user" : "missing", [], false),
     requirement("economy.discount", "Ставка дисконтирования", true, scenarioConfig?.economy?.discountRatePercent != null ? "user" : "fallback"),
   ];
   const warnings: string[] = [];
-  if (annualCostRub != null) {
-    warnings.push("Годовая стоимость оценена как derived-only из текущего RC-сценария и заданного тарифа. Это не заменяет отдельный экономический контур.");
-  }
-  if (isCanonicalDemoProjectModel(model) && (tariff != null || (scenario.economy?.capexRub ?? null) != null)) {
-    warnings.push("Экономические параметры заданы как demo assumptions и не являются нормативными исходными данными.");
-  }
+  const tariffUnit =
+    resolvedTariff.heatingEnergySource === "electricity" ? "руб/кВт·ч" : "руб/кВт·ч (из руб/Гкал)";
   return {
     id: "economy",
     label: SECTION_LABELS.economy,
@@ -1613,17 +1896,27 @@ function buildEconomySection(
     requirements,
     warnings,
     computedFields: [
-      field("economy.tariff", "Тариф", tariff, "руб/кВт·ч", tariff != null ? "user" : "missing"),
+      field(
+        "economy.heating-source",
+        "Способ отопления",
+        resolvedTariff.heatingEnergySourceLabel,
+        null,
+        scenario.ecology?.energySource ? "scenario" : model.pipes.length > 0 ? "model" : "fallback"
+      ),
+      field(
+        "economy.tariff",
+        "Тариф",
+        tariff,
+        tariffUnit,
+        scenario.climateCityId ? "sp131" : "fallback"
+      ),
       field("economy.capex", "CAPEX", scenario.economy?.capexRub ?? null, "руб", scenarioConfig?.economy?.capexRub != null ? "user" : "missing"),
       field("economy.analysis-period", "Период анализа", scenario.economy?.analysisPeriodYears ?? null, "лет", scenarioConfig?.economy?.analysisPeriodYears != null ? "user" : "fallback"),
       field("economy.discount", "Ставка дисконтирования", scenario.economy?.discountRatePercent ?? null, "%", scenarioConfig?.economy?.discountRatePercent != null ? "user" : "fallback"),
       field("economy.tariff-growth", "Рост тарифа", scenario.economy?.annualTariffGrowthPercent ?? null, "%", scenarioConfig?.economy?.annualTariffGrowthPercent != null ? "user" : "fallback"),
       field("economy.maintenance", "Стоимость обслуживания", scenario.economy?.annualMaintenanceCostRub ?? null, "руб/год", scenarioConfig?.economy?.annualMaintenanceCostRub != null ? "user" : "missing"),
-      field("economy.annualized-energy", "Annualized energy", annualizedEnergyKWh, "кВт·ч/год", annualizedEnergyKWh != null ? "calculated" : "missing", warnings),
-      field("economy.annual-cost", "Annual cost", annualCostRub, "руб/год", annualCostRub != null ? "calculated" : "missing", warnings),
-      field("economy.savings", "Savings", null, "руб/год", "missing", ["Для savings и payback нужен контур сравнения base/variant."]),
-      field("economy.payback", "Simple payback", null, "лет", "missing", ["Simple payback не рассчитывается без annualSaving."]),
-      field("economy.npv", "NPV", null, "руб", "missing", ["NPV не рассчитывается без сценария сравнения и денежного потока."]),
+      field("economy.annualized-energy", "Annualized energy", annualizedEnergyKWh, "кВт·ч/год", annualizedEnergyKWh != null ? "calculated" : "missing"),
+      field("economy.annual-cost", "Annual cost", annualCostRub, "руб/год", annualCostRub != null ? "calculated" : "missing"),
     ],
   };
 }
@@ -1785,26 +2078,40 @@ function hasText(value: string | null | undefined): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
 
+/** Синхронизирует envelope, ψ/χ и климат для отчёта «Данные для расчёта» (без записи в build-store). */
+export function prepareModelForSourceData(
+  model: BuildingModel,
+  scenarioConfig?: ScenarioConfig | null
+): BuildingModel {
+  let next = syncAndEnrichThermalProtection(model);
+  next = ensureModelClimate(next, scenarioConfig);
+  return next;
+}
+
 export function buildSourceDataWorkspaceReport(
   input: BuildSourceDataWorkspaceReportInput
 ): SourceDataWorkspaceReport {
+  const model = applyDefaultOpeningEnvelopeToModel(
+    prepareModelForSourceData(input.model, input.scenarioConfig)
+  );
   const scenario = resolveScenarioConfig(input.scenarioConfig ?? null);
-  const geometry = buildGeometrySection(input.model);
-  const climate = buildClimateSection(input.scenarioConfig, scenario, input.model);
+  const geometry = buildGeometrySection(model);
+  const climate = buildClimateSection(input.scenarioConfig, scenario, model);
   const materials = resolveConstructionRows(
-    input.model,
+    model,
     input.scenarioConfig,
     scenario,
     climate.designDeltaT,
-    input.thermalResult
+    input.thermalResult,
+    input.solarTime
   );
   const operation = buildOperationSection(input.scenarioConfig, scenario, input.thermalResult);
-  const airExchange = buildAirExchangeSection(input.model, input.scenarioConfig, scenario, climate.designDeltaT);
-  const humidity = buildHumiditySection(input.scenarioConfig, scenario, input.model, input.thermalResult, climate.section);
-  const engineeringNetworks = buildEngineeringSection(input.model, input.scenarioConfig, scenario, input.thermalResult);
-  const ecology = buildEcologySection(input.model, input.scenarioConfig, scenario, input.thermalResult);
-  const economy = buildEconomySection(input.model, input.scenarioConfig, scenario, input.thermalResult);
-  const validation = buildValidationSection(input.model, scenario, input.thermalResult);
+  const airExchange = buildAirExchangeSection(model, input.scenarioConfig, scenario, climate.designDeltaT);
+  const humidity = buildHumiditySection(input.scenarioConfig, scenario, model, input.thermalResult, climate.section);
+  const engineeringNetworks = buildEngineeringSection(model, input.scenarioConfig, scenario, input.thermalResult);
+  const ecology = buildEcologySection(model, input.scenarioConfig, scenario, input.thermalResult);
+  const economy = buildEconomySection(model, input.scenarioConfig, scenario, input.thermalResult);
+  const validation = buildValidationSection(model, scenario, input.thermalResult);
   const reports = buildReportsSection(input.reportInputs);
 
   const sections: Record<SourceDataSectionId, SourceDataSectionReport> = {

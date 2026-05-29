@@ -120,7 +120,7 @@ export function detectRoomsFromWalls(model) {
             });
             autoRooms.push({
                 id: roomId,
-                name: `Space ${counter++}`,
+                name: `Помещение ${counter++}`,
                 levelId: level.id,
                 polygon: normalized,
                 source: "auto",

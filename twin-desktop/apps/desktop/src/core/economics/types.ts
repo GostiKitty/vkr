@@ -2,7 +2,7 @@ import type { Sp50ComplianceReport } from "../thermal/sp50/types";
 import type { Sp50ConstructionType } from "../../entities/geometry/types";
 
 export type BuildingType = "private_house" | "public_building" | "apartment_building" | "educational" | "office";
-export type HeatingEnergySource = "heat" | "electricity" | "unknown";
+export type HeatingEnergySource = "heat" | "gas" | "electricity" | "unknown";
 export type EconomicScenarioMode = "minimum_budget" | "maximum_saving" | "fast_payback" | "comprehensive";
 export type EconomicComplexity = "низкая" | "средняя" | "средняя/высокая" | "высокая";
 export type EconomicPriorityLevel = "очень высокий" | "высокий" | "средний" | "низкий";
@@ -35,6 +35,8 @@ export interface EconomicMeasureDefault {
   complexity: EconomicComplexity;
   comfortEffect: string;
   riskReduction?: string;
+  /** Расчётный срок службы конструкции/оборудования, лет. Используется для остаточной стоимости в NPV. */
+  lifetimeYears?: number;
 }
 
 export interface EconomicDefaults {
@@ -91,6 +93,11 @@ export interface EconomicScenario {
   heatTariffRubPerGcal: number;
   electricityTariffRubPerKwh: number;
   regionalCostFactor: number;
+  /**
+   * Удельный выброс CO₂ источника тепла, кг/кВт·ч тепловой энергии.
+   * Gas котёл: ~0.22, ЦТ от ТЭЦ на газе: ~0.20, электроотопление: ~0.35.
+   */
+  co2EmissionFactor_kgPerKWh?: number;
   analysisPeriod_years: number;
   discountRate?: number;
   annualTariffGrowthPercent?: number;
@@ -101,6 +108,23 @@ export interface EconomicScenario {
     heatPrice_RUB_kWh: number;
     currency: string;
   };
+  /**
+   * Тариф на природный газ, руб./м³ (только для heatingEnergySource = "gas").
+   * 0 или undefined — газ не используется как источник тепла.
+   */
+  gasTariffRubPerM3?: number;
+  /**
+   * Штраф за недобор газа, % от стоимости невыбранного объёма.
+   * Применяется когда здание потребляет меньше договорного минимума.
+   */
+  gasUnderconsumptionPenaltyPercent?: number;
+  /** Минимальный объём выборки газа, % от договорного (65–80 %). */
+  gasMinimumOfftakePercent?: number;
+  /**
+   * Доля счёта на централизованное теплоснабжение, не зависящая от фактического потребления.
+   * 0.0 — здание с прибором учёта; 0.10–0.25 — нормативный расчёт без счётчика.
+   */
+  heatContractMinimumPaymentFraction?: number;
   defaults: EconomicDefaults;
   measures: EconomicMeasureDefinition[];
 }
@@ -122,6 +146,12 @@ export interface EconomicMeasureResult {
   savedEnergy_kWh_year: number;
   savedEnergy_Gcal_year: number;
   annualSaving_RUB: number;
+  /** Годовой штраф за недобор газа или минимальный платёж по ЦТ, руб./год */
+  contractPenalty_RUB: number;
+  /** Годовая экономия за вычетом штрафов по договору, руб./год */
+  effectiveAnnualSaving_RUB: number;
+  /** Снижение выбросов CO₂, т CO₂/год */
+  savedCO2_tCO2_year: number | null;
   payback_years: number | null;
   paybackClass: EconomicPaybackClass;
   discountedPayback_years: number | null;
@@ -171,8 +201,14 @@ export interface EconomicAssessmentSummary {
   fastestPaybackMeasureId: string | null;
   packageCost_RUB: number;
   packageAnnualSaving_RUB: number;
+  /** Суммарный штраф по пакету мероприятий, руб./год */
+  packageContractPenalty_RUB: number;
+  /** Эффективная экономия пакета за вычетом штрафов, руб./год */
+  packageEffectiveAnnualSaving_RUB: number;
   packageSavedEnergy_kWh_year: number;
   packageSavedEnergy_Gcal_year: number;
+  /** Суммарное снижение выбросов CO₂ по пакету мер, т CO₂/год */
+  packageSavedCO2_tCO2_year: number | null;
   packagePayback_years: number | null;
   packagePaybackClass: EconomicPaybackClass;
   totalCost_RUB: number;
@@ -183,6 +219,22 @@ export interface EconomicAssessmentSummary {
   baseAnnualHeatingEnergy_kWh: number | null;
   estimatedAnnualHeatingEnergyBefore_kWh: number | null;
   estimatedAnnualHeatingEnergyAfter_kWh: number | null;
+  /** Удельный расход тепловой энергии на отопление до мер, кВт·ч/(м²·год) */
+  specificHeatConsumption_kWh_m2: number | null;
+  /** Удельный расход после реализации пакета, кВт·ч/(м²·год) */
+  specificHeatConsumptionAfter_kWh_m2: number | null;
+  /** Нормативный удельный расход по SP50, кВт·ч/(м²·год) */
+  sp50EnergyNorm_kWh_m2: number | null;
+  /** Класс энергоэффективности здания до мер по SP50.13330 (А++…G) */
+  energyClassBefore: string | null;
+  /** Класс энергоэффективности здания после реализации пакета */
+  energyClassAfter: string | null;
+  /** Соответствие нормативу SP50 до мер */
+  sp50EnergyComplies: boolean | null;
+  /** Срок окупаемости при нулевом росте тарифа, лет */
+  paybackAtZeroGrowth_years: number | null;
+  /** Срок окупаемости при росте тарифа 10%/год, лет (дисконт = 0) */
+  paybackAtHighGrowth_years: number | null;
   isApproximate: boolean;
   hasAnyPayback: boolean;
   allMeasuresNonPayback: boolean;
@@ -243,6 +295,7 @@ export const economicDefaults: EconomicDefaults = {
       complexity: "средняя",
       comfortEffect: "высокий",
       riskReduction: "снижение риска промерзания и конденсата",
+      lifetimeYears: 30,
     },
     wallInsulationPolystyrene: {
       name: "Утепление наружных стен пенополистиролом",
@@ -254,6 +307,7 @@ export const economicDefaults: EconomicDefaults = {
       complexity: "средняя",
       comfortEffect: "высокий",
       riskReduction: "снижение риска промерзания при корректном узле пароизоляции",
+      lifetimeYears: 30,
     },
     wetFacade: {
       name: "Система мокрого фасада",
@@ -263,6 +317,7 @@ export const economicDefaults: EconomicDefaults = {
       complexity: "средняя/высокая",
       comfortEffect: "высокий",
       riskReduction: "снижение мостиков холода в зоне фасада",
+      lifetimeYears: 25,
     },
     ventilatedFacade: {
       name: "Вентилируемый фасад с утеплителем",
@@ -272,6 +327,7 @@ export const economicDefaults: EconomicDefaults = {
       complexity: "высокая",
       comfortEffect: "высокий",
       riskReduction: "снижение риска увлажнения ограждения и локального промерзания",
+      lifetimeYears: 30,
     },
     roofInsulationMineralWool: {
       name: "Утепление кровли или чердачного перекрытия минеральной ватой",
@@ -281,6 +337,7 @@ export const economicDefaults: EconomicDefaults = {
       complexity: "средняя",
       comfortEffect: "высокий",
       riskReduction: "снижение риска конденсата на покрытии",
+      lifetimeYears: 25,
     },
     roofInsulationBasalt: {
       name: "Утепление кровли базальтовой ватой",
@@ -290,6 +347,7 @@ export const economicDefaults: EconomicDefaults = {
       complexity: "средняя",
       comfortEffect: "высокий",
       riskReduction: "уменьшение локального переохлаждения верхних помещений",
+      lifetimeYears: 25,
     },
     coldAtticInsulation: {
       name: "Утепление холодного чердака",
@@ -299,6 +357,7 @@ export const economicDefaults: EconomicDefaults = {
       complexity: "низкая",
       comfortEffect: "средний/высокий",
       riskReduction: "снижение риска увлажнения чердачного перекрытия",
+      lifetimeYears: 20,
     },
     floorInsulation: {
       name: "Утепление пола или перекрытия над подвалом",
@@ -308,6 +367,7 @@ export const economicDefaults: EconomicDefaults = {
       complexity: "средняя",
       comfortEffect: "высокий",
       riskReduction: "снижение риска холодного пола и конденсата у цоколя",
+      lifetimeYears: 25,
     },
     windowReplacement: {
       name: "Замена окон на энергоэффективные",
@@ -317,6 +377,7 @@ export const economicDefaults: EconomicDefaults = {
       complexity: "средняя",
       comfortEffect: "высокий",
       riskReduction: "снижение риска продувания и переохлаждения откосов",
+      lifetimeYears: 20,
     },
     energyGlassUnit: {
       name: "Установка энергосберегающего стеклопакета",
@@ -326,6 +387,7 @@ export const economicDefaults: EconomicDefaults = {
       complexity: "средняя",
       comfortEffect: "высокий",
       riskReduction: "снижение риска конденсата на стекле",
+      lifetimeYears: 20,
     },
     jointsSealing: {
       name: "Герметизация оконных примыканий",
@@ -335,6 +397,7 @@ export const economicDefaults: EconomicDefaults = {
       complexity: "низкая",
       comfortEffect: "средний/высокий",
       riskReduction: "снижение риска продувания и увлажнения откосов",
+      lifetimeYears: 5,
     },
     hardwareAdjustment: {
       name: "Регулировка фурнитуры и замена уплотнителей",
@@ -344,6 +407,7 @@ export const economicDefaults: EconomicDefaults = {
       complexity: "низкая",
       comfortEffect: "средний",
       riskReduction: "снижение локального продувания и конденсата",
+      lifetimeYears: 8,
     },
     sealingLeaks: {
       name: "Герметизация щелей и примыканий",
@@ -353,6 +417,7 @@ export const economicDefaults: EconomicDefaults = {
       complexity: "низкая",
       comfortEffect: "средний/высокий",
       riskReduction: "снижение риска сквозняков, конденсата и плесени",
+      lifetimeYears: 5,
     },
     doorInsulation: {
       name: "Утепление входной двери и восстановление уплотнителей",
@@ -362,6 +427,7 @@ export const economicDefaults: EconomicDefaults = {
       complexity: "низкая",
       comfortEffect: "средний/высокий",
       riskReduction: "снижение риска продувания входной группы",
+      lifetimeYears: 10,
     },
     vestibule: {
       name: "Установка тамбура или второй двери",
@@ -371,6 +437,7 @@ export const economicDefaults: EconomicDefaults = {
       complexity: "средняя",
       comfortEffect: "высокий",
       riskReduction: "снижение пиковых инфильтрационных потерь",
+      lifetimeYears: 30,
     },
     thermalBridgeMitigation: {
       name: "Локальное устранение мостиков холода",
@@ -380,6 +447,7 @@ export const economicDefaults: EconomicDefaults = {
       complexity: "средняя",
       comfortEffect: "средний/высокий",
       riskReduction: "снижение риска промерзания, конденсата и плесени",
+      lifetimeYears: 20,
     },
     heatingControl: {
       name: "Терморегуляторы и балансировка отопления",
@@ -389,6 +457,7 @@ export const economicDefaults: EconomicDefaults = {
       complexity: "средняя",
       comfortEffect: "высокий",
       riskReduction: "снижение перегревов, недогрева и гидравлических перекосов",
+      lifetimeYears: 15,
     },
     weatherControl: {
       name: "Погодозависимое регулирование",
@@ -398,6 +467,7 @@ export const economicDefaults: EconomicDefaults = {
       complexity: "средняя",
       comfortEffect: "высокий",
       riskReduction: "снижение перетопов и температурных колебаний",
+      lifetimeYears: 15,
     },
     pipeInsulation: {
       name: "Утепление трубопроводов в неотапливаемых зонах",
@@ -407,6 +477,7 @@ export const economicDefaults: EconomicDefaults = {
       complexity: "низкая",
       comfortEffect: "средний",
       riskReduction: "снижение потерь и риска переохлаждения магистралей",
+      lifetimeYears: 15,
     },
   },
 };

@@ -55,13 +55,10 @@ export function MonteCarloChart({ result, baselineEnergyKWh = null }: MonteCarlo
           <p className="text-sm font-semibold text-[color:var(--text-base)]">Распределение энергии за период</p>
           <MetricInfoTooltip {...resultsMetricInfo.monteCarloHistogram} />
         </div>
-        <p className="text-sm text-[color:var(--text-muted)]">
-          По оси X — энергия, кВт·ч; по оси Y — число сценариев. Линии: базовый расчёт, P10, P50 и P90.
-        </p>
       </div>
 
       <div className="ui-chart-shell__body rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] p-3">
-        <ResponsiveContainer width="100%" height="100%">
+        <ResponsiveContainer width="100%" height={260}>
           <ComposedChart data={histogramData} margin={{ top: 8, right: 16, bottom: 6, left: 4 }}>
             <CartesianGrid stroke="var(--chart-grid)" strokeDasharray="3 3" />
             <XAxis
@@ -123,26 +120,22 @@ export function MonteCarloChart({ result, baselineEnergyKWh = null }: MonteCarlo
       <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2 xl:grid-cols-4">
         <LegendChip
           label="P10"
-          description="10% сценариев ниже этого значения"
           value={`${formatNumber(result.totalEnergy.p10, { maximumFractionDigits: 1 })} кВт·ч`}
           borderClass="border-[color:var(--border-soft)]"
         />
         <LegendChip
           label="P50"
-          description="Медиана распределения"
           value={`${formatNumber(result.totalEnergy.p50, { maximumFractionDigits: 1 })} кВт·ч`}
           borderClass="border-[color:var(--accent-base)]/35"
         />
         <LegendChip
           label="P90"
-          description="90% сценариев ниже этого значения"
           value={`${formatNumber(result.totalEnergy.p90, { maximumFractionDigits: 1 })} кВт·ч`}
           borderClass="border-[color:var(--warning-border)]"
         />
         {baselineEnergyKWh != null ? (
           <LegendChip
             label="Базовый расчёт"
-            description="Результат базового сценария"
             value={`${formatNumber(baselineEnergyKWh, { maximumFractionDigits: 1 })} кВт·ч`}
             borderClass="border-[color:var(--danger-border)]"
           />
@@ -154,12 +147,10 @@ export function MonteCarloChart({ result, baselineEnergyKWh = null }: MonteCarlo
 
 function LegendChip({
   label,
-  description,
   value,
   borderClass,
 }: {
   label: string;
-  description: string;
   value: string;
   borderClass: string;
 }) {
@@ -167,7 +158,6 @@ function LegendChip({
     <div className={`rounded-2xl border bg-[color:var(--surface-overlay)] px-3 py-2 text-[color:var(--text-muted)] ${borderClass}`}>
       <p className="font-semibold text-[color:var(--text-base)]">{label}</p>
       <p>{value}</p>
-      <p className="mt-1 text-[11px] text-[color:var(--text-soft)]">{description}</p>
     </div>
   );
 }

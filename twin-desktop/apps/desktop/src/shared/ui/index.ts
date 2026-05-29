@@ -1,4 +1,16 @@
 export { Badge, type BadgeTone } from "./Badge";
+export {
+  AutoCalculatedSourceIcon,
+  AUTO_CALCULATED_SOURCE_LABEL,
+  isAutoCalculatedDataSource,
+} from "./AutoCalculatedSourceIcon";
+export { ModelSourceIcon, MODEL_SOURCE_LABEL, isModelDataSource } from "./ModelSourceIcon";
+export {
+  DemoFallbackSourceIcon,
+  DEMO_FALLBACK_SOURCE_LABEL,
+  isDemoFallbackDataSource,
+} from "./DemoFallbackSourceIcon";
+export { SourceBadgeIconFilters } from "./sourceBadgeIcon";
 export { EmptyState } from "./EmptyState";
 export { Tabs } from "./Tabs";
 export { NotificationPanel } from "./NotificationPanel";
@@ -30,6 +42,7 @@ export {
   EngineeringPanel,
   FormulaCard,
   MetricCard,
+  type MetricFormulaInfo,
   ReportPreviewCard,
   ResultSummaryCard,
   SectionShell,

@@ -4,7 +4,7 @@
  * Функции:
  *  - переключение уровней (этажей)
  *  - ввод метаданных (штамп)
- *  - экспорт SVG
+ *  - экспорт SVG / PDF (A3 альбомная)
  *  - масштабирование просмотра
  */
 
@@ -49,11 +49,11 @@ function exportSvg(svgEl: SVGSVGElement, filename = "chertezh.svg"): void {
 
 /**
  * Растеризовать SVG-чертёж и собрать одностраничный PDF в формате A3 альбомная.
- * Разрешение растеризации — 300 DPI (для печати): 420×297мм → ~4960×3508 px.
  */
 async function exportPdf(svgEl: SVGSVGElement, filename = "chertezh.pdf"): Promise<void> {
   const sheet = SHEET_A3_LANDSCAPE;
-  const dpi = 300;
+  // 200 DPI даёт ~3307×2339 px при размере PDF ~3–6 МБ (JPEG q=0.92), читаемый чертёжный текст.
+  const dpi = 200;
   const pxPerMm = dpi / 25.4;
   const targetW = Math.round(sheet.widthMm * pxPerMm);
   const targetH = Math.round(sheet.heightMm * pxPerMm);
@@ -81,13 +81,15 @@ async function exportPdf(svgEl: SVGSVGElement, filename = "chertezh.pdf"): Promi
           ctx.fillStyle = "#ffffff";
           ctx.fillRect(0, 0, targetW, targetH);
           ctx.drawImage(image, 0, 0, targetW, targetH);
-          const dataUrl = canvas.toDataURL("image/png");
+          // JPEG-сжатие: чертёжные линии переживают q=0.92, файл существенно меньше PNG.
+          const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
           const pdf = new jsPDF({
             orientation: "landscape",
             unit: "mm",
             format: [sheet.widthMm, sheet.heightMm],
+            compress: true,
           });
-          pdf.addImage(dataUrl, "PNG", 0, 0, sheet.widthMm, sheet.heightMm);
+          pdf.addImage(dataUrl, "JPEG", 0, 0, sheet.widthMm, sheet.heightMm, undefined, "FAST");
           pdf.save(filename);
           resolve();
         } catch (err) {

@@ -340,6 +340,42 @@ html[data-theme="dark"] body {
     color: var(--text-base);
   }
 
+  .ui-build-badge--icon-only {
+    padding: 0.25rem 0.35rem;
+    line-height: 0;
+  }
+
+  .ui-source-badge-filters {
+    position: absolute;
+    width: 0;
+    height: 0;
+    overflow: hidden;
+    pointer-events: none;
+  }
+
+  .ui-source-badge-icon-wrap--fx .ui-source-badge-icon {
+    filter: url(#ui-source-badge-fx-thin);
+  }
+
+  .ui-source-badge-icon-wrap {
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    overflow: visible;
+    line-height: 0;
+  }
+
+  .ui-source-badge-icon {
+    display: block;
+    max-width: 100%;
+    max-height: 100%;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+    object-position: center;
+  }
+
   .ui-build-section-title {
     font-size: 0.75rem;
     font-weight: 600;
@@ -1106,6 +1142,19 @@ html[data-theme="dark"] body {
     box-shadow: var(--shadow-panel);
   }
 
+  .ui-highlight-card__header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.5rem;
+  }
+
+  .ui-highlight-card__source-badge {
+    display: inline-flex;
+    flex-shrink: 0;
+    line-height: 0;
+  }
+
   .ui-highlight-card__label {
     margin: 0;
     font-size: 0.8rem;
@@ -1385,6 +1434,48 @@ html[data-theme="dark"] body {
     color: var(--text-muted);
   }
 
+  .ui-section-shell--collapsible .ui-section-shell__header {
+    align-items: center;
+  }
+
+  .ui-section-shell__toggle {
+    display: flex;
+    flex: 1 1 auto;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.8rem;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    text-align: left;
+    cursor: pointer;
+    color: inherit;
+  }
+
+  .ui-section-shell__toggle:focus-visible {
+    outline: 2px solid var(--accent-base);
+    outline-offset: 4px;
+    border-radius: 0.5rem;
+  }
+
+  .ui-section-shell__chevron {
+    flex-shrink: 0;
+    margin-top: 0.35rem;
+    color: var(--text-soft);
+    transition: transform 180ms ease;
+    transform: rotate(-90deg);
+  }
+
+  .ui-section-shell__chevron--open {
+    transform: rotate(0deg);
+  }
+
+  .ui-section-shell__body {
+    display: grid;
+    gap: 1rem;
+  }
+
   .ui-status-badge {
     display: inline-flex;
     align-items: center;
@@ -1478,6 +1569,19 @@ html[data-theme="dark"] body {
     color: var(--text-soft);
   }
 
+  .ui-metric-card__icons {
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: flex-start;
+    justify-content: flex-end;
+    gap: 0.35rem;
+  }
+
+  .ui-metric-card__source-badge {
+    display: inline-flex;
+    line-height: 0;
+  }
+
   .ui-metric-card__icon {
     display: inline-flex;
     align-items: center;
@@ -1512,6 +1616,26 @@ html[data-theme="dark"] body {
     line-height: 1.4;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
     color: var(--text-base);
+  }
+
+  .ui-formula-math {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  .ui-formula-math .katex {
+    font-size: 0.92em;
+    color: var(--text-base);
+  }
+
+  .ui-formula-math .katex-display {
+    margin: 0;
+    text-align: left;
+  }
+
+  .ui-formula-math__fallback {
+    margin: 0;
+    word-break: break-word;
   }
 
   .ui-formula-card__description {
@@ -2886,4 +3010,39 @@ html[data-theme="dark"] .legal-content {
   .ui-mockup-float {
     animation: none !important;
   }
+}
+
+/* Defensive guard: inspector fields must not appear as root children. */
+#root > .min-h-screen > input.ui-field {
+  display: none !important;
+}
+
+.build-3d-room-label-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.build-3d-room-label {
+  max-width: 11rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 0.45rem;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(203, 213, 225, 0.92);
+  color: #0f172a;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.25;
+  text-align: center;
+  white-space: nowrap;
+  text-shadow:
+    0 0 2px #fff,
+    0 0 2px #fff,
+    1px 0 0 #fff,
+    -1px 0 0 #fff,
+    0 1px 0 #fff,
+    0 -1px 0 #fff;
+  transform: translate(-50%, -50%);
+  user-select: none;
 }

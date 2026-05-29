@@ -63,10 +63,7 @@ export function FormulaDrawer() {
               }`}
             >
               <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="ui-kicker">{formula.id}</p>
-                  <h3 className="text-base font-semibold text-[color:var(--text-base)]">{formula.title}</h3>
-                </div>
+                <h3 className="text-base font-semibold text-[color:var(--text-base)]">{formula.title}</h3>
                 <button
                   type="button"
                   onClick={() => focus(formula.id)}
@@ -75,11 +72,6 @@ export function FormulaDrawer() {
                   В фокус
                 </button>
               </div>
-
-              <p className="text-sm text-[color:var(--text-muted)]">{formula.description}</p>
-              <p className="text-xs text-[color:var(--text-soft)]">
-                <span className="font-semibold text-[color:var(--text-base)]">Метод:</span> {formula.methodName}
-              </p>
 
               <div className="overflow-x-auto rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] px-3 py-2">
                 <BlockMath math={formula.latex} />
@@ -109,26 +101,8 @@ export function FormulaDrawer() {
               </div>
 
               <div className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] px-3 py-3 text-sm text-[color:var(--text-muted)]">
-                <div>
-                  <span className="font-semibold text-[color:var(--text-base)]">Физический смысл:</span>{" "}
-                  {formula.physicalMeaning}
-                </div>
-                <div className="mt-2">
-                  <span className="font-semibold text-[color:var(--text-base)]">Что означает результат:</span>{" "}
-                  {formula.resultMeaning}
-                </div>
-                <div className="mt-2">
-                  <span className="font-semibold text-[color:var(--text-base)]">Применимость:</span> {formula.applicability}
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] px-3 py-3">
-                <p className="ui-kicker">Допущения</p>
-                <ul className="mt-2 space-y-1 text-sm text-[color:var(--text-muted)]">
-                  {formula.assumptions.map((assumption) => (
-                    <li key={`${formula.id}-${assumption}`}>{assumption}</li>
-                  ))}
-                </ul>
+                <span className="font-semibold text-[color:var(--text-base)]">Физический смысл:</span>{" "}
+                {formula.physicalMeaning}
               </div>
             </article>
           ))

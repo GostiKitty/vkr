@@ -248,17 +248,17 @@ interface MutablePatch {
 }
 
 export const SURFACE_FIELD_MODE_LABELS: Record<SurfaceFieldRenderMode, string> = {
-  surfaceTemperature: "Surface temperature",
-  heatFlux: "Heat flux",
-  heatLoss: "Heat loss",
-  condensationRisk: "Condensation risk",
+  surfaceTemperature: "Температура поверхности",
+  heatFlux: "Тепловой поток",
+  heatLoss: "Потери тепла",
+  condensationRisk: "Риск конденсации",
 };
 
 export const SURFACE_FIELD_MODE_UNITS: Record<SurfaceFieldRenderMode, string> = {
   surfaceTemperature: "°C",
-  heatFlux: "W/m²",
-  heatLoss: "W",
-  condensationRisk: "risk",
+  heatFlux: "Вт/м²",
+  heatLoss: "Вт",
+  condensationRisk: "%",
 };
 
 export function buildSurfaceFieldResult(input: BuildSurfaceFieldInput): SurfaceFieldResult {
@@ -918,8 +918,12 @@ function buildHorizontalSurfaceDescriptor(args: {
     (slab) => slab.levelId === args.room.levelId && polygonContainsPoint(centroid2D, slab.boundary)
   );
 
+  // Если у крыши heatedSide = "above" — значит тёплое помещение НАД крышей
+  // (холодный чердак снизу), крыша не является внешним ограждением этой комнаты
+  const roofHeatedBelow = !matchingRoof || (matchingRoof.heatedSide ?? "below") === "below";
+
   const totalResistance = (() => {
-    if (args.kind === "ceiling" && matchingRoof) {
+    if (args.kind === "ceiling" && matchingRoof && roofHeatedBelow) {
       return resolveConstructionResistance(matchingRoof.layers, 2.7);
     }
     if (args.kind === "floor" && matchingSlab) {
@@ -929,7 +933,7 @@ function buildHorizontalSurfaceDescriptor(args: {
   })();
 
   const boundaryType = (() => {
-    if (args.kind === "ceiling" && matchingRoof) {
+    if (args.kind === "ceiling" && matchingRoof && roofHeatedBelow) {
       return "external" as const;
     }
     if (args.kind === "floor" && matchingSlab?.kind === "ground") {
@@ -942,7 +946,7 @@ function buildHorizontalSurfaceDescriptor(args: {
   })();
 
   const boundaryTemperatureC = (() => {
-    if (args.kind === "ceiling" && matchingRoof) {
+    if (args.kind === "ceiling" && matchingRoof && roofHeatedBelow) {
       return args.outdoorTemperatureC;
     }
     if (args.kind === "floor" && matchingSlab?.kind === "ground") {

@@ -248,8 +248,8 @@ function SectionCutLine({ area }: { area: { x: number; y: number; w: number; h: 
         [x2 - r * 2.5 - 1.2, y + 0.5],
         [x2 - r * 2.5 + 1.2, y + 0.5]])} fill={INK} />
 
-      <AxisBubble cx={x1} cy={y} r={r} label="1" />
-      <AxisBubble cx={x2} cy={y} r={r} label="1" />
+      <AxisBubble cx={x1} cy={y} r={r} label="А" />
+      <AxisBubble cx={x2} cy={y} r={r} label="Б" />
     </g>
   );
 }
@@ -441,7 +441,7 @@ function SectionDrawing({ layout, model }: { layout: DrawingSheetLayout; model: 
       <line x1={markLineX} y1={roofTopY - 2} x2={markLineX} y2={foundBot + 2}
         stroke={INK} strokeWidth={0.15} strokeDasharray="1 0.5" />
 
-      {/* ── ОСИ РАЗРЕЗА (числовые) ── */}
+      {/* ── ОСИ РАЗРЕЗА (буквенные) ── */}
       {[
         { x: left,  label: "А" },
         { x: right, label: "Б" },
@@ -512,16 +512,12 @@ function GostFrame({ sheet }: { sheet: DrawingSheetLayout["sheet"] }) {
   return (
     <g data-layer="frame">
       <rect x={0} y={0} width={W} height={H} fill={PAPER} />
-      {/* Внешняя рамка — тонкая */}
-      <rect x={m.right} y={m.top}
-        width={W - m.left - m.right} height={H - m.top - m.bottom}
-        fill="none" stroke={INK} strokeWidth={0.18} />
-      {/* Основная рамка — толстая */}
+      {/* Основная рамка — внутри полей ГОСТ */}
       <rect x={m.left} y={m.top}
         width={W - m.left - m.right} height={H - m.top - m.bottom}
-        fill="none" stroke={INK} strokeWidth={0.7} />
-      {/* Поле подшивки */}
-      <line x1={m.right} y1={m.top} x2={m.right} y2={H - m.bottom}
+        fill="none" stroke={INK} strokeWidth={0.5} />
+      {/* Поле подшивки на расстоянии 20мм от левого края */}
+      <line x1={m.left} y1={m.top} x2={m.left} y2={H - m.bottom}
         stroke={INK} strokeWidth={0.18} />
     </g>
   );
@@ -535,10 +531,10 @@ function TitleBlock({ data, layout }: { data: TitleBlockData; layout: DrawingShe
   const sy = (mm: number) => y + (mm / 55) * H;
 
   // Вертикальные линии (мм от левого края штампа, ref: 185мм wide)
-  const vMm = [17, 40, 55, 65, 135, 155, 172];
+  const vMm = [15, 40, 55, 65, 135, 155, 172];
   // Горизонтальные линии (ref: 55мм high)
   const hMm = [20, 34, 44];
-  const hLeftMm = [5, 10, 15, 24, 28, 32, 38, 42, 48, 52];
+  const hLeftMm = [5, 10, 15, 20, 24, 28, 32, 38, 42, 48, 52];
 
   return (
     <g data-layer="title-block">
@@ -568,13 +564,13 @@ function TitleBlock({ data, layout }: { data: TitleBlockData; layout: DrawingShe
 
       {/* Заголовки граф */}
       {[
-        { x: sx(137), y: sy(0.14), t: "Лит." },
-        { x: sx(157), y: sy(0.14), t: "Масса" },
-        { x: sx(173), y: sy(0.14), t: "Масштаб" },
-        { x: sx(137), y: sy(0.69), t: "Лист" },
-        { x: sx(162), y: sy(0.69), t: "Листов" },
+        { x: sx(137), y: sy(3), t: "Лит." },
+        { x: sx(157), y: sy(3), t: "Масса" },
+        { x: sx(173), y: sy(3), t: "Масштаб" },
+        { x: sx(137), y: sy(37), t: "Лист" },
+        { x: sx(162), y: sy(37), t: "Листов" },
       ].map(({ x: tx, y: ty, t }) => (
-        <text key={t} x={tx} y={ty} fontFamily={FONT} fontSize={FS.stamp} fill={INK_SOFT}>{t}</text>
+        <text key={t} x={tx} y={ty} fontFamily={FONT} fontSize={FS.stamp} fill={INK}>{t}</text>
       ))}
 
       {/* Должности */}
@@ -586,7 +582,7 @@ function TitleBlock({ data, layout }: { data: TitleBlockData; layout: DrawingShe
         { label: "Утв.",    relY: 46, val: "" },
       ].map(({ label, relY, val }) => (
         <g key={label}>
-          <text x={x + 1} y={sy(relY)} fontFamily={FONT} fontSize={FS.stamp} fill={INK_SOFT}>{label}</text>
+          <text x={x + 1} y={sy(relY)} fontFamily={FONT} fontSize={FS.stamp} fill={INK}>{label}</text>
           <text x={sx(18)} y={sy(relY)} fontFamily={FONT} fontSize={FS.stamp} fill={INK}>{val}</text>
         </g>
       ))}
@@ -605,7 +601,7 @@ function TitleBlock({ data, layout }: { data: TitleBlockData; layout: DrawingShe
 
       {/* Наименование объекта */}
       <text x={sx(100)} y={sy(40)} textAnchor="middle"
-        fontFamily={FONT} fontSize={FS.stamp} fill={INK_SOFT}>
+        fontFamily={FONT} fontSize={FS.stamp} fill={INK}>
         {data.objectName}
       </text>
 
@@ -618,17 +614,17 @@ function TitleBlock({ data, layout }: { data: TitleBlockData; layout: DrawingShe
         fontFamily={FONT} fontWeight={700} fontSize={FS.stampLg} fill={INK}>
         {data.scale}
       </text>
-      <text x={sx(147)} y={sy(50)} textAnchor="middle"
+      <text x={sx(147)} y={sy(42)} textAnchor="middle"
         fontFamily={FONT} fontWeight={700} fontSize={FS.stampXl} fill={INK}>
         {data.sheetNumber}
       </text>
-      <text x={sx(172)} y={sy(50)} textAnchor="middle"
+      <text x={sx(172)} y={sy(42)} textAnchor="middle"
         fontFamily={FONT} fontWeight={700} fontSize={FS.stampXl} fill={INK}>
         {data.totalSheets}
       </text>
 
       {/* Дата */}
-      <text x={sx(56)} y={sy(46)} fontFamily={FONT} fontSize={FS.stamp} fill={INK_SOFT}>
+      <text x={sx(56)} y={sy(46)} fontFamily={FONT} fontSize={FS.stamp} fill={INK}>
         {data.date}
       </text>
     </g>

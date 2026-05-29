@@ -17,6 +17,8 @@ import { CHART_AXIS_TICK, CHART_MARGIN, CHART_TOOLTIP_STYLE } from "./thermalCha
 
 type ChartMode = "temperature" | "heating";
 
+export type ThermalTimeSeriesHeatingDisplay = "raw" | "equipment";
+
 interface RoomOption {
   id: string;
   label: string;
@@ -30,6 +32,10 @@ interface ThermalTimeSeriesChartProps {
   resultState?: ResultSyncState;
   simulationSource?: "demo" | "computed" | null;
   onRunCalculation?: () => void;
+  /** raw — шаги RC; equipment — ограничение и инерция, близко к работе реального источника. */
+  heatingDisplay?: ThermalTimeSeriesHeatingDisplay;
+  /** Установленная мощность отопления для режима equipment, кВт. */
+  installedCapacityKW?: number | null;
 }
 
 interface ChartPoint {
@@ -38,8 +44,10 @@ interface ChartPoint {
   airTemperatureC: number | null;
   /** Уставка отопления в момент времени, °C. Из room.timeline[i].setpointC (добавлен в solver). */
   setpointC: number | null;
-  /** Мощность отопления, кВт. */
+  /** Мощность отопления по шагу RC, кВт. */
   heatingPowerKW: number | null;
+  /** Значение для линии на графике (может отличаться при сглаживании). */
+  heatingPowerDisplayKW: number | null;
 }
 
 const UNDERLAY_GRID_COLOR = "rgba(148, 163, 184, 0.16)";
@@ -95,13 +103,87 @@ function buildChartPoints(
       setpointC = toFiniteNumber(frame?.rooms?.[roomId]?.setpointC);
     }
 
+    const heatingPowerKW = heatingPowerW !== null ? heatingPowerW / 1000 : null;
     return {
       timeHours: toFiniteNumber(pt.timeHours) ?? index * (result.timeline[1]?.timeHours ?? 1),
       airTemperatureC,
       setpointC,
-      heatingPowerKW: heatingPowerW !== null ? heatingPowerW / 1000 : null,
+      heatingPowerKW,
+      heatingPowerDisplayKW: heatingPowerKW,
     };
   });
+}
+
+function resolveEquipmentCapacityKW(points: ChartPoint[], installedCapacityKW: number | null): number {
+  if (installedCapacityKW != null && installedCapacityKW > 0) {
+    return installedCapacityKW;
+  }
+  const values = points.map((pt) => pt.heatingPowerKW).filter(isFiniteNumber);
+  if (!values.length) {
+    return 10;
+  }
+  const sorted = [...values].sort((a, b) => a - b);
+  const p90 = sorted[Math.floor(sorted.length * 0.9)] ?? sorted[sorted.length - 1];
+  return Math.max(0.5, p90 * 1.08);
+}
+
+function applyMovingAverageKW(values: Array<number | null>, windowSteps: number): number[] {
+  return values.map((_, index) => {
+    const start = Math.max(0, index - windowSteps + 1);
+    const slice = values.slice(start, index + 1).filter(isFiniteNumber);
+    if (!slice.length) {
+      return 0;
+    }
+    return slice.reduce((sum, value) => sum + value, 0) / slice.length;
+  });
+}
+
+/** Ограничение мощности + сглаживание ~2 ч + ограничение скорости набора нагрузки. */
+function applyEquipmentLikeDisplay(points: ChartPoint[], installedCapacityKW: number | null): ChartPoint[] {
+  if (points.length < 2) {
+    return points;
+  }
+
+  const capKW = resolveEquipmentCapacityKW(points, installedCapacityKW);
+  const timestepHours = resolveTimestepHours(points);
+  const windowSteps = Math.max(4, Math.min(18, Math.round(2 / Math.max(timestepHours, 1 / 12))));
+  const maxRampKWPerStep = Math.max(0.08, capKW * Math.min(0.2, (0.12 * timestepHours) / 0.167));
+
+  const capped = points.map((pt) =>
+    isFiniteNumber(pt.heatingPowerKW)
+      ? { ...pt, heatingPowerDisplayKW: Math.min(pt.heatingPowerKW, capKW) }
+      : { ...pt, heatingPowerDisplayKW: null }
+  );
+
+  const averaged = applyMovingAverageKW(
+    capped.map((pt) => pt.heatingPowerDisplayKW),
+    windowSteps
+  );
+
+  let previous: number | null = null;
+  return capped.map((pt, index) => {
+    if (!isFiniteNumber(averaged[index])) {
+      previous = null;
+      return { ...pt, heatingPowerDisplayKW: null };
+    }
+    let next = Math.min(averaged[index], capKW);
+    if (previous != null) {
+      next = Math.max(previous - maxRampKWPerStep, Math.min(previous + maxRampKWPerStep, next));
+    }
+    previous = next;
+    return { ...pt, heatingPowerDisplayKW: next };
+  });
+}
+
+function enrichPlottedPoints(
+  points: ChartPoint[],
+  heatingDisplay: ThermalTimeSeriesHeatingDisplay,
+  installedCapacityKW: number | null
+): ChartPoint[] {
+  if (heatingDisplay !== "equipment" || points.length < 2) {
+    return points;
+  }
+  return applyEquipmentLikeDisplay(points, installedCapacityKW);
 }
 
 /** Emits a dev-mode diagnostic log for the chart to help debug data issues. */
@@ -109,8 +191,7 @@ function devLogChartDiagnostics(
   roomId: string | null,
   roomLabel: string | null,
   data: ChartPoint[],
-  result: ThermalSimulationResult | null,
-  fallbackApplied: boolean
+  result: ThermalSimulationResult | null
 ): void {
   if (!IS_DEV) {
     return;
@@ -130,7 +211,6 @@ function devLogChartDiagnostics(
     selectedRoomId: roomId,
     selectedRoomName: roomLabel,
     matchedZoneId: roomId && result?.rooms[roomId] ? roomId : null,
-    fallbackApplied,
     countTemperaturePoints: tempPoints.length,
     countHeatingPoints: heatingPoints.length,
     firstTemperaturePoint: tempPoints[0] ?? null,
@@ -167,6 +247,8 @@ export function ThermalTimeSeriesChart({
   resultState = "current",
   simulationSource = "computed",
   onRunCalculation,
+  heatingDisplay = "raw",
+  installedCapacityKW = null,
 }: ThermalTimeSeriesChartProps) {
   const [mode, setMode] = useState<ChartMode>("temperature");
 
@@ -175,55 +257,25 @@ export function ThermalTimeSeriesChart({
     [roomId, roomOptions]
   );
 
-  /**
-   * Effective room: if the requested roomId has no temperature data, fall back
-   * to the first room in result.rooms that has a non-empty timeline.
-   */
-  const { effectiveRoomId, fallbackApplied } = useMemo<{
-    effectiveRoomId: string | null;
-    fallbackApplied: boolean;
-  }>(() => {
-    if (!result || !roomId) {
-      return { effectiveRoomId: roomId, fallbackApplied: false };
-    }
-    const roomData = result.rooms[roomId];
-    const hasTempData =
-      roomData &&
-      roomData.timeline.length > 0 &&
-      roomData.timeline.some((pt) => isFiniteNumber(pt.temperatureC));
-
-    if (hasTempData) {
-      return { effectiveRoomId: roomId, fallbackApplied: false };
-    }
-
-    // Auto-fallback: find first room with valid temperature data
-    const fallback = Object.entries(result.rooms).find(
-      ([, r]) => r.timeline.length > 0 && r.timeline.some((pt) => isFiniteNumber(pt.temperatureC))
-    );
-    if (fallback) {
-      return { effectiveRoomId: fallback[0], fallbackApplied: true };
-    }
-
-    return { effectiveRoomId: null, fallbackApplied: false };
-  }, [result, roomId]);
-
   const data = useMemo<ChartPoint[]>(() => {
-    if (!result || !effectiveRoomId) {
+    if (!result || !roomId) {
       return [];
     }
-    return buildChartPoints(result, effectiveRoomId);
-  }, [result, effectiveRoomId]);
+    return enrichPlottedPoints(buildChartPoints(result, roomId), heatingDisplay, installedCapacityKW);
+  }, [result, roomId, heatingDisplay, installedCapacityKW]);
+
+  const heatingIsEquipment = heatingDisplay === "equipment";
 
   // Emit dev diagnostics after data is computed
   useMemo(() => {
-    devLogChartDiagnostics(roomId, selectedRoom?.label ?? null, data, result, fallbackApplied);
-  }, [data, roomId, selectedRoom, result, fallbackApplied]);
+    devLogChartDiagnostics(roomId, selectedRoom?.label ?? null, data, result);
+  }, [data, roomId, selectedRoom, result]);
 
   const stats = useMemo(() => {
-    if (!result || !effectiveRoomId || !result.rooms[effectiveRoomId]) {
+    if (!result || !roomId || !result.rooms[roomId]) {
       return null;
     }
-    const room = result.rooms[effectiveRoomId];
+    const room = result.rooms[roomId];
     const temperatures = data
       .map((pt) => pt.airTemperatureC)
       .filter((v): v is number => isFiniteNumber(v));
@@ -243,7 +295,7 @@ export function ThermalTimeSeriesChart({
       energyKWh: Number.isFinite(room.dailyEnergyKWh) ? room.dailyEnergyKWh : null,
       heatingRuntimeHours,
     };
-  }, [result, effectiveRoomId, data]);
+  }, [result, roomId, data]);
 
   const periodLabel = useMemo(() => buildPeriodLabel(data), [data]);
   const peakExplanation = useMemo(() => buildPeakExplanation(data), [data]);
@@ -267,7 +319,7 @@ export function ThermalTimeSeriesChart({
   }, [data]);
 
   const heatingDomain = useMemo(() => {
-    const values = data.map((pt) => pt.heatingPowerKW).filter(isFiniteNumber);
+    const values = data.map((pt) => pt.heatingPowerDisplayKW).filter(isFiniteNumber);
     const max = values.length ? Math.max(...values) : 1;
     return [0, Math.max(0.5, Math.ceil(max * 10) / 10)] as [number, number];
   }, [data]);
@@ -277,7 +329,7 @@ export function ThermalTimeSeriesChart({
     [data]
   );
   const hasHeatingSeries = useMemo(
-    () => data.some((pt) => isFiniteNumber(pt.heatingPowerKW)),
+    () => data.some((pt) => isFiniteNumber(pt.heatingPowerDisplayKW)),
     [data]
   );
 
@@ -301,11 +353,11 @@ export function ThermalTimeSeriesChart({
     );
   }
 
-  if (simulationSource === "demo") {
+  if (simulationSource === "demo" && !result) {
     return (
       <ChartState
         title="Нет актуальных расчётных данных"
-        message="Сейчас доступны только demo-данные. Запустите локальный расчёт, чтобы увидеть динамику для текущей модели."
+        message="Для текущей модели нет RC-ряда. Добавьте помещения в конструкторе или запустите расчёт."
         buttonLabel="Запустить расчёт"
         onClick={onRunCalculation}
       />
@@ -354,7 +406,7 @@ export function ThermalTimeSeriesChart({
   }
 
   // No data at all for any room
-  if (!effectiveRoomId || !data.length) {
+  if (!roomId || !data.length) {
     return (
       <section className="ui-chart-shell">
         <ChartHeader
@@ -408,19 +460,11 @@ export function ThermalTimeSeriesChart({
   // Normal render
   // ---------------------------------------------------------------------------
 
-  const effectiveRoomLabel =
-    roomOptions.find((r) => r.id === effectiveRoomId)?.label ?? effectiveRoomId;
+  const roomLabel = selectedRoom?.label ?? roomId;
 
   return (
     <section className="ui-chart-shell">
       <ChartHeader roomId={roomId} roomOptions={roomOptions} onSelectRoom={onSelectRoom} periodLabel={periodLabel} />
-
-      {fallbackApplied ? (
-        <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-          Для выбранного помещения нет временного ряда, показано ближайшее помещение с результатами:{" "}
-          <strong>{effectiveRoomLabel}</strong>
-        </div>
-      ) : null}
 
       <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
         <MetricPill label="Средняя температура" value={formatTemperatureValue(stats?.averageTemperatureC ?? null)} />
@@ -430,20 +474,6 @@ export function ThermalTimeSeriesChart({
           label="Время работы отопления"
           value={stats == null ? "—" : `${formatNumber(stats.heatingRuntimeHours, { maximumFractionDigits: 1 })} ч`}
         />
-      </div>
-
-      <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-[color:var(--text-muted)]">
-        <span className="rounded-full border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] px-3 py-1">
-          Актуально для текущей модели
-        </span>
-        <span className="rounded-full border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] px-3 py-1">
-          Помещение: {effectiveRoomLabel}
-        </span>
-        {periodLabel ? (
-          <span className="rounded-full border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] px-3 py-1">
-            Период: {periodLabel}
-          </span>
-        ) : null}
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -470,7 +500,12 @@ export function ThermalTimeSeriesChart({
             <LegendSwatch color={SETPOINT_LINE_COLOR} dashed label="Уставка, °C" />
           </>
         ) : (
-          <LegendSwatch color={HEATING_LINE_COLOR} label="Расч. тепловая нагрузка, кВт" />
+          <LegendSwatch
+            color={HEATING_LINE_COLOR}
+            label={
+              heatingIsEquipment ? "Нагрузка (огранич. источник), кВт" : "Тепловая нагрузка, кВт"
+            }
+          />
         )}
       </div>
 
@@ -522,13 +557,17 @@ export function ThermalTimeSeriesChart({
                 if (mode === "heating" && (name === "Температура воздуха, °C" || name === "Уставка, °C")) {
                   return null as unknown as [string, string];
                 }
-                if (mode === "temperature" && name === "Мощность отопления, кВт") {
+                if (
+                  mode === "temperature" &&
+                  (name === "Тепловая нагрузка, кВт" || name === "Нагрузка (огранич. источник), кВт")
+                ) {
                   return null as unknown as [string, string];
                 }
                 if (name === "Температура воздуха, °C" || name === "Уставка, °C") {
                   return [`${formatNumber(value, { maximumFractionDigits: 1 })} °C`, name];
                 }
-                return [`${formatNumber(value, { maximumFractionDigits: 2 })} кВт (нагрузка)`, name];
+                const heatingLabel = heatingIsEquipment ? "источник" : "нагрузка";
+                return [`${formatNumber(value, { maximumFractionDigits: 2 })} кВт (${heatingLabel})`, name];
               }}
             />
             {/*
@@ -561,8 +600,8 @@ export function ThermalTimeSeriesChart({
             />
             <Line
               type="monotone"
-              dataKey="heatingPowerKW"
-              name="Расч. тепловая нагрузка, кВт"
+              dataKey="heatingPowerDisplayKW"
+              name={heatingIsEquipment ? "Нагрузка (огранич. источник), кВт" : "Тепловая нагрузка, кВт"}
               stroke={HEATING_LINE_COLOR}
               strokeWidth={2.2}
               dot={data.length <= 2 ? { r: 2.5 } : false}
@@ -575,14 +614,11 @@ export function ThermalTimeSeriesChart({
       </div>
 
       <div className="mt-3 flex flex-col gap-1 text-sm text-[color:var(--text-muted)]">
-        <p>
-          Динамика температуры воздуха и расчётной тепловой нагрузки за расчётный период.
-        </p>
         {mode === "heating" ? (
           <p className="text-xs text-[color:var(--text-soft)]">
-            Расчётная нагрузка — это тепловая потребность здания (demand), а не мощность котла.
-            Спайк при переключении уставки — нагрузка на прогрев тепловой массы. Реальное оборудование
-            ограничено по мощности и растягивает прогрев на 1–2 ч.
+            {heatingIsEquipment
+              ? "Оранжевая кривая — потребность с учётом установленной мощности и инерции источника (~2 ч), как у реального котла. KPI «Пиковая мощность» — по сырому RC без этой обработки."
+              : "Тепловая нагрузка по шагам RC без сглаживания. Данные пересчитываются по текущей модели и сценарию."}
           </p>
         ) : null}
         {peakExplanation ? <p>{peakExplanation}</p> : null}
@@ -613,9 +649,6 @@ function ChartHeader({
           <p className="text-base font-semibold text-[color:var(--text-base)]">Динамика температуры и отопления</p>
           <MetricInfoTooltip {...resultsMetricInfo.rcBalance} />
         </div>
-        <p className="mt-1 text-sm text-[color:var(--text-muted)]">
-          Температура воздуха и требуемая мощность отопления за расчётный период.
-        </p>
         {periodLabel ? <p className="mt-1 text-xs text-[color:var(--text-soft)]">Расчётный период: {periodLabel}.</p> : null}
       </div>
 

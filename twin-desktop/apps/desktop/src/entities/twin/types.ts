@@ -7,6 +7,7 @@ export interface SpaceInstance {
   size: [number, number, number];
   area: number;
   volume: number;
+  level?: string;
 }
 
 export interface ThermalNode {

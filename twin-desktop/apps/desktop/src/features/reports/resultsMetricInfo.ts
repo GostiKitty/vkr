@@ -5,6 +5,8 @@ export interface MetricInfoDefinition {
   inputs?: string | string[];
   calculatedIn?: string;
   notes?: string | string[];
+  /** Id записей в entities/formulas/registry.ts для FormulaDrawer. */
+  linkedFormulaIds?: string[];
 }
 
 export const resultsMetricInfo = {
@@ -14,6 +16,7 @@ export const resultsMetricInfo = {
     formula: "E = Σ_t Σ_z Q_heat,z(t) · Δt / 3 600 000",
     inputs: ["Q_heat,z(t)", "Δt", "временные ряды зон RC-модели"],
     calculatedIn: "src/core/thermal/solver.ts → runThermalSimulation(...).summary.totalEnergyKWh",
+    linkedFormulaIds: ["rc_heating_energy_integral", "consistency_energy_integration"],
   },
   peakLoad: {
     title: "Пиковая нагрузка",
@@ -21,6 +24,7 @@ export const resultsMetricInfo = {
     formula: "Q_peak = max_t Σ_z Q_heat,z(t)",
     inputs: ["Q_heat,z(t)", "временной шаг RC-модели"],
     calculatedIn: "src/core/thermal/solver.ts → runThermalSimulation(...).summary.peakLoadKW",
+    linkedFormulaIds: ["thermal_peak_load", "specific_heat_load_area", "consistency_H_times_deltaT"],
   },
   discomfort: {
     title: "Часы дискомфорта",
@@ -28,11 +32,13 @@ export const resultsMetricInfo = {
     formula: "H = Σ_t Σ_z I(T_z(t) + 0.05 < T_set,z(t)) · Δt / 3600",
     inputs: ["T_z(t)", "T_set,z(t)", "Δt"],
     calculatedIn: "src/core/thermal/solver.ts → runThermalSimulation(...).summary.discomfortHours",
+    linkedFormulaIds: ["discomfort_seconds_threshold", "discomfort_hours_split", "derived_dh_underheat"],
   },
   rcBalance: {
     title: "Нестационарный RC-баланс",
     meaning: "Базовое дифференциальное уравнение зонального нестационарного расчёта.",
     formula: "C · ΔT/Δt = ΣG(T_neighbor − T_zone) + G_inf(T_out − T_zone) + Q_int + Q_heat",
+    linkedFormulaIds: ["rc_zone_discrete_balance", "thermal_balance", "diagnostics_balance_relative_residual"],
     inputs: [
       "теплоёмкость зоны C",
       "связи G",
@@ -65,6 +71,44 @@ export const resultsMetricInfo = {
     formula: "H = H_tr + H_inf + H_ve",
     inputs: ["H_tr", "H_inf", "H_ve"],
     calculatedIn: "src/core/thermal/derived/metrics.ts → totalHeatLossCoefficient_W_K",
+    linkedFormulaIds: ["heat_loss_coefficient_total", "consistency_h_total_components_sum", "derived_h_total"],
+  },
+  buildingTotalHeatLossKW: {
+    title: "Суммарные теплопотери",
+    meaning:
+      "Мощность теплопотерь здания в опорном срезе RC-расчёта: сумма трансмиссионных и воздухообменных составляющих.",
+    formula: "Q = (Q_{огр} + Q_{возд}) / 1000",
+    inputs: [
+      "Q_{огр} = Q_{непр} + Q_{окн} + Q_{дв}",
+      "Q_{возд} = Q_{инф} + Q_{вент}",
+      "срез diagnostics.building в момент max Σ Q_{heat,z}",
+    ],
+    calculatedIn: "src/core/thermal/thermalDiagnostics.ts → building.totalTransmissionLossW + totalAirExchangeLossW",
+    linkedFormulaIds: ["thermal_peak_load", "heat_loss_coefficient_total"],
+  },
+  buildingTransmissionLossKW: {
+    title: "Потери через ограждения",
+    meaning: "Трансмиссионные потери через непрозрачные ограждения, окна и двери в опорном срезе.",
+    formula: "Q_{огр} = (Q_{непр} + Q_{окн} + Q_{дв}) / 1000",
+    inputs: ["totalOpaqueLossW", "totalWindowLossW", "totalDoorLossW"],
+    calculatedIn: "src/core/thermal/thermalDiagnostics.ts → building.totalTransmissionLossW",
+    linkedFormulaIds: ["heat_loss_coefficient_total", "consistency_H_times_deltaT"],
+  },
+  buildingAirExchangeLossKW: {
+    title: "Потери на воздухообмен",
+    meaning: "Суммарные потери на инфильтрацию и механическую вентиляцию в опорном срезе.",
+    formula: "Q_{возд} = (Q_{инф} + Q_{вент}) / 1000",
+    inputs: ["totalInfiltrationLossW", "totalMechanicalVentilationLossW"],
+    calculatedIn: "src/core/thermal/thermalDiagnostics.ts → building.totalAirExchangeLossW",
+    linkedFormulaIds: ["ventilation_loss", "envelope_infiltration"],
+  },
+  buildingSpecificEnergyKWhM2: {
+    title: "Удельные потери (энергия за период)",
+    meaning: "Интеграл энергии отопления за расчётный период, приведённый к площади отапливаемого пола зон.",
+    formula: "q = E / A_{пол}",
+    inputs: ["summary.totalEnergyKWh", "heatedFloorAreaM2"],
+    calculatedIn: "src/core/thermal/thermalDiagnostics.ts → building.specificEnergyKWh_m2",
+    linkedFormulaIds: ["rc_heating_energy_integral", "specific_heat_load_area"],
   },
   thermalTimeConstant: {
     title: "Тепловая постоянная времени",
@@ -117,6 +161,7 @@ export const resultsMetricInfo = {
     formula: "P50 = quantile(totalEnergyKWh, 0.50)",
     inputs: "scenarioSeries.totalEnergyKWh",
     calculatedIn: "src/core/uncertainty/thermalMonteCarlo.ts → totalEnergy.p50",
+    linkedFormulaIds: ["uncertainty_percentile", "uncertainty_mc"],
   },
   monteCarloP90: {
     title: "Медиана сверху (P90)",
@@ -148,12 +193,53 @@ export const resultsMetricInfo = {
     calculatedIn: "Results → Вероятностный анализ → производная метрика по DistributionSummary",
     notes: "Относительная ширина считается как ΔP_rel = (P90 − P10) / P50 · 100%.",
   },
+  percentileCorridorP5P95: {
+    title: "Коридор P5–P95",
+    meaning: "Диапазон, внутри которого находится 90% сценариев Monte Carlo. Более широкий доверительный коридор, чем P10–P80.",
+    formula: "[P5; P95] = [quantile(X, 0.05); quantile(X, 0.95)]",
+    inputs: ["scenarioSeries", "квантили 0,05 и 0,95"],
+    calculatedIn: "src/core/uncertainty/thermalMonteCarlo.ts → DistributionSummary.p5 / p95",
+    notes: "Покрывает 90% сценариев против 80% у диапазона P10–P90 — используется как консервативный коридор.",
+  },
+  confidenceIntervalMean: {
+    title: "95% доверительный интервал среднего",
+    meaning: "Интервал, в котором с вероятностью 95% находится истинное среднее показателя. Чем он уже, тем стабильнее оценка и тем больше прогонов накоплено.",
+    formula: "CI₉₅ = μ ± 1,96 · σ / √N",
+    inputs: ["среднее μ", "СКО σ", "число сценариев N"],
+    calculatedIn: "src/core/thermal/formulas.ts → meanConfidenceInterval(...)",
+    notes: "Это интервал для среднего, а не для отдельного сценария — он сужается с ростом числа прогонов.",
+  },
+  cumulativeDistribution: {
+    title: "Кривая вероятности (CDF)",
+    meaning: "Вероятность того, что показатель не превысит заданное значение. По оси X — значение метрики, по оси Y — накопленная вероятность.",
+    formula: "F(x) = P(X ≤ x) = count(X_i ≤ x) / N",
+    inputs: ["отсортированные сценарии X", "число сценариев N"],
+    calculatedIn: "src/core/uncertainty/thermalMonteCarlo.ts → DistributionSummary.cdf",
+    notes: "По кривой читаются квантили: уровню 0,5 соответствует P50, уровню 0,9 — P90.",
+  },
+  valueAtRisk: {
+    title: "VaR — значение под риском",
+    meaning: "Квантиль уровня α: показатель, который не будет превышен в α·100% сценариев. Используется как расчётный запас на неблагоприятные условия.",
+    formula: "VaR_α = quantile(X, α)",
+    inputs: ["отсортированные сценарии X", "уровень доверия α"],
+    calculatedIn: "src/core/uncertainty/thermalMonteCarlo.ts → DistributionSummary.valueAtRisk",
+    notes: "При α = 0,95 это P95: в 95% сценариев результат не хуже этого значения.",
+  },
+  conditionalValueAtRisk: {
+    title: "CVaR — ожидаемые потери в хвосте",
+    meaning: "Среднее значение показателя в худших (1 − α)·100% сценариев, то есть за порогом VaR. Более консервативная оценка риска, чем VaR.",
+    formula: "CVaR_α = mean(X | X ≥ VaR_α)",
+    inputs: ["сценарии X за порогом VaR_α", "уровень доверия α"],
+    calculatedIn: "src/core/uncertainty/thermalMonteCarlo.ts → DistributionSummary.conditionalValueAtRisk",
+    notes: "CVaR ≥ VaR: показывает, насколько тяжёлым может быть результат, если порог VaR всё-таки превышен.",
+  },
   exceedanceProbability: {
     title: "Вероятность превышения порога",
     meaning: "Доля сценариев, в которых показатель превысил заданный инженерный порог.",
     formula: "P_exceed = count(Y > Y_lim) / N",
     inputs: ["scenarioSeries", "Y_lim", "число сценариев N"],
     calculatedIn: "Results → Вероятностный анализ → probabilityOf(...)",
+    linkedFormulaIds: ["monte_carlo_exceedance_heating", "uncertainty_risk_probability"],
   },
   energyGrowthRisk: {
     title: "Риск роста энергии",
@@ -176,6 +262,7 @@ export const resultsMetricInfo = {
     formula: "S_i = normalized influence(input_i → targetMetric)",
     inputs: ["samples", "scenarioSeries.<targetMetric>"],
     calculatedIn: "src/core/uncertainty/thermalMonteCarlo.ts → sensitivity",
+    linkedFormulaIds: ["mc_pearson_sensitivity_ranking", "morris_mu_star_sensitivity", "sensitivity_index"],
     notes: [
       "В интерфейсе показывается относительная важность факторов для выбранной целевой метрики.",
       "Текущая реализация основана на корреляции и не является Morris/Sobol-анализом.",
@@ -187,6 +274,7 @@ export const resultsMetricInfo = {
     formula: "Risk = count(T_min,scenario < 20 °C) / N",
     inputs: ["minimumIndoorTemperatureC", "число сценариев N"],
     calculatedIn: "src/core/uncertainty/thermalMonteCarlo.ts → underheatingBelow20CProbability",
+    linkedFormulaIds: ["thermal_mc_underheat_probability", "uncertainty_risk_probability"],
   },
   roomMargin: {
     title: "Запас помещения до порога",
@@ -215,6 +303,7 @@ export const resultsMetricInfo = {
     formula: "T_payback = CAPEX / annualSaving",
     inputs: ["CAPEX", "annualSaving"],
     calculatedIn: "src/core/economics/analysis.ts → calculateSimplePayback_years(...)",
+    linkedFormulaIds: ["economics_simple_payback", "scenario_energy_tariff_resolve"],
   },
   npv: {
     title: "Чистый дисконтированный доход (NPV)",
@@ -222,6 +311,7 @@ export const resultsMetricInfo = {
     formula: "NPV = Σ CF_t / (1 + r)^t − CAPEX",
     inputs: ["денежный поток CF_t", "ставка дисконтирования r", "CAPEX"],
     calculatedIn: "src/core/economics/analysis.ts → calculateNpv_RUB(...)",
+    linkedFormulaIds: ["economics_npv"],
   },
   compactness: {
     title: "Коэффициент компактности",
@@ -260,12 +350,14 @@ export const resultsMetricInfo = {
     meaning: "Линейные тепловые мосты (явно заданные ψ·L).",
     formula: "H_ψ = Σ(ψ_i · L_i)",
     calculatedIn: "src/core/thermal/derived/buildingPerformanceMetrics.ts",
+    linkedFormulaIds: ["thermal_bridge_linear", "envelope_H_psi_H_chi_aggregate", "sp230_psi_window_jamb"],
   },
   heatLossPointBridges: {
     title: "H_χ",
     meaning: "Точечные тепловые мосты (явно заданные χ).",
     formula: "H_χ = Σ(χ_i)",
     calculatedIn: "src/core/thermal/derived/buildingPerformanceMetrics.ts",
+    linkedFormulaIds: ["thermal_bridge_point", "sp230_chi_disc_anchor"],
   },
   heatLossTotal: {
     title: "H_total",

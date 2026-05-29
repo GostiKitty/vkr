@@ -69,7 +69,6 @@ export const routes: AppRoute[] = [
     path: "/formulas",
     title: "Формулы",
     component: FormulasPage,
-    hiddenInNav: true,
   },
   {
     id: "drawing",

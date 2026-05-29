@@ -5,14 +5,14 @@ import type { SimulationFrame, ThermalEdge, ThermalGraph, ThermalNode } from "..
 import { useTwinStore } from "../../entities/twin/twin.store";
 import { buildModelToTwin } from "../../features/build/export/toTwin";
 import { buildSpaceInstancesFromModel } from "../../features/twin/twin.engine";
-import { writeAgentDebugLog } from "../../shared/utils/agentDebugLog";
 import { getRoomDisplayName } from "../../shared/utils/roomNames";
 import { createModelBinding, getModelRevision } from "../../shared/utils/modelSync";
 import type { ThermalSimulationResult } from "./solver";
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(Math.max(value, min), max);
-}
+import {
+  twinInternalConductanceWPerK,
+  twinNodeCapacitanceJPerK,
+  twinOutdoorConductanceWPerK,
+} from "./twinGraphHeuristics";
 
 export function buildThermalGraphFromBuilding(
   model: BuildingModel,
@@ -25,7 +25,7 @@ export function buildThermalGraphFromBuilding(
     id: room.id,
     label: getRoomDisplayName(room, index),
     type: "space",
-    capacity: 120 + area * 0.3,
+    capacity: twinNodeCapacitanceJPerK(area),
     heatGain: 0,
     initialTemp: 20,
   };
@@ -43,12 +43,12 @@ export function buildThermalGraphFromBuilding(
   const edges: ThermalEdge[] = [];
 
   for (const edge of adjacency.graph.edges) {
-    const conductance = clamp(edge.area_m2 / 600, 0.05, 0.35);
+    const conductance = twinInternalConductanceWPerK(edge.area_m2);
     edges.push({ from: edge.roomA, to: edge.roomB, conductance });
   }
 
   for (const ext of adjacency.graph.outdoorEdges) {
-    const conductance = clamp(ext.area_m2 / 500, 0.05, 0.3);
+    const conductance = twinOutdoorConductanceWPerK(ext.area_m2);
     edges.push({ from: ext.roomId, to: "outdoor", conductance });
   }
 
@@ -98,32 +98,13 @@ export function syncBuildSimulationToStudio(
   model: BuildingModel,
   result: ThermalSimulationResult,
   adjacency: AdjacencyResult,
-  options?: { projectName?: string; projectKey?: string | null; modelRevision?: number | null }
+  options?: { projectName?: string; projectKey?: string | null; modelRevision?: number | null; projectId?: string | null }
 ): void {
   const frames = thermalResultToSimulationFrames(result);
   const outdoorC = result.timeline[0]?.outdoorTemperatureC ?? -5;
   const graph = buildThermalGraphFromBuilding(model, adjacency, outdoorC);
-  const twin = buildModelToTwin(model, { projectName: options?.projectName });
+  const twin = buildModelToTwin(model, { projectName: options?.projectName, projectId: options?.projectId ?? null });
   const instances = buildSpaceInstancesFromModel(model);
-  // #region agent log
-  writeAgentDebugLog({
-    sessionId: "c3d591",
-    runId: "repro-5",
-    hypothesisId: "H8",
-    location: "thermalSimulationExport.ts:syncBuildSimulationToStudio",
-    message: "built space instances from actual geometry",
-    data: {
-      projectKey: options?.projectKey ?? null,
-      modelRevision: options?.modelRevision ?? getModelRevision(model),
-      roomCount: model.rooms.length,
-      firstRoomId: model.rooms[0]?.id ?? null,
-      firstInstancePosition: instances[0]?.position ?? null,
-      firstInstanceSize: instances[0]?.size ?? null,
-      geometrySource: "building-model",
-    },
-    timestamp: Date.now(),
-  });
-  // #endregion
   const store = useTwinStore.getState();
   store.setSimulationResult({
     frames,

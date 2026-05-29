@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { navigate } from "../../app/router";
 import { useProjectStore } from "../../entities/project/project.store";
 import { createEmptyBuildingModel } from "../../entities/geometry/types";
@@ -11,16 +11,28 @@ import {
   type ScenarioValidationPoint,
 } from "../../entities/workflow/workflow.store";
 import {
-  ActionBar,
+  AutoCalculatedSourceIcon,
+  AUTO_CALCULATED_SOURCE_LABEL,
   Badge,
+  DemoFallbackSourceIcon,
+  DEMO_FALLBACK_SOURCE_LABEL,
   EmptyWorkspaceState,
   EngineeringCallout,
+  isAutoCalculatedDataSource,
+  isDemoFallbackDataSource,
+  isModelDataSource,
+  FormulaTooltip,
+  ModelSourceIcon,
+  MODEL_SOURCE_LABEL,
   SectionShell,
   WorkspacePageHeader,
 } from "../../shared/ui";
+import { getSourceFieldFormulaInfo } from "./sourceFieldFormulaInfo";
 import { formatNumber } from "../../shared/utils/format";
+import { aggregateEnvelopeBridgeConductances } from "../../demo/deriveExteriorWallThermalBridges";
 import { isCanonicalDemoProjectModel } from "../../shared/utils/demoProject";
 import {
+  applyDefaultOpeningEnvelopeToModel,
   setModelBridgeConductance,
   setModelOpeningUValues,
   setModelOpticalFactors,
@@ -29,10 +41,24 @@ import { getResultSyncState } from "../../shared/utils/modelSync";
 import { useBuildStore } from "../build/build.store";
 import { doesBuildModelMatchProject, hasBuildGeometry } from "../project/projectSummary";
 import {
+  applySp131ClimateToModel,
+  inferSp131CityIdFromClimate,
+} from "../../core/thermal/climate/ensureModelClimate";
+import { getSp131CityClimate, sp131CitySelectOptions } from "../../norms/sp131_2025/climate";
+import {
+  resolveScenarioVentilationInputs,
+  type VentilationInputSource,
+} from "../../core/thermal/ventilation/resolveScenarioVentilation";
+import {
+  resolveScenarioEngineeringInputs,
+  type EngineeringInputSource,
+} from "../../core/thermal/engineering/resolveScenarioEngineering";
+import { calculateRequiredHydronicMassFlow } from "../../core/thermal/formulas";
+import {
   buildSourceDataWorkspaceReport,
+  prepareModelForSourceData,
   type SourceDataField,
   type SourceDataOrigin,
-  type SourceDataSummaryCard,
 } from "../../core/thermal/derived/sourceDataWorkspace";
 // `EXPERTISE_INPUT_SECTIONS` временно не используется в UI: соответствующая подсказка
 // о «полном комплекте полей отчёта» скрыта вместе с разделом проектной документации
@@ -49,7 +75,6 @@ const SECTION_TITLES = {
   climate: "Климат",
   operation: "Эксплуатация",
   airExchange: "Воздухообмен",
-  humidity: "Влажность и комфорт",
   engineeringNetworks: "Инженерные сети",
   ecology: "Экология",
   economy: "Экономика",
@@ -63,7 +88,6 @@ const SECTION_NAV_ITEMS = [
   { id: "climate", anchor: "data-section-climate", label: SECTION_TITLES.climate },
   { id: "operation", anchor: "data-section-operation", label: SECTION_TITLES.operation },
   { id: "airExchange", anchor: "data-section-air", label: SECTION_TITLES.airExchange },
-  { id: "humidity", anchor: "data-section-humidity", label: SECTION_TITLES.humidity },
   { id: "engineeringNetworks", anchor: "data-section-engineering", label: SECTION_TITLES.engineeringNetworks },
   { id: "ecology", anchor: "data-section-ecology", label: SECTION_TITLES.ecology },
   { id: "economy", anchor: "data-section-economy", label: SECTION_TITLES.economy },
@@ -71,21 +95,52 @@ const SECTION_NAV_ITEMS = [
   { id: "reports", anchor: "data-section-reports", label: SECTION_TITLES.reports },
 ] as const;
 
+type ScenarioSectionId = (typeof SECTION_NAV_ITEMS)[number]["id"];
+
+type ScenarioSectionShellProps = {
+  sectionId: ScenarioSectionId;
+  expandedSections: Set<ScenarioSectionId>;
+  onSectionExpandedChange: (sectionId: ScenarioSectionId, expanded: boolean) => void;
+  title: string;
+  description?: string;
+  kicker?: string;
+  action?: ReactNode;
+  children: ReactNode;
+  className?: string;
+};
+
+function ScenarioSectionShell({
+  sectionId,
+  expandedSections,
+  onSectionExpandedChange,
+  ...props
+}: ScenarioSectionShellProps) {
+  return (
+    <SectionShell
+      {...props}
+      collapsible
+      open={expandedSections.has(sectionId)}
+      onOpenChange={(open) => onSectionExpandedChange(sectionId, open)}
+    />
+  );
+}
+
 const FIELD_DISPLAY_META: Record<string, { title: string; caption?: string }> = {
   "geometry.envelope-area": { title: "Площадь наружной оболочки", caption: "A_env" },
   "geometry.wwr": { title: "Доля остекления фасада", caption: "WWR = A_win / A_facade" },
   "geometry.compactness": { title: "Коэффициент компактности здания", caption: "K_compact = A_env / V_h" },
-  "materials.window-u": { title: "Коэффициент теплопередачи окна", caption: "U окна" },
-  "materials.door-u": { title: "Коэффициент теплопередачи двери", caption: "U двери" },
-  "materials.window-g": { title: "Солнечный фактор окна", caption: "g-value" },
-  "materials.shading-factor": { title: "Коэффициент затенения", caption: "Shading factor" },
-  "materials.u-eq": { title: "Эквивалентный коэффициент теплопередачи Uэкв", caption: "U_eq" },
-  "materials.h-tr": { title: "Коэффициент теплопотерь через ограждения Htr", caption: "H_tr" },
-  "materials.h-total": { title: "Суммарный коэффициент теплопотерь", caption: "H_total" },
-  "materials.q-tr": { title: "Теплопотери через ограждения при расчётной ΔT", caption: "Q_tr" },
-  "materials.h-psi": { title: "Линейные мостики холода", caption: "H_psi" },
-  "materials.h-chi": { title: "Точечные мостики холода", caption: "H_chi" },
-  "materials.q-bridges": { title: "Потери через мостики холода", caption: "Q_thermal_bridges" },
+  "materials.window-u": { title: "Коэффициент теплопередачи окна" },
+  "materials.door-u": { title: "Коэффициент теплопередачи двери" },
+  "materials.window-g": { title: "Солнечный фактор окна" },
+  "materials.shading-factor": { title: "Коэффициент затенения" },
+  "materials.homogeneity-coefficient": { title: "Коэффициент однородности r" },
+  "materials.u-eq": { title: "Эквивалентный коэффициент теплопередачи Uэкв" },
+  "materials.h-tr": { title: "Коэффициент теплопотерь через ограждения Htr" },
+  "materials.h-total": { title: "Суммарный коэффициент теплопотерь" },
+  "materials.q-tr": { title: "Теплопотери через ограждения при расчётной ΔT" },
+  "materials.h-psi": { title: "Линейные мостики холода" },
+  "materials.h-chi": { title: "Точечные мостики холода" },
+  "materials.q-bridges": { title: "Потери через мостики холода" },
   "operation.peak-load": { title: "Пиковая нагрузка отопления", caption: "peakLoadKW" },
   "operation.total-energy": { title: "Энергопотребление за расчётный период", caption: "totalEnergyKWh" },
   "operation.degree-hours-underheat": { title: "Градусо-часы недотопа", caption: "DH_underheat" },
@@ -111,12 +166,24 @@ const FIELD_DISPLAY_META: Record<string, { title: string; caption?: string }> = 
   "air.h-inf": { title: "Коэффициент теплопотерь инфильтрации", caption: "H_inf" },
   "air.h-vent": { title: "Коэффициент теплопотерь вентиляции", caption: "H_ve" },
   "air.h-total": { title: "Суммарный коэффициент теплопотерь воздухообмена", caption: "H_total" },
-  "humidity.f-rsi": { title: "Температурный фактор внутренней поверхности", caption: "f_Rsi" },
-  "humidity.mrt": { title: "Средняя радиационная температура", caption: "MRT / T_mrt" },
-  "humidity.t-op": { title: "Оперативная температура", caption: "T_op" },
+  "humidity.rh": { title: "Относительная влажность" },
+  "humidity.dew-point": { title: "Точка росы" },
+  "humidity.surface-temp": { title: "Минимальная температура внутренней поверхности" },
+  "humidity.f-rsi": { title: "Температурный фактор внутренней поверхности" },
+  "humidity.condensation-margin": { title: "Запас до точки росы" },
+  "humidity.condensation-status": { title: "Статус поверхности" },
+  "humidity.comfort-min": { title: "Минимально допустимая температура" },
+  "humidity.comfort-max": { title: "Максимально допустимая температура" },
+  "humidity.mrt": { title: "Средняя радиационная температура" },
+  "humidity.t-op": { title: "Оперативная температура" },
+  "engineering.delta-t": { title: "ΔT теплоносителя", caption: "T_подачи − T_обратки" },
   "engineering.hydronic-capacity": { title: "Гидравлическая мощность отопления", caption: "Q_hyd" },
   "engineering.required-mass-flow": { title: "Требуемый массовый расход теплоносителя", caption: "requiredMassFlow" },
   "engineering.required-volume-flow": { title: "Требуемый объёмный расход теплоносителя", caption: "requiredVolumeFlow" },
+  "engineering.pipe-count": { title: "Количество трубных участков" },
+  "engineering.pipe-total-length": { title: "Суммарная длина труб" },
+  "engineering.pipe-diameter": { title: "Диаметры труб в модели" },
+  "engineering.pipe-insulation": { title: "Теплоизоляция труб", caption: "изолировано / всего" },
   "engineering.peak-unmet-load": { title: "Непокрытая пиковая нагрузка", caption: "peakUnmetLoadKW" },
   "engineering.unmet-energy": { title: "Непокрытая энергия", caption: "unmetEnergyKWh" },
   "ecology.ef": { title: "Удельный коэффициент выбросов CO₂", caption: "emissionFactorKgPerKWh" },
@@ -127,11 +194,11 @@ const FIELD_DISPLAY_META: Record<string, { title: string; caption?: string }> = 
 function getFieldDisplayMeta(field: SourceDataField): { title: string; caption?: string } {
   const meta = FIELD_DISPLAY_META[field.key];
   if (!meta) {
-    return { title: field.label, caption: field.notes[0] || undefined };
+    return { title: field.label };
   }
   return {
     title: meta.title,
-    caption: field.notes[0] || meta.caption,
+    caption: meta.caption,
   };
 }
 
@@ -176,6 +243,34 @@ function scenarioFieldSource(
   return hasExplicitValue ? explicitSource : fallbackSource;
 }
 
+function ventilationInputSourceToOrigin(source: VentilationInputSource): SourceDataOrigin {
+  switch (source) {
+    case "user":
+      return "scenario";
+    case "model":
+      return "model";
+    case "calculated":
+      return "calculated";
+    default:
+      return "fallback";
+  }
+}
+
+function engineeringInputSourceToOrigin(source: EngineeringInputSource): SourceDataOrigin {
+  switch (source) {
+    case "user":
+      return "scenario";
+    case "model":
+      return "model";
+    case "result":
+      return "result";
+    case "calculated":
+      return "calculated";
+    default:
+      return "fallback";
+  }
+}
+
 function sourceTone(origin: SourceDataOrigin): "neutral" | "info" | "success" | "warning" | "accent" {
   switch (origin) {
     case "model":
@@ -198,19 +293,19 @@ function sourceTone(origin: SourceDataOrigin): "neutral" | "info" | "success" | 
 function sourceLabel(origin: SourceDataOrigin, demoMode = false): string {
   switch (origin) {
     case "model":
-      return "из модели";
+      return MODEL_SOURCE_LABEL;
     case "user":
     case "scenario":
       return "задано пользователем";
     case "calculated":
     case "result":
-      return "рассчитано автоматически";
+      return AUTO_CALCULATED_SOURCE_LABEL;
     case "sp50":
       return "из СП 50";
     case "sp131":
       return "из СП 131";
     case "fallback":
-      return demoMode ? "демо-значение, можно заменить" : "демо-значение, можно заменить";
+      return DEMO_FALLBACK_SOURCE_LABEL;
     default:
       return "нет данных";
   }
@@ -360,39 +455,67 @@ function resolveConstructionPreviewWallId(
   return model.walls.find((wall) => wall.id === constructionId)?.id ?? null;
 }
 
-function statusMeta(status: SourceDataSummaryCard["status"]): {
-  label: string;
-  tone: "success" | "warning" | "neutral";
-} {
-  switch (status) {
-    case "sufficient":
-      return { label: "готово", tone: "success" };
-    case "partial":
-      return { label: "нужно уточнить", tone: "warning" };
-    default:
-      return { label: "нет данных", tone: "neutral" };
+function SourceBadge({
+  origin,
+  demoMode = false,
+  formulaFieldKey,
+}: {
+  origin: SourceDataOrigin;
+  demoMode?: boolean;
+  formulaFieldKey?: string;
+}) {
+  const label = sourceLabel(origin, demoMode);
+  const formulaInfo =
+    formulaFieldKey &&
+    (isAutoCalculatedDataSource(origin) || isModelDataSource(origin))
+      ? getSourceFieldFormulaInfo(formulaFieldKey)
+      : undefined;
+
+  const wrapWithFormulaTooltip = (badge: ReactNode) => {
+    if (!formulaInfo) {
+      return badge;
+    }
+    return (
+      <FormulaTooltip
+        title={formulaInfo.title}
+        meaning={formulaInfo.meaning}
+        formula={formulaInfo.formula}
+        inputs={formulaInfo.inputs}
+        notes={formulaInfo.notes}
+        linkedFormulaIds={formulaInfo.linkedFormulaIds}
+        className="inline-flex shrink-0"
+      >
+        {badge}
+      </FormulaTooltip>
+    );
+  };
+
+  if (isAutoCalculatedDataSource(origin)) {
+    return wrapWithFormulaTooltip(
+      <Badge
+        tone={sourceTone(origin)}
+        className="ui-build-badge--icon-only"
+        title={formulaInfo ? undefined : label}
+      >
+        <AutoCalculatedSourceIcon size={20} />
+      </Badge>
+    );
   }
-}
-
-function DataCompletenessCard({ card }: { card: SourceDataSummaryCard }) {
-  const meta = statusMeta(card.status);
-  return (
-    <article className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-elevated)] p-4 shadow-[var(--shadow-control)]">
-      <div className="flex items-start justify-between gap-3">
-        <div className="space-y-1">
-          <p className="text-sm font-semibold text-[color:var(--text-base)]">{card.label}</p>
-        </div>
-        <Badge tone={meta.tone}>{meta.label}</Badge>
-      </div>
-      <p className="mt-4 text-3xl font-semibold tracking-tight text-[color:var(--text-base)]">
-        {card.completionPercent}%
-      </p>
-    </article>
-  );
-}
-
-function SourceBadge({ origin, demoMode = false }: { origin: SourceDataOrigin; demoMode?: boolean }) {
-  return <Badge tone={sourceTone(origin)}>{sourceLabel(origin, demoMode)}</Badge>;
+  if (isModelDataSource(origin)) {
+    return wrapWithFormulaTooltip(
+      <Badge tone={sourceTone(origin)} className="ui-build-badge--icon-only" title={formulaInfo ? undefined : label}>
+        <ModelSourceIcon size={20} />
+      </Badge>
+    );
+  }
+  if (isDemoFallbackDataSource(origin)) {
+    return (
+      <Badge tone={sourceTone(origin)} className="ui-build-badge--icon-only" title={label}>
+        <DemoFallbackSourceIcon size={20} />
+      </Badge>
+    );
+  }
+  return <Badge tone={sourceTone(origin)}>{label}</Badge>;
 }
 
 function FieldHelp({
@@ -405,7 +528,7 @@ function FieldHelp({
   const note = field.warnings[0] ?? getMissingFieldExplanation(field);
   return (
     <div className="mt-2 flex flex-wrap items-center gap-2">
-      <SourceBadge origin={field.source} demoMode={demoMode} />
+      <SourceBadge origin={field.source} demoMode={demoMode} formulaFieldKey={field.key} />
       {note ? <span className="text-xs text-[color:var(--warning-fg)]">{note}</span> : null}
     </div>
   );
@@ -430,14 +553,13 @@ function ReadOnlyFieldCard({
             <p className="text-xs text-[color:var(--text-soft)]">{display.caption}</p>
           ) : null}
         </div>
-        {showSourceBadge ? <SourceBadge origin={field.source} demoMode={demoMode} /> : null}
+        {showSourceBadge ? (
+          <SourceBadge origin={field.source} demoMode={demoMode} formulaFieldKey={field.key} />
+        ) : null}
       </div>
       <p className="mt-4 text-lg font-semibold text-[color:var(--text-base)]">
         {formatFieldValue(field)}
       </p>
-      {field.warnings[0] || field.missing ? (
-        <p className="mt-2 text-xs text-[color:var(--warning-fg)]">{field.warnings[0] ?? getMissingFieldExplanation(field)}</p>
-      ) : null}
     </div>
   );
 }
@@ -452,6 +574,8 @@ function NumberInputField({
   placeholder,
   min,
   step,
+  showSourceBadge = true,
+  formulaFieldKey,
 }: {
   label: string;
   value: number | null | undefined;
@@ -462,12 +586,14 @@ function NumberInputField({
   placeholder?: string;
   min?: number;
   step?: number;
+  showSourceBadge?: boolean;
+  formulaFieldKey?: string;
 }) {
   return (
     <label className="block space-y-2">
       <div className="flex items-center justify-between gap-3">
         <span className="text-sm font-medium text-[color:var(--text-base)]">{label}</span>
-        <SourceBadge origin={source} />
+        {showSourceBadge ? <SourceBadge origin={source} formulaFieldKey={formulaFieldKey} /> : null}
       </div>
       <div className="relative">
         <input
@@ -565,6 +691,8 @@ function SelectField({
   warning,
   options,
   onChange,
+  showSourceBadge = true,
+  formulaFieldKey,
 }: {
   label: string;
   value: string | null | undefined;
@@ -572,12 +700,14 @@ function SelectField({
   warning?: string | null;
   options: Array<{ value: string; label: string }>;
   onChange: (next: string | null) => void;
+  showSourceBadge?: boolean;
+  formulaFieldKey?: string;
 }) {
   return (
     <label className="block space-y-2">
       <div className="flex items-center justify-between gap-3">
         <span className="text-sm font-medium text-[color:var(--text-base)]">{label}</span>
-        <SourceBadge origin={source} />
+        {showSourceBadge ? <SourceBadge origin={source} formulaFieldKey={formulaFieldKey} /> : null}
       </div>
       <select
         value={value ?? ""}
@@ -644,6 +774,7 @@ export function ScenariosWorkspacePage() {
   const projectId = useProjectStore((state) => state.projectId);
   const projectKind = useProjectStore((state) => state.projectKind);
   const buildModel = useBuildStore((state) => state.model);
+  const solarTime = useBuildStore((state) => state.solarTime);
   const projectKey = useBuildStore((state) => state.projectKey);
   const modelRevision = useBuildStore((state) => state.modelRevision);
   const setBuildSelection = useBuildStore((state) => state.setSelection);
@@ -664,6 +795,24 @@ export function ScenariosWorkspacePage() {
     formatValidationSeries(scenario.validation?.measuredSeries)
   );
   const [validationSeriesErrors, setValidationSeriesErrors] = useState(0);
+  const [expandedSections, setExpandedSections] = useState<Set<ScenarioSectionId>>(() => new Set());
+
+  const handleSectionExpandedChange = (sectionId: ScenarioSectionId, expanded: boolean) => {
+    setExpandedSections((prev) => {
+      const next = new Set(prev);
+      if (expanded) {
+        next.add(sectionId);
+      } else {
+        next.delete(sectionId);
+      }
+      return next;
+    });
+  };
+
+  const sectionShellProps = {
+    expandedSections,
+    onSectionExpandedChange: handleSectionExpandedChange,
+  };
 
   useEffect(() => {
     setCurrentStep("scenario");
@@ -689,31 +838,35 @@ export function ScenariosWorkspacePage() {
     () => (hasBuildGeometryForProject ? buildModel : createEmptyBuildingModel()),
     [buildModel, hasBuildGeometryForProject]
   );
+  const strictModelForData = useMemo(() => {
+    const prepared = prepareModelForSourceData(strictModel, rawScenarioConfig);
+    return applyDefaultOpeningEnvelopeToModel(prepared);
+  }, [rawScenarioConfig, strictModel]);
+
   const currentThermalResult =
     thermalResultState === "current" && solveCompleted ? lastThermalResult : null;
   const reportInputSnapshot = reportInputs ?? getReportInputs(projectKey);
   const dataReport = useMemo(
     () =>
       buildSourceDataWorkspaceReport({
-        model: strictModel,
+        model: strictModelForData,
         scenarioConfig: rawScenarioConfig,
         thermalResult: currentThermalResult,
         reportInputs: reportInputSnapshot,
+        solarTime,
       }),
-    [currentThermalResult, rawScenarioConfig, reportInputSnapshot, strictModel]
+    [currentThermalResult, rawScenarioConfig, reportInputSnapshot, solarTime, strictModelForData]
   );
 
   const hasModel = strictModel.rooms.length > 0 || strictModel.walls.length > 0;
   const isDemoProject = isCanonicalDemoProjectModel(strictModel);
-  const humidityWarnings = dataReport.sections.humidity.warnings.filter(
-    (warning) => !warning.includes("MRT не задана.")
-  );
-  const summaryCards = dataReport.summaryCards.filter(
-    (card) => card.id !== "humidity" && card.id !== "economy"
-  );
   const scrollToSection = (anchor: string) => {
     if (typeof document === "undefined") {
       return;
+    }
+    const navItem = SECTION_NAV_ITEMS.find((item) => item.anchor === anchor);
+    if (navItem) {
+      handleSectionExpandedChange(navItem.id, true);
     }
     document.getElementById(anchor)?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
@@ -743,22 +896,132 @@ export function ScenariosWorkspacePage() {
   const climateManual = rawScenarioConfig?.climate?.manual;
   const rawMaterials = rawScenarioConfig?.materials;
   const rawOperation = rawScenarioConfig?.operation;
-  const rawComfort = rawScenarioConfig?.comfort;
   const rawEngineering = rawScenarioConfig?.engineeringSystems;
   const rawEcology = rawScenarioConfig?.ecology;
   const rawEconomy = rawScenarioConfig?.economy;
   const rawValidation = rawScenarioConfig?.validation;
+  const matComputedFields = dataReport.sections.materials.computedFields;
+  const modelWindowUField = matComputedFields.find((f) => f.key === "materials.window-u");
+  const modelDoorUField = matComputedFields.find((f) => f.key === "materials.door-u");
+  const modelWindowGField = matComputedFields.find((f) => f.key === "materials.window-g");
+  const modelShadingField = matComputedFields.find((f) => f.key === "materials.shading-factor");
+  const modelHomogeneityField = matComputedFields.find((f) => f.key === "materials.homogeneity-coefficient");
+  const modelHpsiField = matComputedFields.find((f) => f.key === "materials.h-psi");
+  const modelHchiField = matComputedFields.find((f) => f.key === "materials.h-chi");
+  const bridgeModeField = matComputedFields.find((f) => f.key === "materials.bridge-mode");
+  const effectiveBridgeMode =
+    typeof bridgeModeField?.value === "string" ? bridgeModeField.value : "disabled";
+  const bridgesInEnergyBalance = effectiveBridgeMode === "explicitPsiChi";
+  const envelopeBridgePreview = useMemo(
+    () => aggregateEnvelopeBridgeConductances(strictModelForData),
+    [strictModelForData]
+  );
   const modelHpsi =
-    (typeof dataReport.sections.materials.computedFields.find((f) => f.key === "materials.h-psi")?.value === "number"
-      ? (dataReport.sections.materials.computedFields.find((f) => f.key === "materials.h-psi")?.value as number)
-      : null) ?? null;
+    envelopeBridgePreview.H_psi ??
+    (typeof modelHpsiField?.value === "number" ? modelHpsiField.value : null);
   const modelHchi =
-    (typeof dataReport.sections.materials.computedFields.find((f) => f.key === "materials.h-chi")?.value === "number"
-      ? (dataReport.sections.materials.computedFields.find((f) => f.key === "materials.h-chi")?.value as number)
-      : null) ?? null;
-  const climateDesignPlaceholder = dataReport.sections.climate.computedFields.find((field) => field.key === "climate.design-outdoor")?.value;
-  const climateAveragePlaceholder = dataReport.sections.climate.computedFields.find((field) => field.key === "climate.heating-average")?.value;
-  const climateDurationPlaceholder = dataReport.sections.climate.computedFields.find((field) => field.key === "climate.heating-duration")?.value;
+    envelopeBridgePreview.H_chi ??
+    (typeof modelHchiField?.value === "number" ? modelHchiField.value : null);
+  // Поля, которые уже отображаются выше как редактируемые — не дублируем в нижней сетке
+  const economyTariffField = dataReport.sections.economy.computedFields.find((field) => field.key === "economy.tariff");
+  const economyHeatingSourceField = dataReport.sections.economy.computedFields.find(
+    (field) => field.key === "economy.heating-source"
+  );
+  const EDITABLE_MAT_KEYS = new Set([
+    "materials.bridge-mode",
+    "materials.window-u",
+    "materials.door-u",
+    "materials.window-g",
+    "materials.shading-factor",
+    "materials.h-psi",
+    "materials.h-chi",
+  ]);
+  const climateComputedFields = dataReport.sections.climate.computedFields;
+  const climateDesignField = climateComputedFields.find((field) => field.key === "climate.design-outdoor");
+  const climateAverageField = climateComputedFields.find((field) => field.key === "climate.heating-average");
+  const climateDurationField = climateComputedFields.find((field) => field.key === "climate.heating-duration");
+  const resolvedVentilation = useMemo(
+    () => resolveScenarioVentilationInputs(rawScenarioConfig, scenario, strictModelForData),
+    [rawScenarioConfig, scenario, strictModelForData]
+  );
+  const airSection = dataReport.sections.airExchange;
+  const airReadonlyKeys = new Set([
+    "air.infiltration-mode",
+    "air.ventilation-ach",
+    "air.infiltration-ach",
+    "air.infiltration-source",
+  ]);
+  const airComputedFields = airSection.computedFields.filter((field) => !airReadonlyKeys.has(field.key));
+  const infiltrationMode = scenario.ventilation.infiltrationMode ?? "manualAch";
+  const airActionableWarnings = airSection.warnings.filter(
+    (warning) => !warning.includes("Рекуперация применяется только")
+  );
+  const resolvedEngineering = useMemo(() => {
+    const requiredPowerW =
+      currentThermalResult?.summary.peakLoadKW != null ? currentThermalResult.summary.peakLoadKW * 1000 : null;
+    const provisionalDeltaT =
+      scenario.engineeringSystems?.supplyTemperatureC != null &&
+      scenario.engineeringSystems?.returnTemperatureC != null
+        ? scenario.engineeringSystems.supplyTemperatureC - scenario.engineeringSystems.returnTemperatureC
+        : 20;
+    const provisionalRequiredMassFlowKgS =
+      requiredPowerW != null && provisionalDeltaT > 0
+        ? calculateRequiredHydronicMassFlow(requiredPowerW, provisionalDeltaT, 4186)
+        : null;
+    return resolveScenarioEngineeringInputs(
+      rawScenarioConfig,
+      scenario,
+      strictModelForData,
+      currentThermalResult,
+      provisionalRequiredMassFlowKgS
+    );
+  }, [currentThermalResult, rawScenarioConfig, scenario, strictModelForData]);
+  const engineeringSection = dataReport.sections.engineeringNetworks;
+  const engineeringReadonlyKeys = new Set([
+    "engineering.heating-enabled",
+    "engineering.heating-mode",
+    "engineering.supply-temp",
+    "engineering.return-temp",
+    "engineering.mass-flow",
+    "engineering.heat-carrier",
+    "engineering.installed-capacity",
+  ]);
+  const engineeringComputedFields = engineeringSection.computedFields.filter(
+    (field) => !engineeringReadonlyKeys.has(field.key)
+  );
+  const engineeringActionableWarnings = engineeringSection.warnings.filter(
+    (warning) =>
+      !warning.includes("подставлена") &&
+      !warning.includes("подставлен") &&
+      !warning.includes("рассчитана как") &&
+      !warning.includes("справочные свойства")
+  );
+  const modelClimateCityId = inferSp131CityIdFromClimate(strictModelForData.thermalProtection?.climate);
+  const resolvedClimateCityId = rawClimateCityId || modelClimateCityId || "moscow";
+  const selectedCityClimate = getSp131CityClimate(resolvedClimateCityId);
+  const modelClimate = strictModelForData.thermalProtection?.climate;
+  const modelDesignOutdoorC =
+    modelClimate?.outdoorDesignTemperatureC ??
+    (typeof climateDesignField?.value === "number" ? climateDesignField.value : selectedCityClimate?.outdoorDesignTemperatureC ?? null);
+  const modelHeatingAverageC =
+    modelClimate?.outdoorHeatingPeriodAverageC ??
+    (typeof climateAverageField?.value === "number" ? climateAverageField.value : selectedCityClimate?.outdoorHeatingPeriodAverageC ?? null);
+  const modelHeatingDurationDays =
+    modelClimate?.heatingPeriodDurationDays ??
+    (typeof climateDurationField?.value === "number" ? climateDurationField.value : selectedCityClimate?.heatingPeriodDurationDays ?? null);
+  const displayDesignOutdoorC = climateManual?.outdoorDesignTemperatureC ?? modelDesignOutdoorC;
+  const displayHeatingAverageC = climateManual?.outdoorHeatingAverageC ?? modelHeatingAverageC;
+  const displayHeatingDurationDays = climateManual?.heatingDurationDays ?? modelHeatingDurationDays;
+  const EDITABLE_CLIMATE_KEYS = new Set([
+    "climate.city",
+    "climate.source",
+    "climate.design-outdoor",
+    "climate.heating-average",
+    "climate.heating-duration",
+    "climate.baseC",
+    "climate.amplitude",
+    "climate.offset",
+  ]);
   const missingGeometryMessage = buildModelMatchesProject
     ? "Для расчёта используется только локальная 2D/build-модель текущего проекта. Сначала соберите или импортируйте её в конструкторе."
     : "В build-store сейчас нет локальной модели для текущего проекта. Расчёт по данным другого проекта отключён.";
@@ -794,24 +1057,6 @@ export function ScenariosWorkspacePage() {
 
       {!hasBuildGeometryForProject ? null : (
         <>
-      {dataReport.reportWarnings.length ? (
-        <EngineeringCallout variant="assumption" title="Источники и допущения">
-          <ul>
-            {dataReport.reportWarnings.slice(0, 5).map((warning) => (
-              <li key={warning}>{warning}</li>
-            ))}
-          </ul>
-        </EngineeringCallout>
-      ) : null}
-
-      <SectionShell title="Сводка">
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {summaryCards.map((card) => (
-            <DataCompletenessCard key={card.id} card={card} />
-          ))}
-        </div>
-      </SectionShell>
-
       <div className="sticky top-2 z-10 overflow-x-auto rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-elevated)] px-3 py-3 shadow-[var(--shadow-control)]">
         <div className="flex min-w-max gap-2">
           {SECTION_NAV_ITEMS.map((item) => (
@@ -828,18 +1073,10 @@ export function ScenariosWorkspacePage() {
       </div>
 
       <div id="data-section-geometry" className="scroll-mt-24">
-      <SectionShell
+      <ScenarioSectionShell
+        {...sectionShellProps}
+        sectionId="geometry"
         title={SECTION_TITLES.geometry}
-        action={
-          <div className="flex gap-2">
-            <button type="button" onClick={() => scrollToSection("data-section-materials")} className="ui-btn-secondary px-3 py-2 text-sm">
-              К материалам
-            </button>
-            <button type="button" onClick={() => navigate("/model")} className="ui-btn-secondary px-3 py-2 text-sm">
-              Показать на модели
-            </button>
-          </div>
-        }
       >
         <SectionWarnings warnings={dataReport.sections.geometry.warnings} />
         {hasModel ? (
@@ -925,29 +1162,235 @@ export function ScenariosWorkspacePage() {
             }
           />
         )}
-      </SectionShell>
+      </ScenarioSectionShell>
       </div>
 
       <div id="data-section-materials" className="scroll-mt-24">
-      <SectionShell
+      <ScenarioSectionShell
+        {...sectionShellProps}
+        sectionId="materials"
         title={SECTION_TITLES.materials}
-        action={
-          <button type="button" onClick={() => navigate("/model")} className="ui-btn-secondary px-3 py-2 text-sm">
-            Открыть конструктор
-          </button>
-        }
       >
-        <SectionWarnings warnings={dataReport.sections.materials.warnings} />
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr),24rem]">
-          <div className="space-y-4">
-            {dataReport.constructions.length ? (
-              dataReport.constructions.map((construction) => (
+        <div className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <SelectField
+              label="Учёт неоднородностей"
+              value={rawMaterials?.bridgeAccountingMode ?? "auto"}
+              source={
+                rawMaterials?.bridgeAccountingMode != null
+                  ? "user"
+                  : (dataReport.sections.materials.computedFields.find((f) => f.key === "materials.bridge-mode")
+                      ?.source ?? "calculated")
+              }
+              formulaFieldKey="materials.bridge-mode"
+              options={[
+                { value: "auto", label: "автоматически (точнее по данным)" },
+                { value: "disabled", label: "не учитывать" },
+                { value: "homogeneityCoefficient", label: "коэффициент однородности r" },
+                { value: "explicitPsiChi", label: "линейные/точечные мостики ψ/χ" },
+              ]}
+              onChange={(next) =>
+                updateScenario((draft) => {
+                  draft.materials = draft.materials ?? {};
+                  if (next == null || next === "auto") {
+                    delete draft.materials.bridgeAccountingMode;
+                  } else {
+                    draft.materials.bridgeAccountingMode = next as
+                      | "disabled"
+                      | "homogeneityCoefficient"
+                      | "explicitPsiChi";
+                  }
+                })
+              }
+            />
+            <NumberInputField
+              label="Коэффициент однородности r"
+              value={
+                rawMaterials?.homogeneityCoefficient ??
+                (typeof modelHomogeneityField?.value === "number" ? modelHomogeneityField.value : null)
+              }
+              source={
+                rawMaterials?.homogeneityCoefficient != null
+                  ? "user"
+                  : (modelHomogeneityField?.source ?? "missing")
+              }
+              formulaFieldKey="materials.homogeneity-coefficient"
+              onChange={(next) =>
+                updateScenario((draft) => {
+                  draft.materials = draft.materials ?? {};
+                  draft.materials.homogeneityCoefficient = next;
+                })
+              }
+            />
+            <NumberInputField
+              label="U окна"
+              value={
+                rawMaterials?.windowUValue_W_m2K ??
+                (typeof modelWindowUField?.value === "number" ? modelWindowUField.value : null)
+              }
+              unit="Вт/(м²·К)"
+              source={rawMaterials?.windowUValue_W_m2K != null ? "user" : (modelWindowUField?.source ?? "fallback")}
+              onChange={(next) => {
+                updateScenario((draft) => {
+                  draft.materials = draft.materials ?? {};
+                  draft.materials.windowUValue_W_m2K = next;
+                });
+                updateModel((model) =>
+                  setModelOpeningUValues(model, {
+                    windowU_W_m2K: next,
+                    doorU_W_m2K: scenario.materials?.doorUValue_W_m2K ?? null,
+                  })
+                );
+              }}
+            />
+            <NumberInputField
+              label="U двери"
+              value={
+                rawMaterials?.doorUValue_W_m2K ??
+                (typeof modelDoorUField?.value === "number" ? modelDoorUField.value : null)
+              }
+              unit="Вт/(м²·К)"
+              source={rawMaterials?.doorUValue_W_m2K != null ? "user" : (modelDoorUField?.source ?? "fallback")}
+              onChange={(next) => {
+                updateScenario((draft) => {
+                  draft.materials = draft.materials ?? {};
+                  draft.materials.doorUValue_W_m2K = next;
+                });
+                updateModel((model) =>
+                  setModelOpeningUValues(model, {
+                    windowU_W_m2K: scenario.materials?.windowUValue_W_m2K ?? null,
+                    doorU_W_m2K: next,
+                  })
+                );
+              }}
+            />
+            <NumberInputField
+              label="Солнечный фактор окна"
+              value={
+                rawMaterials?.windowGValue ??
+                (typeof modelWindowGField?.value === "number" ? modelWindowGField.value : null)
+              }
+              source={rawMaterials?.windowGValue != null ? "user" : (modelWindowGField?.source ?? "fallback")}
+              onChange={(next) => {
+                updateScenario((draft) => {
+                  draft.materials = draft.materials ?? {};
+                  draft.materials.windowGValue = next;
+                });
+                updateModel((model) =>
+                  setModelOpticalFactors(model, {
+                    windowGValue: next,
+                    shadingFactor: scenario.materials?.shadingFactor ?? null,
+                  })
+                );
+              }}
+            />
+            <NumberInputField
+              label="Коэффициент затенения"
+              value={
+                rawMaterials?.shadingFactor ??
+                (typeof modelShadingField?.value === "number" ? modelShadingField.value : null)
+              }
+              source={
+                rawMaterials?.shadingFactor != null
+                  ? "user"
+                  : (modelShadingField?.source ?? "missing")
+              }
+              formulaFieldKey="materials.shading-factor"
+              warning={modelShadingField?.notes[0] ?? null}
+              onChange={(next) => {
+                updateScenario((draft) => {
+                  draft.materials = draft.materials ?? {};
+                  draft.materials.shadingFactor = next;
+                });
+                updateModel((model) =>
+                  setModelOpticalFactors(model, {
+                    windowGValue: scenario.materials?.windowGValue ?? null,
+                    shadingFactor: next,
+                  })
+                );
+              }}
+            />
+            <NumberInputField
+              label="H_psi (линейные мостики)"
+              value={modelHpsi}
+              unit="Вт/К"
+              source={
+                modelHpsi != null
+                  ? envelopeBridgePreview.hasLinear
+                    ? "sp50"
+                    : "calculated"
+                  : "missing"
+              }
+              formulaFieldKey="materials.h-psi"
+              showSourceBadge={bridgesInEnergyBalance && modelHpsi != null}
+              onChange={(next) =>
+                updateModel((model) =>
+                  setModelBridgeConductance(model, {
+                    H_psi_W_K: next,
+                    H_chi_W_K: modelHchi,
+                  })
+                )
+              }
+            />
+            <NumberInputField
+              label="H_chi (точечные мостики)"
+              value={modelHchi}
+              unit="Вт/К"
+              source={
+                modelHchi != null
+                  ? envelopeBridgePreview.hasPoint
+                    ? "sp50"
+                    : "calculated"
+                  : "missing"
+              }
+              formulaFieldKey="materials.h-chi"
+              showSourceBadge={bridgesInEnergyBalance && modelHchi != null}
+              onChange={(next) =>
+                updateModel((model) =>
+                  setModelBridgeConductance(model, {
+                    H_psi_W_K: modelHpsi,
+                    H_chi_W_K: next,
+                  })
+                )
+              }
+            />
+          </div>
+          {modelHpsi == null && modelHchi == null ? (
+            <EngineeringCallout variant="assumption" title="Мостики холода">
+              <p>
+                Не удалось рассчитать H_psi и H_chi из модели. Назначьте наружным стенам пресет ограждения или слои
+                материалов в конструкторе — после сохранения значения подставятся по СП 230 (углы, окна, анкеры).
+              </p>
+            </EngineeringCallout>
+          ) : null}
+          <div className="grid gap-3 lg:grid-cols-3 xl:grid-cols-4">
+            {dataReport.sections.materials.computedFields
+              .filter((field) => !EDITABLE_MAT_KEYS.has(field.key))
+              .map((field) => (
+                <ReadOnlyFieldCard key={field.key} field={field} demoMode={isDemoProject} />
+              ))}
+          </div>
+          {dataReport.constructions.length ? (
+            <details
+              className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-elevated)]"
+              open={false}
+            >
+              <summary className="cursor-pointer select-none list-none px-4 py-4 [&::-webkit-details-marker]:hidden">
+                <div>
+                  <p className="text-sm font-semibold text-[color:var(--text-base)]">Конструкции ограждения</p>
+                  <p className="mt-1 text-xs text-[color:var(--text-soft)]">
+                    {dataReport.constructions.length} шт.
+                  </p>
+                </div>
+              </summary>
+              <div className="space-y-3 border-t border-[color:var(--border-soft)] px-4 pb-4 pt-4">
+              {dataReport.constructions.map((construction) => (
                 <details
                   key={construction.id}
-                  className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-elevated)]"
+                  className="rounded-xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)]"
                   open={false}
                 >
-                  <summary className="cursor-pointer select-none list-none px-4 py-4 [&::-webkit-details-marker]:hidden">
+                  <summary className="cursor-pointer select-none list-none px-3 py-3 [&::-webkit-details-marker]:hidden">
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
                         <p className="text-sm font-semibold text-[color:var(--text-base)]">{construction.label}</p>
@@ -957,7 +1400,7 @@ export function ScenariosWorkspacePage() {
                       </div>
                     </div>
                   </summary>
-                  <div className="space-y-4 border-t border-[color:var(--border-soft)] px-4 pb-4 pt-4">
+                  <div className="space-y-4 border-t border-[color:var(--border-soft)] px-3 pb-3 pt-3">
                     <div className="flex flex-wrap items-center gap-2">
                       <button
                         type="button"
@@ -1004,7 +1447,9 @@ export function ScenariosWorkspacePage() {
                     ) : null}
                   </div>
                 </details>
-              ))
+              ))}
+              </div>
+            </details>
             ) : (
               <EmptyWorkspaceState
                 title="Материалы и конструкции пока не назначены"
@@ -1016,215 +1461,122 @@ export function ScenariosWorkspacePage() {
                 }
               />
             )}
-          </div>
-          <div className="space-y-4">
-            <SelectField
-              label="Учёт неоднородностей"
-              value={scenario.materials?.bridgeAccountingMode ?? "disabled"}
-              source={scenarioFieldSource(Boolean(rawMaterials?.bridgeAccountingMode))}
-              warning={dataReport.sections.materials.warnings[0] ?? null}
-              options={[
-                { value: "disabled", label: "не учитывать" },
-                { value: "homogeneityCoefficient", label: "коэффициент однородности r" },
-                { value: "explicitPsiChi", label: "линейные/точечные мостики ψ/χ" },
-              ]}
-              onChange={(next) =>
-                updateScenario((draft) => {
-                  draft.materials = draft.materials ?? {};
-                  draft.materials.bridgeAccountingMode =
-                    (next ?? "disabled") as "disabled" | "homogeneityCoefficient" | "explicitPsiChi";
-                })
-              }
-            />
-            <NumberInputField
-              label="Коэффициент однородности r"
-              value={scenario.materials?.homogeneityCoefficient ?? null}
-              source={scenarioFieldSource(rawMaterials?.homogeneityCoefficient != null)}
-              warning={
-                scenario.materials?.bridgeAccountingMode === "explicitPsiChi"
-                  ? "При explicit ψ/χ коэффициент однородности не должен дополнительно ухудшать R."
-                  : null
-              }
-              onChange={(next) =>
-                updateScenario((draft) => {
-                  draft.materials = draft.materials ?? {};
-                  draft.materials.homogeneityCoefficient = next;
-                })
-              }
-            />
-            <NumberInputField
-              label="U окна"
-              value={scenario.materials?.windowUValue_W_m2K ?? null}
-              unit="Вт/(м²·К)"
-              source={scenarioFieldSource(rawMaterials?.windowUValue_W_m2K != null)}
-              onChange={(next) => {
-                updateScenario((draft) => {
-                  draft.materials = draft.materials ?? {};
-                  draft.materials.windowUValue_W_m2K = next;
-                });
-                updateModel((model) =>
-                  setModelOpeningUValues(model, {
-                    windowU_W_m2K: next,
-                    doorU_W_m2K: scenario.materials?.doorUValue_W_m2K ?? null,
-                  })
-                );
-              }}
-            />
-            <NumberInputField
-              label="U двери"
-              value={scenario.materials?.doorUValue_W_m2K ?? null}
-              unit="Вт/(м²·К)"
-              source={scenarioFieldSource(rawMaterials?.doorUValue_W_m2K != null)}
-              onChange={(next) => {
-                updateScenario((draft) => {
-                  draft.materials = draft.materials ?? {};
-                  draft.materials.doorUValue_W_m2K = next;
-                });
-                updateModel((model) =>
-                  setModelOpeningUValues(model, {
-                    windowU_W_m2K: scenario.materials?.windowUValue_W_m2K ?? null,
-                    doorU_W_m2K: next,
-                  })
-                );
-              }}
-            />
-            <NumberInputField
-              label="Солнечный фактор окна"
-              value={scenario.materials?.windowGValue ?? null}
-              source={scenarioFieldSource(rawMaterials?.windowGValue != null)}
-              onChange={(next) => {
-                updateScenario((draft) => {
-                  draft.materials = draft.materials ?? {};
-                  draft.materials.windowGValue = next;
-                });
-                updateModel((model) =>
-                  setModelOpticalFactors(model, {
-                    windowGValue: next,
-                    shadingFactor: scenario.materials?.shadingFactor ?? null,
-                  })
-                );
-              }}
-            />
-            <NumberInputField
-              label="Коэффициент затенения"
-              value={scenario.materials?.shadingFactor ?? null}
-              source={scenarioFieldSource(rawMaterials?.shadingFactor != null)}
-              onChange={(next) => {
-                updateScenario((draft) => {
-                  draft.materials = draft.materials ?? {};
-                  draft.materials.shadingFactor = next;
-                });
-                updateModel((model) =>
-                  setModelOpticalFactors(model, {
-                    windowGValue: scenario.materials?.windowGValue ?? null,
-                    shadingFactor: next,
-                  })
-                );
-              }}
-            />
-            <NumberInputField
-              label="H_psi (линейные мостики)"
-              value={modelHpsi}
-              unit="Вт/К"
-              source="model"
-              onChange={(next) =>
-                updateModel((model) =>
-                  setModelBridgeConductance(model, {
-                    H_psi_W_K: next,
-                    H_chi_W_K: modelHchi,
-                  })
-                )
-              }
-            />
-            <NumberInputField
-              label="H_chi (точечные мостики)"
-              value={modelHchi}
-              unit="Вт/К"
-              source="model"
-              onChange={(next) =>
-                updateModel((model) =>
-                  setModelBridgeConductance(model, {
-                    H_psi_W_K: modelHpsi,
-                    H_chi_W_K: next,
-                  })
-                )
-              }
-            />
-            <div className="grid gap-3">
-              {dataReport.sections.materials.computedFields.map((field) => (
-                <ReadOnlyFieldCard key={field.key} field={field} demoMode={isDemoProject} />
-              ))}
-            </div>
-          </div>
         </div>
-      </SectionShell>
+      </ScenarioSectionShell>
       </div>
 
       <div id="data-section-climate" className="scroll-mt-24">
-      <SectionShell
-        title={SECTION_TITLES.climate}
-        description="Пользователь задаёт климатический профиль или ручные климатические параметры. GSOP, ΔT и статус источника считаются в core."
-      >
-        <SectionWarnings warnings={dataReport.sections.climate.warnings} />
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr),24rem]">
-          <div className="grid gap-4 md:grid-cols-2">
+      <ScenarioSectionShell {...sectionShellProps} sectionId="climate" title={SECTION_TITLES.climate}>
+        <div className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             <SelectField
               label="Город / климатический профиль"
-              value={scenario.climateCityId ?? null}
-              source={rawClimateCityId ? "sp131" : "fallback"}
-              warning={!rawClimateCityId ? "Если город не выбран вручную, используется профиль по умолчанию." : null}
-              options={[
-                { value: "", label: "не выбран" },
-                { value: "moscow", label: "Москва" },
-                { value: "spb", label: "Санкт-Петербург" },
-                { value: "ekb", label: "Екатеринбург" },
-                { value: "novosibirsk", label: "Новосибирск" },
-                { value: "krasnodar", label: "Краснодар" },
-              ]}
-              onChange={(next) =>
-                updateScenario((draft) => {
-                  draft.climateCityId = next;
-                })
+              value={resolvedClimateCityId}
+              source={
+                rawClimateCityId
+                  ? "user"
+                  : modelClimateCityId
+                    ? "model"
+                    : climateDesignField?.source === "model"
+                      ? "model"
+                      : "sp131"
               }
+              showSourceBadge
+              options={sp131CitySelectOptions()}
+              onChange={(next) => {
+                const cityId = next || "moscow";
+                updateScenario((draft) => {
+                  draft.climateCityId = cityId;
+                  draft.climate.manual = {
+                    ...(draft.climate.manual ?? {}),
+                    outdoorDesignTemperatureC: null,
+                    outdoorHeatingAverageC: null,
+                    heatingDurationDays: null,
+                  };
+                });
+                updateModel((model) => applySp131ClimateToModel(model, cityId));
+              }}
             />
             <NumberInputField
               label="Расчётная наружная температура"
-              value={scenario.climate.manual?.outdoorDesignTemperatureC ?? null}
+              value={displayDesignOutdoorC}
               unit="°C"
-              source={scenarioFieldSource(climateManual?.outdoorDesignTemperatureC != null)}
-              placeholder={typeof climateDesignPlaceholder === "number" ? climateDesignPlaceholder.toFixed(1) : undefined}
-              onChange={(next) =>
+              source={
+                climateManual?.outdoorDesignTemperatureC != null
+                  ? "user"
+                  : (climateDesignField?.source ?? "missing")
+              }
+              showSourceBadge
+              onChange={(next) => {
                 updateScenario((draft) => {
                   draft.climate.manual = draft.climate.manual ?? {};
                   draft.climate.manual.outdoorDesignTemperatureC = next;
-                })
-              }
+                });
+                updateModel((model) => ({
+                  ...model,
+                  thermalProtection: {
+                    ...(model.thermalProtection ?? {}),
+                    climate: {
+                      ...(model.thermalProtection?.climate ?? {}),
+                      outdoorDesignTemperatureC: next,
+                    },
+                  },
+                }));
+              }}
             />
             <NumberInputField
               label="Средняя температура отопительного периода"
-              value={scenario.climate.manual?.outdoorHeatingAverageC ?? null}
+              value={displayHeatingAverageC}
               unit="°C"
-              source={scenarioFieldSource(climateManual?.outdoorHeatingAverageC != null)}
-              placeholder={typeof climateAveragePlaceholder === "number" ? climateAveragePlaceholder.toFixed(1) : undefined}
-              onChange={(next) =>
+              source={
+                climateManual?.outdoorHeatingAverageC != null
+                  ? "user"
+                  : (climateAverageField?.source ?? "missing")
+              }
+              showSourceBadge
+              onChange={(next) => {
                 updateScenario((draft) => {
                   draft.climate.manual = draft.climate.manual ?? {};
                   draft.climate.manual.outdoorHeatingAverageC = next;
-                })
-              }
+                });
+                updateModel((model) => ({
+                  ...model,
+                  thermalProtection: {
+                    ...(model.thermalProtection ?? {}),
+                    climate: {
+                      ...(model.thermalProtection?.climate ?? {}),
+                      outdoorHeatingPeriodAverageC: next,
+                    },
+                  },
+                }));
+              }}
             />
             <NumberInputField
               label="Длительность отопительного периода"
-              value={scenario.climate.manual?.heatingDurationDays ?? null}
+              value={displayHeatingDurationDays}
               unit="сут"
-              source={scenarioFieldSource(climateManual?.heatingDurationDays != null)}
-              placeholder={typeof climateDurationPlaceholder === "number" ? climateDurationPlaceholder.toFixed(0) : undefined}
-              onChange={(next) =>
+              source={
+                climateManual?.heatingDurationDays != null
+                  ? "user"
+                  : (climateDurationField?.source ?? "missing")
+              }
+              showSourceBadge
+              onChange={(next) => {
                 updateScenario((draft) => {
                   draft.climate.manual = draft.climate.manual ?? {};
                   draft.climate.manual.heatingDurationDays = next;
-                })
-              }
+                });
+                updateModel((model) => ({
+                  ...model,
+                  thermalProtection: {
+                    ...(model.thermalProtection ?? {}),
+                    climate: {
+                      ...(model.thermalProtection?.climate ?? {}),
+                      heatingPeriodDurationDays: next,
+                    },
+                  },
+                }));
+              }}
             />
             <NumberInputField
               label="Базовая температура сценария"
@@ -1260,22 +1612,21 @@ export function ScenariosWorkspacePage() {
               }
             />
           </div>
-          <div className="grid gap-3">
-            {dataReport.sections.climate.computedFields.map((field) => (
-              <ReadOnlyFieldCard key={field.key} field={field} demoMode={isDemoProject} />
-            ))}
+          <div className="grid gap-3 lg:grid-cols-3 xl:grid-cols-4">
+            {climateComputedFields
+              .filter((field) => !EDITABLE_CLIMATE_KEYS.has(field.key))
+              .map((field) => (
+                <ReadOnlyFieldCard key={field.key} field={field} demoMode={isDemoProject} />
+              ))}
           </div>
         </div>
-      </SectionShell>
+      </ScenarioSectionShell>
       </div>
 
       <div id="data-section-operation" className="scroll-mt-24">
-      <SectionShell
-        title={SECTION_TITLES.operation}
-        description="Расписание уставок, внутренние теплопоступления, занятость, длительность сценария и шаг расчёта."
-      >
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr),24rem]">
-          <div className="grid gap-4 md:grid-cols-2">
+      <ScenarioSectionShell {...sectionShellProps} sectionId="operation" title={SECTION_TITLES.operation}>
+        <div className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             <NumberInputField
               label="Дневная уставка"
               value={scenario.setpoints.day}
@@ -1358,23 +1709,23 @@ export function ScenariosWorkspacePage() {
               })}
             />
           </div>
-          <div className="grid gap-3">
-            {dataReport.sections.operation.computedFields.map((field) => (
-              <ReadOnlyFieldCard key={field.key} field={field} demoMode={isDemoProject} />
-            ))}
-          </div>
         </div>
-      </SectionShell>
+      </ScenarioSectionShell>
       </div>
 
       <div id="data-section-air" className="scroll-mt-24">
-      <SectionShell
-        title={SECTION_TITLES.airExchange}
-        description="Инфильтрация и вентиляция учитываются раздельно. Рекуперация применяется только к механической вентиляции."
-      >
-        <SectionWarnings warnings={dataReport.sections.airExchange.warnings} />
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr),24rem]">
-          <div className="grid gap-4 md:grid-cols-2">
+      <ScenarioSectionShell {...sectionShellProps} sectionId="airExchange" title={SECTION_TITLES.airExchange}>
+        <div className="space-y-4">
+          {airActionableWarnings.length ? (
+            <EngineeringCallout variant="attention" title="Предупреждения">
+              <ul className="list-disc space-y-0.5 pl-5">
+                {airActionableWarnings.map((warning) => (
+                  <li key={warning}>{warning}</li>
+                ))}
+              </ul>
+            </EngineeringCallout>
+          ) : null}
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             <SelectField
               label="Режим инфильтрации"
               value={scenario.ventilation.infiltrationMode ?? "manualAch"}
@@ -1389,29 +1740,55 @@ export function ScenariosWorkspacePage() {
               })}
             />
             <NumberInputField
-              label="Инфильтрация / fallback ACH"
-              value={scenario.ventilation.infiltrationACH}
+              label={infiltrationMode === "manualAch" ? "Инфильтрация ACH" : "Инфильтрация / fallback ACH"}
+              value={resolvedVentilation.infiltrationACH.value}
               unit="1/ч"
-              source={scenarioFieldSource(rawScenarioConfig?.ventilation?.infiltrationACH != null, "scenario")}
+              source={ventilationInputSourceToOrigin(resolvedVentilation.infiltrationACH.source)}
+              formulaFieldKey="scenario.ventilation.infiltration-ach"
+              warning={
+                infiltrationMode === "manualAch"
+                  ? resolvedVentilation.infiltrationACH.explicit
+                    ? null
+                    : resolvedVentilation.infiltrationACH.source === "model"
+                      ? "Из thermalProtection.energyVentilation модели."
+                      : "Дефолт сценария 0,5 1/ч."
+                  : "В расчётном режиме ACH берётся из утечек и ΔP — см. карточку «Инфильтрация ACH»."
+              }
               onChange={(next) => updateScenario((draft) => { draft.ventilation.infiltrationACH = Math.max(0, next ?? draft.ventilation.infiltrationACH); })}
             />
             <NumberInputField
               label="Механическая вентиляция"
-              value={scenario.ventilation.ventilationACH}
+              value={resolvedVentilation.ventilationACH.value}
               unit="1/ч"
-              source={scenarioFieldSource(rawScenarioConfig?.ventilation?.ventilationACH != null, "scenario")}
+              source={ventilationInputSourceToOrigin(resolvedVentilation.ventilationACH.source)}
+              formulaFieldKey="scenario.ventilation.ventilation-ach"
+              warning={
+                resolvedVentilation.ventilationACH.explicit
+                  ? null
+                  : resolvedVentilation.ventilationACH.source === "model"
+                    ? "Из thermalProtection.energyVentilation модели."
+                    : "Дефолт сценария 0,18 1/ч."
+              }
               onChange={(next) => updateScenario((draft) => { draft.ventilation.ventilationACH = Math.max(0, next ?? draft.ventilation.ventilationACH); })}
             />
             <ToggleField
               label="Механическая вентиляция"
-              checked={scenario.ventilation.mechanicalVentilationEnabled}
-              source={scenarioFieldSource(rawScenarioConfig?.ventilation?.mechanicalVentilationEnabled != null, "scenario")}
+              checked={resolvedVentilation.mechanicalVentilationEnabled.value}
+              source={ventilationInputSourceToOrigin(resolvedVentilation.mechanicalVentilationEnabled.source)}
               onChange={(next) => updateScenario((draft) => { draft.ventilation.mechanicalVentilationEnabled = next; })}
             />
             <NumberInputField
               label="КПД рекуперации"
-              value={scenario.ventilation.heatRecoveryFactor}
-              source={scenarioFieldSource(rawScenarioConfig?.ventilation?.heatRecoveryFactor != null, "scenario")}
+              value={resolvedVentilation.heatRecoveryFactor.value}
+              source={ventilationInputSourceToOrigin(resolvedVentilation.heatRecoveryFactor.source)}
+              formulaFieldKey="scenario.ventilation.heat-recovery"
+              warning={
+                resolvedVentilation.heatRecoveryFactor.explicit
+                  ? null
+                  : resolvedVentilation.heatRecoveryFactor.source === "model"
+                    ? "Из thermalProtection.energyVentilation модели."
+                    : null
+              }
               onChange={(next) => updateScenario((draft) => { draft.ventilation.heatRecoveryFactor = Math.max(0, Math.min(1, next ?? draft.ventilation.heatRecoveryFactor)); })}
             />
             {scenario.ventilation.infiltrationMode !== "manualAch" ? (
@@ -1480,9 +1857,15 @@ export function ScenariosWorkspacePage() {
                 />
                 <NumberInputField
                   label="Высота stack effect"
-                  value={scenario.ventilation.pressureBased?.stackHeightM ?? null}
+                  value={resolvedVentilation.stackHeightM.value}
                   unit="м"
-                  source={scenarioFieldSource(rawScenarioConfig?.ventilation?.pressureBased?.stackHeightM != null, "scenario")}
+                  source={ventilationInputSourceToOrigin(resolvedVentilation.stackHeightM.source)}
+                  formulaFieldKey="scenario.ventilation.stack-height"
+                  warning={
+                    resolvedVentilation.stackHeightM.explicit
+                      ? null
+                      : "Из геометрии этажей модели (разница отметок)."
+                  }
                   onChange={(next) => updateScenario((draft) => {
                     draft.ventilation.pressureBased = draft.ventilation.pressureBased ?? {};
                     draft.ventilation.pressureBased.stackHeightM = next == null ? null : Math.max(0.5, next);
@@ -1500,98 +1883,37 @@ export function ScenariosWorkspacePage() {
                 />
               </>
             ) : null}
-          </div>
-          <div className="grid gap-3">
-            {dataReport.sections.airExchange.computedFields.map((field) => (
-              <ReadOnlyFieldCard key={field.key} field={field} demoMode={isDemoProject} />
+            {infiltrationMode !== "manualAch"
+              ? airSection.computedFields
+                  .filter((field) => field.key === "air.infiltration-ach" || field.key === "air.infiltration-source")
+                  .map((field) => (
+                    <ReadOnlyFieldCard key={field.key} field={field} demoMode={isDemoProject} showFieldWarning />
+                  ))
+              : null}
+            {airComputedFields.map((field) => (
+              <ReadOnlyFieldCard key={field.key} field={field} demoMode={isDemoProject} showFieldWarning />
             ))}
           </div>
         </div>
-      </SectionShell>
-      </div>
-
-      <div id="data-section-humidity" className="scroll-mt-24">
-      <SectionShell title={SECTION_TITLES.humidity}>
-        <SectionWarnings warnings={humidityWarnings} />
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr),24rem]">
-          <div className="grid gap-4 md:grid-cols-2">
-            <NumberInputField
-              label="Относительная влажность"
-              value={scenario.comfort?.relativeHumidityPercent ?? null}
-              unit="%"
-              source={scenarioFieldSource(rawComfort?.relativeHumidityPercent != null)}
-              onChange={(next) => updateScenario((draft) => {
-                draft.comfort = draft.comfort ?? {};
-                draft.comfort.relativeHumidityPercent = next;
-              })}
-            />
-            <NumberInputField
-              label="Минимально допустимая температура"
-              value={scenario.comfort?.comfortMinC ?? null}
-              unit="°C"
-              source={scenarioFieldSource(rawComfort?.comfortMinC != null)}
-              onChange={(next) => updateScenario((draft) => {
-                draft.comfort = draft.comfort ?? {};
-                draft.comfort.comfortMinC = next;
-              })}
-            />
-            <NumberInputField
-              label="Максимально допустимая температура"
-              value={scenario.comfort?.comfortMaxC ?? null}
-              unit="°C"
-              source={scenarioFieldSource(rawComfort?.comfortMaxC != null)}
-              onChange={(next) => updateScenario((draft) => {
-                draft.comfort = draft.comfort ?? {};
-                draft.comfort.comfortMaxC = next;
-              })}
-            />
-            <TextInputField
-              label="Категория комфорта"
-              value={scenario.comfort?.comfortCategory ?? ""}
-              source={scenarioFieldSource(Boolean(rawComfort?.comfortCategory))}
-              onChange={(next) => updateScenario((draft) => {
-                draft.comfort = draft.comfort ?? {};
-                draft.comfort.comfortCategory = next.trim() || null;
-              })}
-            />
-            <NumberInputField
-              label="Измеренная MRT"
-              value={scenario.comfort?.measuredMrtC ?? null}
-              unit="°C"
-              source={scenarioFieldSource(rawComfort?.measuredMrtC != null)}
-              onChange={(next) => updateScenario((draft) => {
-                draft.comfort = draft.comfort ?? {};
-                draft.comfort.measuredMrtC = next;
-              })}
-            />
-            <NumberInputField
-              label="Измеренная температура поверхности"
-              value={scenario.comfort?.measuredSurfaceTemperatureC ?? null}
-              unit="°C"
-              source={scenarioFieldSource(rawComfort?.measuredSurfaceTemperatureC != null)}
-              onChange={(next) => updateScenario((draft) => {
-                draft.comfort = draft.comfort ?? {};
-                draft.comfort.measuredSurfaceTemperatureC = next;
-              })}
-            />
-          </div>
-          <div className="grid gap-3">
-            {dataReport.sections.humidity.computedFields.map((field) => (
-              <ReadOnlyFieldCard key={field.key} field={field} demoMode={isDemoProject} />
-            ))}
-          </div>
-        </div>
-      </SectionShell>
+      </ScenarioSectionShell>
       </div>
 
       <div id="data-section-engineering" className="scroll-mt-24">
-      <SectionShell
-        title={SECTION_TITLES.engineeringNetworks}
-        description="Идеальный режим solver остаётся default. Ограничение мощности и гидравлика задаются явно и считаются как отдельные derived-показатели."
-      >
-        <SectionWarnings warnings={dataReport.sections.engineeringNetworks.warnings} />
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr),24rem]">
-          <div className="grid gap-4 md:grid-cols-2">
+      <ScenarioSectionShell
+        {...sectionShellProps}
+        sectionId="engineeringNetworks"
+        title={SECTION_TITLES.engineeringNetworks}>
+        <div className="space-y-4">
+          {engineeringActionableWarnings.length ? (
+            <EngineeringCallout variant="attention" title="Предупреждения">
+              <ul className="list-disc space-y-0.5 pl-5">
+                {engineeringActionableWarnings.map((warning) => (
+                  <li key={warning}>{warning}</li>
+                ))}
+              </ul>
+            </EngineeringCallout>
+          ) : null}
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             <ToggleField
               label="Система отопления активна"
               checked={scenario.engineeringSystems?.heatingEnabled ?? true}
@@ -1605,11 +1927,6 @@ export function ScenariosWorkspacePage() {
               label="Режим отопления"
               value={scenario.engineeringSystems?.heatingMode ?? "ideal"}
               source={scenarioFieldSource(Boolean(rawEngineering?.heatingMode))}
-              warning={
-                scenario.engineeringSystems?.heatingMode === "ideal"
-                  ? "Мощность отопления в solver не ограничивается; гидравлические показатели справочные."
-                  : "Используется режим с ограниченной доступной мощностью и расчётом непокрытой нагрузки."
-              }
               options={[
                 { value: "ideal", label: "Идеальный режим" },
                 { value: "capacityLimited", label: "Ограниченная мощность" },
@@ -1621,9 +1938,16 @@ export function ScenariosWorkspacePage() {
             />
             <NumberInputField
               label="Температура подачи"
-              value={scenario.engineeringSystems?.supplyTemperatureC ?? null}
+              value={resolvedEngineering.supplyTemperatureC.value}
               unit="°C"
-              source={scenarioFieldSource(rawEngineering?.supplyTemperatureC != null)}
+              source={engineeringInputSourceToOrigin(resolvedEngineering.supplyTemperatureC.source)}
+              warning={
+                resolvedEngineering.supplyTemperatureC.explicit
+                  ? null
+                  : resolvedEngineering.supplyTemperatureC.source === "model"
+                    ? "Из параметров оборудования или труб модели."
+                    : "Типовой график 70 °C, если в модели нет данных."
+              }
               onChange={(next) => updateScenario((draft) => {
                 draft.engineeringSystems = draft.engineeringSystems ?? {};
                 draft.engineeringSystems.supplyTemperatureC = next;
@@ -1631,9 +1955,16 @@ export function ScenariosWorkspacePage() {
             />
             <NumberInputField
               label="Температура обратки"
-              value={scenario.engineeringSystems?.returnTemperatureC ?? null}
+              value={resolvedEngineering.returnTemperatureC.value}
               unit="°C"
-              source={scenarioFieldSource(rawEngineering?.returnTemperatureC != null)}
+              source={engineeringInputSourceToOrigin(resolvedEngineering.returnTemperatureC.source)}
+              warning={
+                resolvedEngineering.returnTemperatureC.explicit
+                  ? null
+                  : resolvedEngineering.returnTemperatureC.source === "calculated"
+                    ? "Рассчитано как T_подачи − 20 K."
+                    : "Из параметров оборудования модели."
+              }
               onChange={(next) => updateScenario((draft) => {
                 draft.engineeringSystems = draft.engineeringSystems ?? {};
                 draft.engineeringSystems.returnTemperatureC = next;
@@ -1641,9 +1972,18 @@ export function ScenariosWorkspacePage() {
             />
             <NumberInputField
               label="Массовый расход теплоносителя"
-              value={scenario.engineeringSystems?.massFlowKgS ?? null}
+              value={resolvedEngineering.massFlowKgS.value}
               unit="кг/с"
-              source={scenarioFieldSource(rawEngineering?.massFlowKgS != null)}
+              source={engineeringInputSourceToOrigin(resolvedEngineering.massFlowKgS.source)}
+              warning={
+                resolvedEngineering.massFlowKgS.explicit
+                  ? null
+                  : resolvedEngineering.massFlowKgS.source === "model"
+                    ? "Сумма designFlow_kg_s оборудования модели."
+                    : resolvedEngineering.massFlowKgS.source === "calculated"
+                      ? "Из пика нагрузки и ΔT теплоносителя."
+                      : null
+              }
               onChange={(next) => updateScenario((draft) => {
                 draft.engineeringSystems = draft.engineeringSystems ?? {};
                 draft.engineeringSystems.massFlowKgS = next;
@@ -1651,8 +1991,8 @@ export function ScenariosWorkspacePage() {
             />
             <SelectField
               label="Тип теплоносителя"
-              value={scenario.engineeringSystems?.fluidType ?? "water"}
-              source={scenarioFieldSource(Boolean(rawEngineering?.fluidType))}
+              value={resolvedEngineering.fluidType}
+              source={engineeringInputSourceToOrigin(resolvedEngineering.fluidTypeSource)}
               options={[
                 { value: "water", label: "вода" },
                 { value: "glycol", label: "водно-гликолевая смесь" },
@@ -1665,9 +2005,18 @@ export function ScenariosWorkspacePage() {
             />
             <NumberInputField
               label="Установленная мощность"
-              value={scenario.engineeringSystems?.installedCapacityW ?? null}
+              value={resolvedEngineering.installedCapacityW.value}
               unit="Вт"
-              source={scenarioFieldSource(rawEngineering?.installedCapacityW != null)}
+              source={engineeringInputSourceToOrigin(resolvedEngineering.installedCapacityW.source)}
+              warning={
+                resolvedEngineering.installedCapacityW.explicit
+                  ? null
+                  : resolvedEngineering.installedCapacityW.source === "model"
+                    ? "Сумма nominalPowerW отопительного оборудования."
+                    : resolvedEngineering.installedCapacityW.source === "result"
+                      ? "Из пика нагрузки последнего расчёта."
+                      : null
+              }
               onChange={(next) => updateScenario((draft) => {
                 draft.engineeringSystems = draft.engineeringSystems ?? {};
                 draft.engineeringSystems.installedCapacityW = next;
@@ -1675,8 +2024,9 @@ export function ScenariosWorkspacePage() {
             />
             <TextInputField
               label="Тип прибора"
-              value={scenario.engineeringSystems?.emitterType ?? ""}
-              source={scenarioFieldSource(Boolean(rawEngineering?.emitterType))}
+              value={resolvedEngineering.emitterType.value}
+              source={engineeringInputSourceToOrigin(resolvedEngineering.emitterType.source)}
+              placeholder="radiator, fancoil…"
               onChange={(next) => updateScenario((draft) => {
                 draft.engineeringSystems = draft.engineeringSystems ?? {};
                 draft.engineeringSystems.emitterType = next.trim() || null;
@@ -1684,9 +2034,18 @@ export function ScenariosWorkspacePage() {
             />
             <NumberInputField
               label="Диаметр трубы"
-              value={scenario.engineeringSystems?.pipeDiameterMm ?? null}
+              value={resolvedEngineering.pipeDiameterMm?.value ?? null}
               unit="мм"
-              source={scenarioFieldSource(rawEngineering?.pipeDiameterMm != null)}
+              source={
+                resolvedEngineering.pipeDiameterMm
+                  ? engineeringInputSourceToOrigin(resolvedEngineering.pipeDiameterMm.source)
+                  : "missing"
+              }
+              warning={
+                resolvedEngineering.pipeDiameterMm && !resolvedEngineering.pipeDiameterMm.explicit
+                  ? "Медианный диаметр из труб модели."
+                  : null
+              }
               onChange={(next) => updateScenario((draft) => {
                 draft.engineeringSystems = draft.engineeringSystems ?? {};
                 draft.engineeringSystems.pipeDiameterMm = next;
@@ -1694,9 +2053,18 @@ export function ScenariosWorkspacePage() {
             />
             <NumberInputField
               label="Длина трубы"
-              value={scenario.engineeringSystems?.pipeLengthM ?? null}
+              value={resolvedEngineering.pipeLengthM?.value ?? null}
               unit="м"
-              source={scenarioFieldSource(rawEngineering?.pipeLengthM != null)}
+              source={
+                resolvedEngineering.pipeLengthM
+                  ? engineeringInputSourceToOrigin(resolvedEngineering.pipeLengthM.source)
+                  : "missing"
+              }
+              warning={
+                resolvedEngineering.pipeLengthM && !resolvedEngineering.pipeLengthM.explicit
+                  ? "Суммарная длина полилиний труб в модели."
+                  : null
+              }
               onChange={(next) => updateScenario((draft) => {
                 draft.engineeringSystems = draft.engineeringSystems ?? {};
                 draft.engineeringSystems.pipeLengthM = next;
@@ -1704,8 +2072,8 @@ export function ScenariosWorkspacePage() {
             />
             <ToggleField
               label="Труба изолирована"
-              checked={scenario.engineeringSystems?.pipeInsulated ?? false}
-              source={scenarioFieldSource(rawEngineering?.pipeInsulated != null)}
+              checked={resolvedEngineering.pipeInsulated.value}
+              source={engineeringInputSourceToOrigin(resolvedEngineering.pipeInsulated.source)}
               onChange={(next) => updateScenario((draft) => {
                 draft.engineeringSystems = draft.engineeringSystems ?? {};
                 draft.engineeringSystems.pipeInsulated = next;
@@ -1713,30 +2081,32 @@ export function ScenariosWorkspacePage() {
             />
             <NumberInputField
               label="Температура теплоносителя в трубе"
-              value={scenario.engineeringSystems?.pipeFluidTemperatureC ?? null}
+              value={resolvedEngineering.pipeFluidTemperatureC.value}
               unit="°C"
-              source={scenarioFieldSource(rawEngineering?.pipeFluidTemperatureC != null)}
+              source={engineeringInputSourceToOrigin(resolvedEngineering.pipeFluidTemperatureC.source)}
+              warning={
+                resolvedEngineering.pipeFluidTemperatureC.explicit
+                  ? null
+                  : resolvedEngineering.pipeFluidTemperatureC.source === "model"
+                    ? "Средняя fluidTemperatureC по трубам модели."
+                    : "Совпадает с температурой подачи."
+              }
               onChange={(next) => updateScenario((draft) => {
                 draft.engineeringSystems = draft.engineeringSystems ?? {};
                 draft.engineeringSystems.pipeFluidTemperatureC = next;
               })}
             />
-          </div>
-          <div className="grid gap-3">
-            {dataReport.sections.engineeringNetworks.computedFields.map((field) => (
-              <ReadOnlyFieldCard key={field.key} field={field} demoMode={isDemoProject} />
+            {engineeringComputedFields.map((field) => (
+              <ReadOnlyFieldCard key={field.key} field={field} demoMode={isDemoProject} showFieldWarning />
             ))}
           </div>
         </div>
-      </SectionShell>
+      </ScenarioSectionShell>
       </div>
 
       <div id="data-section-ecology" className="scroll-mt-24">
-      <SectionShell
-        title={SECTION_TITLES.ecology}
-        description="Пользователь задаёт источник энергии и коэффициент выбросов. CO₂ считается автоматически только если есть валидный EF и результат расчёта."
-      >
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr),24rem]">
+      <ScenarioSectionShell {...sectionShellProps} sectionId="ecology" title={SECTION_TITLES.ecology}>
+        <div className="space-y-4">
           <div className="grid gap-4 md:grid-cols-2">
             <SelectField
               label="Источник энергии"
@@ -1764,38 +2134,26 @@ export function ScenariosWorkspacePage() {
               })}
             />
           </div>
-          <div className="grid gap-3">
-            {dataReport.sections.ecology.computedFields.map((field) => (
-              <ReadOnlyFieldCard key={field.key} field={field} demoMode={isDemoProject} />
-            ))}
-          </div>
         </div>
-      </SectionShell>
+      </ScenarioSectionShell>
       </div>
 
       <div id="data-section-economy" className="scroll-mt-24">
-      <SectionShell
-        title={SECTION_TITLES.economy}
-        description="Вкладка хранит исходные экономические параметры. Derived preview не подменяет отдельный контур экономики и явно помечен как оценочный."
-      >
-        <SectionWarnings warnings={dataReport.sections.economy.warnings} />
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr),24rem]">
-          <div className="grid gap-4 md:grid-cols-2">
-            <NumberInputField
-              label="Тариф"
-              value={scenario.economy?.tariffRubPerKWh ?? null}
-              unit="руб/кВт·ч"
-              source={scenarioFieldSource(rawEconomy?.tariffRubPerKWh != null)}
-              onChange={(next) => updateScenario((draft) => {
-                draft.economy = draft.economy ?? {};
-                draft.economy.tariffRubPerKWh = next;
-              })}
-            />
+      <ScenarioSectionShell {...sectionShellProps} sectionId="economy" title={SECTION_TITLES.economy}>
+        <div className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {economyHeatingSourceField ? (
+              <ReadOnlyFieldCard field={economyHeatingSourceField} demoMode={isDemoProject} showSourceBadge={false} />
+            ) : null}
+            {economyTariffField ? (
+              <ReadOnlyFieldCard field={economyTariffField} demoMode={isDemoProject} showSourceBadge={false} />
+            ) : null}
             <NumberInputField
               label="CAPEX мероприятий"
               value={scenario.economy?.capexRub ?? null}
               unit="руб"
               source={scenarioFieldSource(rawEconomy?.capexRub != null)}
+              showSourceBadge={false}
               onChange={(next) => updateScenario((draft) => {
                 draft.economy = draft.economy ?? {};
                 draft.economy.capexRub = next;
@@ -1806,6 +2164,7 @@ export function ScenariosWorkspacePage() {
               value={scenario.economy?.analysisPeriodYears ?? null}
               unit="лет"
               source={scenarioFieldSource(rawEconomy?.analysisPeriodYears != null)}
+              showSourceBadge={false}
               onChange={(next) => updateScenario((draft) => {
                 draft.economy = draft.economy ?? {};
                 draft.economy.analysisPeriodYears = next;
@@ -1816,6 +2175,7 @@ export function ScenariosWorkspacePage() {
               value={scenario.economy?.discountRatePercent ?? null}
               unit="%"
               source={scenarioFieldSource(rawEconomy?.discountRatePercent != null)}
+              showSourceBadge={false}
               onChange={(next) => updateScenario((draft) => {
                 draft.economy = draft.economy ?? {};
                 draft.economy.discountRatePercent = next;
@@ -1826,6 +2186,7 @@ export function ScenariosWorkspacePage() {
               value={scenario.economy?.annualTariffGrowthPercent ?? null}
               unit="%"
               source={scenarioFieldSource(rawEconomy?.annualTariffGrowthPercent != null)}
+              showSourceBadge={false}
               onChange={(next) => updateScenario((draft) => {
                 draft.economy = draft.economy ?? {};
                 draft.economy.annualTariffGrowthPercent = next;
@@ -1836,6 +2197,7 @@ export function ScenariosWorkspacePage() {
               value={scenario.economy?.annualMaintenanceCostRub ?? null}
               unit="руб/год"
               source={scenarioFieldSource(rawEconomy?.annualMaintenanceCostRub != null)}
+              showSourceBadge={false}
               onChange={(next) => updateScenario((draft) => {
                 draft.economy = draft.economy ?? {};
                 draft.economy.annualMaintenanceCostRub = next;
@@ -1846,6 +2208,7 @@ export function ScenariosWorkspacePage() {
               value={scenario.economy?.insulationCostRub ?? null}
               unit="руб"
               source={scenarioFieldSource(rawEconomy?.insulationCostRub != null)}
+              showSourceBadge={false}
               onChange={(next) => updateScenario((draft) => {
                 draft.economy = draft.economy ?? {};
                 draft.economy.insulationCostRub = next;
@@ -1856,6 +2219,7 @@ export function ScenariosWorkspacePage() {
               value={scenario.economy?.windowsCostRub ?? null}
               unit="руб"
               source={scenarioFieldSource(rawEconomy?.windowsCostRub != null)}
+              showSourceBadge={false}
               onChange={(next) => updateScenario((draft) => {
                 draft.economy = draft.economy ?? {};
                 draft.economy.windowsCostRub = next;
@@ -1866,29 +2230,21 @@ export function ScenariosWorkspacePage() {
               value={scenario.economy?.equipmentCostRub ?? null}
               unit="руб"
               source={scenarioFieldSource(rawEconomy?.equipmentCostRub != null)}
+              showSourceBadge={false}
               onChange={(next) => updateScenario((draft) => {
                 draft.economy = draft.economy ?? {};
                 draft.economy.equipmentCostRub = next;
               })}
             />
           </div>
-          <div className="grid gap-3">
-            {dataReport.sections.economy.computedFields.map((field) => (
-              <ReadOnlyFieldCard key={field.key} field={field} demoMode={isDemoProject} />
-            ))}
-          </div>
         </div>
-      </SectionShell>
+      </ScenarioSectionShell>
       </div>
 
       <div id="data-section-validation" className="scroll-mt-24">
-      <SectionShell
-        title={SECTION_TITLES.validation}
-        description="Валидация требует корректную связку помещения датчика и меток времени. Без неё метрики MBE/CVRMSE/RMSE_T не рассчитываются."
-      >
-        <SectionWarnings warnings={dataReport.sections.validation.warnings} />
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr),24rem]">
-          <div className="grid gap-4 md:grid-cols-2">
+      <ScenarioSectionShell {...sectionShellProps} sectionId="validation" title={SECTION_TITLES.validation}>
+        <div className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             <SelectField
               label="Помещение датчика"
               value={scenario.validation?.roomId ?? null}
@@ -1943,22 +2299,13 @@ export function ScenariosWorkspacePage() {
               }}
             />
           </div>
-          <div className="grid gap-3">
-            {dataReport.sections.validation.computedFields.map((field) => (
-              <ReadOnlyFieldCard key={field.key} field={field} demoMode={isDemoProject} />
-            ))}
-          </div>
         </div>
-      </SectionShell>
+      </ScenarioSectionShell>
       </div>
 
       <div id="data-section-reports" className="scroll-mt-24">
-      <SectionShell
-        title={SECTION_TITLES.reports}
-        description="Реквизиты проекта для существующего экспортного и экспертного контура. Эти поля не меняют solver, но участвуют в полноте документов."
-      >
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr),24rem]">
-          <div className="grid gap-4 md:grid-cols-2">
+      <ScenarioSectionShell {...sectionShellProps} sectionId="reports" title={SECTION_TITLES.reports}>
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             <TextInputField
               label="Название объекта"
               value={reportInputSnapshot.projectName}
@@ -2035,32 +2382,9 @@ export function ScenariosWorkspacePage() {
                 </p>
               </div>
             ) : null} */}
-          </div>
-          <div className="grid gap-3">
-            {dataReport.sections.reports.computedFields.map((field) => (
-              <ReadOnlyFieldCard key={field.key} field={field} demoMode={isDemoProject} />
-            ))}
-          </div>
         </div>
-      </SectionShell>
+      </ScenarioSectionShell>
       </div>
-
-      <ActionBar>
-        <div className="space-y-1">
-          <p className="text-sm font-semibold text-[color:var(--text-base)]">Дальше: расчёт</p>
-          <p className="text-sm text-[color:var(--text-muted)]">
-            После заполнения исходных данных переходите к расчёту. Все автоматически вычисляемые показатели останутся read-only.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={() => navigate("/model")} className="ui-btn-secondary px-4 py-2 text-sm">
-            Открыть модель
-          </button>
-          <button type="button" onClick={() => navigate("/calculation")} className="ui-btn-primary px-4 py-2 text-sm">
-            Перейти к расчёту
-          </button>
-        </div>
-      </ActionBar>
         </>
       )}
     </section>

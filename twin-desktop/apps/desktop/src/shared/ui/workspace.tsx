@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { CalculatedMetricSourceBadge, type MetricFormulaInfo } from "./engineeringWorkspace";
 
 type StatusStripTone = "neutral" | "success" | "warning" | "info";
 
@@ -159,11 +160,16 @@ export function HighlightCard({
   value,
   hint,
   tone = "neutral",
+  metricInfo,
+  calculated = false,
 }: {
   label: string;
   value: ReactNode;
   hint?: string;
   tone?: HighlightTone;
+  /** Формула и смысл — иконка «рассчитано» в правом верхнем углу. */
+  metricInfo?: MetricFormulaInfo;
+  calculated?: boolean;
 }) {
   const toneClass =
     tone === "success"
@@ -173,10 +179,18 @@ export function HighlightCard({
         : tone === "info"
           ? "border-[color:var(--info-border)] bg-[color:var(--info-bg)]"
           : "";
+  const showCalculatedBadge = calculated && metricInfo != null;
 
   return (
     <article className={joinClasses("ui-highlight-card ui-hover-lift", toneClass)}>
-      <p className="ui-highlight-card__label">{label}</p>
+      <div className="ui-highlight-card__header">
+        <p className="ui-highlight-card__label">{label}</p>
+        {showCalculatedBadge ? (
+          <span className="ui-highlight-card__source-badge">
+            <CalculatedMetricSourceBadge info={metricInfo} />
+          </span>
+        ) : null}
+      </div>
       <p className="ui-highlight-card__value">{value}</p>
       {hint ? <p className="ui-highlight-card__hint">{hint}</p> : null}
     </article>
@@ -192,6 +206,8 @@ export function SummaryHighlightGrid({
     value: ReactNode;
     hint?: string;
     tone?: HighlightTone;
+    metricInfo?: MetricFormulaInfo;
+    calculated?: boolean;
   }>;
   className?: string;
 }) {
@@ -226,12 +242,14 @@ export function SummaryHero({
 
 export function CollapsibleSection({
   title,
+  titleAddon,
   description,
   defaultOpen = false,
   children,
   className,
 }: {
   title: string;
+  titleAddon?: ReactNode;
   description?: string;
   defaultOpen?: boolean;
   children: ReactNode;
@@ -239,7 +257,20 @@ export function CollapsibleSection({
 }) {
   return (
     <details className={joinClasses("ui-collapsible", className)} open={defaultOpen || undefined}>
-      <summary className="ui-collapsible__summary">{title}</summary>
+      <summary className="ui-collapsible__summary">
+        <span className="flex min-w-0 items-center gap-2">
+          {title}
+          {titleAddon ? (
+            <span
+              className="inline-flex shrink-0"
+              onClick={(event) => event.preventDefault()}
+              onKeyDown={(event) => event.stopPropagation()}
+            >
+              {titleAddon}
+            </span>
+          ) : null}
+        </span>
+      </summary>
       <div className="ui-collapsible__body">
         {description ? <p className="ui-collapsible__description">{description}</p> : null}
         {children}

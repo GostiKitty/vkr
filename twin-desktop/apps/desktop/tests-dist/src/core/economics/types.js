@@ -15,6 +15,7 @@ export const economicDefaults = {
             complexity: "средняя",
             comfortEffect: "высокий",
             riskReduction: "снижение риска промерзания и конденсата",
+            lifetimeYears: 30,
         },
         wallInsulationPolystyrene: {
             name: "Утепление наружных стен пенополистиролом",
@@ -26,6 +27,7 @@ export const economicDefaults = {
             complexity: "средняя",
             comfortEffect: "высокий",
             riskReduction: "снижение риска промерзания при корректном узле пароизоляции",
+            lifetimeYears: 30,
         },
         wetFacade: {
             name: "Система мокрого фасада",
@@ -35,6 +37,7 @@ export const economicDefaults = {
             complexity: "средняя/высокая",
             comfortEffect: "высокий",
             riskReduction: "снижение мостиков холода в зоне фасада",
+            lifetimeYears: 25,
         },
         ventilatedFacade: {
             name: "Вентилируемый фасад с утеплителем",
@@ -44,6 +47,7 @@ export const economicDefaults = {
             complexity: "высокая",
             comfortEffect: "высокий",
             riskReduction: "снижение риска увлажнения ограждения и локального промерзания",
+            lifetimeYears: 30,
         },
         roofInsulationMineralWool: {
             name: "Утепление кровли или чердачного перекрытия минеральной ватой",
@@ -53,6 +57,7 @@ export const economicDefaults = {
             complexity: "средняя",
             comfortEffect: "высокий",
             riskReduction: "снижение риска конденсата на покрытии",
+            lifetimeYears: 25,
         },
         roofInsulationBasalt: {
             name: "Утепление кровли базальтовой ватой",
@@ -62,6 +67,7 @@ export const economicDefaults = {
             complexity: "средняя",
             comfortEffect: "высокий",
             riskReduction: "уменьшение локального переохлаждения верхних помещений",
+            lifetimeYears: 25,
         },
         coldAtticInsulation: {
             name: "Утепление холодного чердака",
@@ -71,6 +77,7 @@ export const economicDefaults = {
             complexity: "низкая",
             comfortEffect: "средний/высокий",
             riskReduction: "снижение риска увлажнения чердачного перекрытия",
+            lifetimeYears: 20,
         },
         floorInsulation: {
             name: "Утепление пола или перекрытия над подвалом",
@@ -80,6 +87,7 @@ export const economicDefaults = {
             complexity: "средняя",
             comfortEffect: "высокий",
             riskReduction: "снижение риска холодного пола и конденсата у цоколя",
+            lifetimeYears: 25,
         },
         windowReplacement: {
             name: "Замена окон на энергоэффективные",
@@ -89,6 +97,7 @@ export const economicDefaults = {
             complexity: "средняя",
             comfortEffect: "высокий",
             riskReduction: "снижение риска продувания и переохлаждения откосов",
+            lifetimeYears: 20,
         },
         energyGlassUnit: {
             name: "Установка энергосберегающего стеклопакета",
@@ -98,6 +107,7 @@ export const economicDefaults = {
             complexity: "средняя",
             comfortEffect: "высокий",
             riskReduction: "снижение риска конденсата на стекле",
+            lifetimeYears: 20,
         },
         jointsSealing: {
             name: "Герметизация оконных примыканий",
@@ -107,6 +117,7 @@ export const economicDefaults = {
             complexity: "низкая",
             comfortEffect: "средний/высокий",
             riskReduction: "снижение риска продувания и увлажнения откосов",
+            lifetimeYears: 5,
         },
         hardwareAdjustment: {
             name: "Регулировка фурнитуры и замена уплотнителей",
@@ -116,6 +127,7 @@ export const economicDefaults = {
             complexity: "низкая",
             comfortEffect: "средний",
             riskReduction: "снижение локального продувания и конденсата",
+            lifetimeYears: 8,
         },
         sealingLeaks: {
             name: "Герметизация щелей и примыканий",
@@ -125,6 +137,7 @@ export const economicDefaults = {
             complexity: "низкая",
             comfortEffect: "средний/высокий",
             riskReduction: "снижение риска сквозняков, конденсата и плесени",
+            lifetimeYears: 5,
         },
         doorInsulation: {
             name: "Утепление входной двери и восстановление уплотнителей",
@@ -134,6 +147,7 @@ export const economicDefaults = {
             complexity: "низкая",
             comfortEffect: "средний/высокий",
             riskReduction: "снижение риска продувания входной группы",
+            lifetimeYears: 10,
         },
         vestibule: {
             name: "Установка тамбура или второй двери",
@@ -143,6 +157,7 @@ export const economicDefaults = {
             complexity: "средняя",
             comfortEffect: "высокий",
             riskReduction: "снижение пиковых инфильтрационных потерь",
+            lifetimeYears: 30,
         },
         thermalBridgeMitigation: {
             name: "Локальное устранение мостиков холода",
@@ -152,6 +167,7 @@ export const economicDefaults = {
             complexity: "средняя",
             comfortEffect: "средний/высокий",
             riskReduction: "снижение риска промерзания, конденсата и плесени",
+            lifetimeYears: 20,
         },
         heatingControl: {
             name: "Терморегуляторы и балансировка отопления",
@@ -161,6 +177,7 @@ export const economicDefaults = {
             complexity: "средняя",
             comfortEffect: "высокий",
             riskReduction: "снижение перегревов, недогрева и гидравлических перекосов",
+            lifetimeYears: 15,
         },
         weatherControl: {
             name: "Погодозависимое регулирование",
@@ -170,6 +187,7 @@ export const economicDefaults = {
             complexity: "средняя",
             comfortEffect: "высокий",
             riskReduction: "снижение перетопов и температурных колебаний",
+            lifetimeYears: 15,
         },
         pipeInsulation: {
             name: "Утепление трубопроводов в неотапливаемых зонах",
@@ -179,6 +197,7 @@ export const economicDefaults = {
             complexity: "низкая",
             comfortEffect: "средний",
             riskReduction: "снижение потерь и риска переохлаждения магистралей",
+            lifetimeYears: 15,
         },
     },
 };

@@ -1,3 +1,8 @@
+declare module "*.png" {
+  const src: string;
+  export default src;
+}
+
 declare module "react-katex" {
   import type { ComponentType, ReactNode } from "react";
 
@@ -302,4 +307,19 @@ declare module "three" {
 
 declare module "three/examples/jsm/controls/OrbitControls.js" {
   export { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
+}
+
+declare module "three/examples/jsm/renderers/CSS2DRenderer.js" {
+  import type { Camera, Object3D, Scene } from "three";
+
+  export class CSS2DObject extends Object3D {
+    element: HTMLElement;
+    constructor(element?: HTMLElement);
+  }
+
+  export class CSS2DRenderer {
+    domElement: HTMLElement;
+    setSize(width: number, height: number): void;
+    render(scene: Scene, camera: Camera): void;
+  }
 }

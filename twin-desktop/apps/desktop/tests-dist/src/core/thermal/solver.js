@@ -4,6 +4,7 @@ import { resolveBuildingInfiltration } from "./infiltration";
 import { createSinusoidalWeatherProfile } from "./weather";
 import { evaluateInternalGains, evaluateSetpoint, } from "./schedules";
 import { computeSimulationMetrics } from "./metrics";
+import { buildRcZoneSolarModel, computeZoneSolarGainW, DEFAULT_RC_SOLAR_CONFIG, } from "./solar/rcSolarGains";
 import { buildThermalSimulationDiagnostics } from "./thermalDiagnostics";
 const SECONDS_PER_HOUR = 3600;
 const DEFAULT_TIMESTEP_SECONDS = 600;
@@ -60,6 +61,8 @@ export function runThermalSimulation(building, options, adjacency) {
             nightStartHour: options.setpoints.nightStartHour,
         },
         initialTemperatureC: options.initialTemperatureC ?? options.setpoints.night,
+        solar: resolveRcSolarOptions(options),
+        zoneSolar: buildRcZoneSolarModel(building, thermalModel.outdoorLinks, resolveRcSolarOptions(options)),
     };
     const run = simulateThermalNetwork(thermalModel, scenario);
     const metrics = computeSimulationMetrics(run.metricFrames);
@@ -77,6 +80,7 @@ export function runThermalSimulation(building, options, adjacency) {
         totalEnergyKWh: metrics.totalEnergyJ / 3_600_000,
         peakLoadKW: metrics.peakHeatingW / 1000,
         adjacency: resolvedAdjacency,
+        performanceOptions: options.performanceOptions,
     });
     const rooms = {};
     run.roomHistories.forEach((history, roomId) => {
@@ -113,6 +117,17 @@ export function runThermalSimulation(building, options, adjacency) {
  * C_i (T_i^{n+1}−T_i^n)/Δt = Σ_j G_ij(T_j^n−T_i^n) + G_inf,i(T_n−T_i^n) + Σ_k G_k,ext(T_n−T_i^n) + Q̇_int + Q̇_ot .
  * Температуры в К в потоках; Q̇_ot ≥ 0 поднимает T до уставки (см. тело цикла). Норматив СП 50 здесь не вычисляется.
  */
+function resolveRcSolarOptions(options) {
+    const engineering = options.engineering;
+    return {
+        enabled: options.solar?.enabled ?? true,
+        latitudeDeg: options.solar?.latitudeDeg ?? DEFAULT_RC_SOLAR_CONFIG.latitudeDeg,
+        dayOfYear: options.solar?.dayOfYear ?? DEFAULT_RC_SOLAR_CONFIG.dayOfYear,
+        irradianceW_m2: options.solar?.irradianceW_m2 ??
+            engineering?.solarIrradianceW_m2 ??
+            DEFAULT_RC_SOLAR_CONFIG.irradianceW_m2,
+    };
+}
 export function simulateThermalNetwork(model, scenario) {
     if (!model.zones.length) {
         throw new Error("Модель не содержит зон для расчёта.");
@@ -176,6 +191,8 @@ export function simulateThermalNetwork(model, scenario) {
             netPowerW += zone.ventilationConductance_W_K * (outdoorK - currentTempK);
             const { gainW } = evaluateInternalGains(scenario.gains, scenario.occupancy, timeSeconds, zone.area_m2);
             netPowerW += gainW;
+            const solarGainW = computeZoneSolarGainW(scenario.zoneSolar?.get(zone.id), timeSeconds, scenario.solar ?? {});
+            netPowerW += solarGainW;
             const predictedK = currentTempK + (netPowerW / zone.capacitance_J_K) * timestepSeconds;
             let heatingPowerW = 0;
             let unmetLoadW = 0;

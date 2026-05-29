@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AmbientLight,
   BoxGeometry,
@@ -7,6 +7,7 @@ import {
   Group,
   Mesh,
   MeshStandardMaterial,
+  MOUSE,
   PerspectiveCamera,
   Raycaster,
   Scene,
@@ -52,6 +53,8 @@ export function SpaceViewer3D({
   const targetTempsRef = useRef<Record<string, number>>({});
   const selectedSpaceRef = useRef<string | null>(null);
   const animationFrameRef = useRef(0);
+  const [levelFilter, setLevelFilter] = useState<string | null>(null);
+  const levelFilterRef = useRef<string | null>(null);
 
   const spaceInstances = useTwinStore((state) => state.spaceInstances);
   const selectSpace = useTwinStore((state) => state.selectSpace);
@@ -65,6 +68,7 @@ export function SpaceViewer3D({
     const targets = targetTempsRef.current;
     const displayed = displayedTempsRef.current;
     const selectedId = selectedSpaceRef.current;
+    const filterLevel = levelFilterRef.current;
 
     meshes.forEach((mesh, id) => {
       const prev = displayed[id] ?? targets[id] ?? 20;
@@ -77,15 +81,18 @@ export function SpaceViewer3D({
       const visualColor = heatmap ? thermalColor : mixColor(mixBase, thermalColor, 0.55);
       const material = mesh.material as MeshStandardMaterial;
       material.color.set(visualColor);
-      material.opacity = 0.94;
       material.transparent = true;
+
+      const meshLevel = mesh.userData.level as string | undefined;
+      const dimmed = filterLevel !== null && meshLevel !== filterLevel;
+      material.opacity = dimmed ? 0.07 : 0.94;
 
       if (selectedId === id) {
         material.emissive.set(theme === "dark" ? "#9cb87a" : "#c2410c");
-        material.emissiveIntensity = theme === "dark" ? 0.28 : 0.4;
+        material.emissiveIntensity = dimmed ? 0.02 : (theme === "dark" ? 0.28 : 0.4);
       } else {
         material.emissive.set(visualColor);
-        material.emissiveIntensity = 0.08;
+        material.emissiveIntensity = dimmed ? 0.0 : 0.08;
       }
     });
   }, [heatmap, theme]);
@@ -97,12 +104,18 @@ export function SpaceViewer3D({
       return;
     }
 
-    const minX = Math.min(...spaceInstances.map((space) => space.position[0] - space.size[0] / 2));
-    const maxX = Math.max(...spaceInstances.map((space) => space.position[0] + space.size[0] / 2));
-    const minY = Math.min(...spaceInstances.map((space) => space.position[1] - space.size[1] / 2));
-    const maxY = Math.max(...spaceInstances.map((space) => space.position[1] + space.size[1] / 2));
-    const minZ = Math.min(...spaceInstances.map((space) => space.position[2] - space.size[2] / 2));
-    const maxZ = Math.max(...spaceInstances.map((space) => space.position[2] + space.size[2] / 2));
+    const filterLevel = levelFilterRef.current;
+    const visible = filterLevel !== null
+      ? spaceInstances.filter((s) => s.level === filterLevel)
+      : spaceInstances;
+    const target = visible.length ? visible : spaceInstances;
+
+    const minX = Math.min(...target.map((s) => s.position[0] - s.size[0] / 2));
+    const maxX = Math.max(...target.map((s) => s.position[0] + s.size[0] / 2));
+    const minY = Math.min(...target.map((s) => s.position[1] - s.size[1] / 2));
+    const maxY = Math.max(...target.map((s) => s.position[1] + s.size[1] / 2));
+    const minZ = Math.min(...target.map((s) => s.position[2] - s.size[2] / 2));
+    const maxZ = Math.max(...target.map((s) => s.position[2] + s.size[2] / 2));
 
     const centerX = (minX + maxX) / 2;
     const centerY = (minY + maxY) / 2;
@@ -149,6 +162,7 @@ export function SpaceViewer3D({
       mesh.scale.set(instance.size[0], instance.size[1], instance.size[2]);
       mesh.position.set(...instance.position);
       mesh.userData.spaceId = instance.id;
+      mesh.userData.level = instance.level ?? "";
       group.add(mesh);
       meshesRef.current.set(instance.id, mesh);
     });
@@ -177,6 +191,11 @@ export function SpaceViewer3D({
 
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
+    controls.mouseButtons = {
+      LEFT: MOUSE.ROTATE,
+      MIDDLE: MOUSE.PAN,
+      RIGHT: MOUSE.ROTATE,
+    };
 
     const group = new Group();
     scene.add(group);
@@ -271,6 +290,32 @@ export function SpaceViewer3D({
     selectedSpaceRef.current = selectedSpaceId ?? null;
   }, [selectedSpaceId]);
 
+  useEffect(() => {
+    levelFilterRef.current = levelFilter;
+  }, [levelFilter]);
+
+  const uniqueLevels = useMemo(() => {
+    const seen = new Set<string>();
+    const result: string[] = [];
+    for (const inst of spaceInstances) {
+      const lvl = inst.level ?? "";
+      if (lvl && !seen.has(lvl)) {
+        seen.add(lvl);
+        result.push(lvl);
+      }
+    }
+    return result;
+  }, [spaceInstances]);
+
+  const handleSetLevelFilter = useCallback(
+    (level: string | null) => {
+      levelFilterRef.current = level;
+      setLevelFilter(level);
+      fitCameraToSpaces();
+    },
+    [fitCameraToSpaces]
+  );
+
   const selectedInstance = spaceInstances.find((space) => space.id === selectedSpaceId) ?? null;
 
   const stats = useMemo(() => {
@@ -301,6 +346,36 @@ export function SpaceViewer3D({
           <TemperatureScaleLegend caption="Температурная карта построена по зональной модели и не является CFD." />
         ) : null}
       </div>
+      {uniqueLevels.length > 1 && (
+        <div className="mb-3 flex flex-wrap items-center gap-1.5">
+          <span className="text-xs font-medium text-[color:var(--text-muted)]">Этаж:</span>
+          <button
+            type="button"
+            onClick={() => handleSetLevelFilter(null)}
+            className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${
+              levelFilter === null
+                ? "bg-[color:var(--accent-base)] text-white"
+                : "border border-[color:var(--border-soft)] text-[color:var(--text-muted)] hover:bg-[color:var(--surface-muted)]"
+            }`}
+          >
+            Все уровни
+          </button>
+          {uniqueLevels.map((level) => (
+            <button
+              key={level}
+              type="button"
+              onClick={() => handleSetLevelFilter(levelFilter === level ? null : level)}
+              className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${
+                levelFilter === level
+                  ? "bg-[color:var(--accent-base)] text-white"
+                  : "border border-[color:var(--border-soft)] text-[color:var(--text-muted)] hover:bg-[color:var(--surface-muted)]"
+              }`}
+            >
+              {level}
+            </button>
+          ))}
+        </div>
+      )}
       <div
         className="ui-workspace-canvas relative w-full overflow-hidden shadow-inner"
         style={{ minHeight: height }}

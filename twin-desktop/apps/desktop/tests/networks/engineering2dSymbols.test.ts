@@ -1,6 +1,7 @@
 import {
   createEngineeringEquipmentInstance,
   createTypicalCtpEngineeringSystems,
+  createItpParallelDhwDependentHeating,
   getEngineeringPort,
   getEngineeringPortWorldPosition,
   rotateEngineeringDirection,
@@ -50,5 +51,53 @@ test("engineering 2d: automation links are routed as signal pipes", () => {
   const signalPipes = systems.pipes.filter((pipe) => pipe.medium === "signal");
   if (signalPipes.length < 2) {
     throw new Error(`Expected at least 2 signal connections to automation cabinet, got ${signalPipes.length}.`);
+  }
+});
+
+test("engineering 2d: ITP parallel DHW + dependent heating contains required equipment", () => {
+  const systems = createItpParallelDhwDependentHeating("l1");
+  const types = new Set(systems.equipment.map((item) => item.type));
+
+  const requiredTypes = [
+    "pump",           // насос ГВС и корректирующий насос
+    "heatExchanger",  // водоподогреватель ГВС
+    "controlValve",   // рег. перепада давл., рег. теплоты, рег. клапан ГВС
+    "checkValve",     // обратные клапаны
+    "filter",         // грязевик
+    "heatMeter",      // теплосчётчик и водомер ХВС
+    "manifold",       // коллекторы
+    "automationCabinet",
+  ] as const;
+
+  requiredTypes.forEach((type) => {
+    if (!types.has(type)) {
+      throw new Error(`Expected ITP parallel DHW template to include equipment type: ${type}.`);
+    }
+  });
+});
+
+test("engineering 2d: ITP parallel DHW + dependent heating has DHW and coldWater medium pipes", () => {
+  const systems = createItpParallelDhwDependentHeating("l1");
+  const mediums = new Set(systems.pipes.map((p) => p.medium));
+  if (!mediums.has("dhw")) {
+    throw new Error("Expected ITP template to have pipes with 'dhw' medium (ГВС circuit).");
+  }
+  if (!mediums.has("coldWater")) {
+    throw new Error("Expected ITP template to have pipes with 'coldWater' medium (ХВС inlet).");
+  }
+  if (!mediums.has("supply")) {
+    throw new Error("Expected ITP template to have pipes with 'supply' medium (district heating).");
+  }
+  if (!mediums.has("return")) {
+    throw new Error("Expected ITP template to have pipes with 'return' medium (district return).");
+  }
+});
+
+test("engineering 2d: ITP parallel DHW + dependent heating has no isolated equipment (all pipes resolved)", () => {
+  const systems = createItpParallelDhwDependentHeating("l1");
+  // Все трубы должны быть успешно маршрутизированы (не пустые)
+  const emptyPipes = systems.pipes.filter((p) => p.points.length < 2);
+  if (emptyPipes.length > 0) {
+    throw new Error(`Found ${emptyPipes.length} pipe(s) with insufficient routing points in ITP template.`);
   }
 });

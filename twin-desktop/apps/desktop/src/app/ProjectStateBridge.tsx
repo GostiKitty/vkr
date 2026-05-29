@@ -3,7 +3,6 @@ import { useProjectStore } from "../entities/project/project.store";
 import { useTwinStore } from "../entities/twin/twin.store";
 import { useWorkflowStore } from "../entities/workflow/workflow.store";
 import { useBuildStore } from "../features/build/build.store";
-import { writeAgentDebugLog } from "../shared/utils/agentDebugLog";
 import { resolveBuildProjectKey } from "../shared/utils/projectRuntime";
 
 export function ProjectStateBridge() {
@@ -17,9 +16,6 @@ export function ProjectStateBridge() {
 
   useEffect(() => {
     const nextKey = resolveBuildProjectKey(projectId);
-    // #region agent log
-    writeAgentDebugLog({sessionId:'c3d591',runId:'repro-4',hypothesisId:'H1',location:'ProjectStateBridge.tsx:project-key-sync',message:'bridge sync project key',data:{projectId,projectKind,currentProjectKey:projectKey,nextProjectKey:nextKey,changed:projectKey!==nextKey},timestamp:Date.now()});
-    // #endregion
     if (projectKey !== nextKey) {
       setProjectKey(nextKey);
     }

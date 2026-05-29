@@ -1,4 +1,4 @@
-import { NotificationPanel } from "../shared/ui";
+import { NotificationPanel, SourceBadgeIconFilters } from "../shared/ui";
 import { usePathname } from "./router";
 import { resolveRoute } from "./routes";
 import TopBar from "./TopBar";
@@ -25,6 +25,7 @@ export default function App() {
             : "min-h-screen bg-[color:var(--app-bg)] text-[color:var(--text-base)]"
       }
     >
+      <SourceBadgeIconFilters />
       <ProjectStateBridge />
       <TopBar currentPath={pathname} />
       <EngineConfigBanner />

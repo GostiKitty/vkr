@@ -16,6 +16,7 @@ export function createDefaultScenarioConfig() {
             night: 18,
             dayStartHour: 6,
             nightStartHour: 22,
+            setpointRampMinutes: 60,
         },
         internalGains: {
             dayGain_W_m2: 6,
@@ -50,7 +51,6 @@ export function createDefaultScenarioConfig() {
             roomOverrides: {},
         },
         materials: {
-            bridgeAccountingMode: "disabled",
             homogeneityCoefficient: null,
             windowUValue_W_m2K: null,
             doorUValue_W_m2K: null,

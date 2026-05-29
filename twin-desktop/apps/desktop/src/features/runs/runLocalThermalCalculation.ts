@@ -3,39 +3,19 @@ import { useWorkflowStore } from "../../entities/workflow/workflow.store";
 import { buildAdjacencyGraph } from "../../core/graph/adjacency";
 import { syncBuildSimulationToStudio } from "../../core/thermal/thermalSimulationExport";
 import { runThermalSimulation, type ThermalSimulationResult } from "../../core/thermal/solver";
-import { writeAgentDebugLog } from "../../shared/utils/agentDebugLog";
 import { useBuildStore } from "../build/build.store";
 import { applyScenarioToBuilding } from "../build/thermal/applyScenarioToBuilding";
 import { buildThermalOptionsFromWorkflow } from "../build/thermal/workflowThermalOptions";
 
 export function runLocalThermalCalculation(): ThermalSimulationResult {
   const { model: buildModel, projectKey, modelRevision } = useBuildStore.getState();
-  const { projectId, projectKind } = useProjectStore.getState();
+  const { projectId } = useProjectStore.getState();
   const workflowState = useWorkflowStore.getState();
   const simulationOptions = buildThermalOptionsFromWorkflow(workflowState.scenarioConfig);
 
   if (!buildModel.rooms.length) {
     throw new Error("Добавьте помещения и стены в режиме конструирования, чтобы запустить расчёт.");
   }
-
-  writeAgentDebugLog({
-    sessionId: "c3d591",
-    runId: "repro-4",
-    hypothesisId: "H2",
-    location: "runLocalThermalCalculation.ts:before",
-    message: "local simulation run start",
-    data: {
-      projectId,
-      projectKind,
-      projectKey,
-      modelRevision,
-      rooms: buildModel.rooms.length,
-      walls: buildModel.walls.length,
-      levels: buildModel.levels.length,
-      sourceProjectId: typeof buildModel.meta?.sourceProjectId === "string" ? buildModel.meta.sourceProjectId : null,
-    },
-    timestamp: Date.now(),
-  });
 
   const adjacency = buildAdjacencyGraph(buildModel);
   const modelForSim = applyScenarioToBuilding(buildModel, workflowState.scenarioConfig);
@@ -44,23 +24,7 @@ export function runLocalThermalCalculation(): ThermalSimulationResult {
   syncBuildSimulationToStudio(modelForSim, simulation, adjacency, {
     projectKey,
     modelRevision,
-  });
-
-  writeAgentDebugLog({
-    sessionId: "c3d591",
-    runId: "repro-4",
-    hypothesisId: "H2",
-    location: "runLocalThermalCalculation.ts:after",
-    message: "local simulation run complete",
-    data: {
-      projectKey,
-      modelRevision,
-      resultRooms: Object.keys(simulation.rooms).length,
-      timeline: simulation.timeline.length,
-      peakLoadKW: simulation.summary.peakLoadKW,
-      totalEnergyKWh: simulation.summary.totalEnergyKWh,
-    },
-    timestamp: Date.now(),
+    projectId,
   });
 
   if (import.meta.env.DEV) {
@@ -72,11 +36,17 @@ export function runLocalThermalCalculation(): ThermalSimulationResult {
     });
   }
 
+  const runNumber = workflowState.scenarioRunHistory.length + 1;
+  const cityId = workflowState.scenarioConfig?.climateCityId ?? null;
   workflowState.pushScenarioRunSnapshot({
-    label: workflowState.scenarioConfig?.climateCityId ?? "Прогон",
+    label: `Прогон ${runNumber}${cityId ? ` · ${cityId}` : ""}`,
     peakLoadKW: simulation.summary.peakLoadKW,
     totalEnergyKWh: simulation.summary.totalEnergyKWh,
     discomfortHours: simulation.summary.discomfortHours,
+    infiltrationACH: simulationOptions.infiltrationACH ?? null,
+    ventilationACH: simulationOptions.ventilationACH ?? null,
+    setpointDayC: simulationOptions.setpoints?.day ?? null,
+    climateCityId: cityId,
   });
   workflowState.markSolveCompleted(true);
 

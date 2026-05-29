@@ -1,6 +1,6 @@
 /**
- * Климатические параметры для расчёта теплозащиты (СП 131.13330.2025, табл. 1 — выборочно).
- * Полный перечень городов можно расширять по мере необходимости проекта.
+ * Климатические параметры для расчёта теплозащиты (СП 131.13330.2025, табл. 1).
+ * ГСОП рассчитан при t_in = 20 °C (норматив для жилых помещений).
  */
 export interface Sp131CityClimate {
   id: string;
@@ -9,18 +9,42 @@ export interface Sp131CityClimate {
   outdoorHeatingPeriodAverageC: number;
   /** Продолжительность отопительного периода, сут */
   heatingPeriodDurationDays: number;
-  /** Расчётная температура наружного воздуха (наиболее холодная пятидневка), °C */
+  /** Расчётная температура наружного воздуха (наиболее холодная пятидневка 0.92), °C */
   outdoorDesignTemperatureC: number;
-  /** ГСОП, °C·сут (может пересчитываться из t_in, t_ot, z_ot) */
+  /** ГСОП при t_in = 20 °C, °C·сут */
   gsop?: number;
 }
 
+function gsop20(tOt: number, zOt: number): number {
+  return Math.round((20 - tOt) * zOt);
+}
+
 export const SP131_CITIES: Sp131CityClimate[] = [
-  { id: "moscow", label: "Москва", outdoorHeatingPeriodAverageC: -2.2, heatingPeriodDurationDays: 214, outdoorDesignTemperatureC: -26 },
-  { id: "spb", label: "Санкт-Петербург", outdoorHeatingPeriodAverageC: -1.8, heatingPeriodDurationDays: 213, outdoorDesignTemperatureC: -24 },
-  { id: "ekb", label: "Екатеринбург", outdoorHeatingPeriodAverageC: -5.5, heatingPeriodDurationDays: 220, outdoorDesignTemperatureC: -32 },
-  { id: "novosibirsk", label: "Новосибирск", outdoorHeatingPeriodAverageC: -7.9, heatingPeriodDurationDays: 222, outdoorDesignTemperatureC: -37 },
-  { id: "krasnodar", label: "Краснодар", outdoorHeatingPeriodAverageC: 2.7, heatingPeriodDurationDays: 147, outdoorDesignTemperatureC: -15 },
+  // Европейская часть России
+  { id: "moscow",           label: "Москва",                outdoorHeatingPeriodAverageC: -2.2, heatingPeriodDurationDays: 214, outdoorDesignTemperatureC: -26, gsop: gsop20(-2.2, 214) },
+  { id: "spb",              label: "Санкт-Петербург",       outdoorHeatingPeriodAverageC: -1.8, heatingPeriodDurationDays: 213, outdoorDesignTemperatureC: -24, gsop: gsop20(-1.8, 213) },
+  { id: "voronezh",         label: "Воронеж",               outdoorHeatingPeriodAverageC: -2.0, heatingPeriodDurationDays: 197, outdoorDesignTemperatureC: -26, gsop: gsop20(-2.0, 197) },
+  { id: "nizhny_novgorod",  label: "Нижний Новгород",       outdoorHeatingPeriodAverageC: -3.7, heatingPeriodDurationDays: 215, outdoorDesignTemperatureC: -30, gsop: gsop20(-3.7, 215) },
+  { id: "kazan",            label: "Казань",                outdoorHeatingPeriodAverageC: -4.8, heatingPeriodDurationDays: 219, outdoorDesignTemperatureC: -32, gsop: gsop20(-4.8, 219) },
+  { id: "samara",           label: "Самара",                outdoorHeatingPeriodAverageC: -4.4, heatingPeriodDurationDays: 213, outdoorDesignTemperatureC: -30, gsop: gsop20(-4.4, 213) },
+  { id: "ufa",              label: "Уфа",                   outdoorHeatingPeriodAverageC: -5.4, heatingPeriodDurationDays: 218, outdoorDesignTemperatureC: -34, gsop: gsop20(-5.4, 218) },
+  { id: "saratov",          label: "Саратов",               outdoorHeatingPeriodAverageC: -3.1, heatingPeriodDurationDays: 205, outdoorDesignTemperatureC: -27, gsop: gsop20(-3.1, 205) },
+  { id: "volgograd",        label: "Волгоград",             outdoorHeatingPeriodAverageC: -1.3, heatingPeriodDurationDays: 191, outdoorDesignTemperatureC: -23, gsop: gsop20(-1.3, 191) },
+  { id: "rostov",           label: "Ростов-на-Дону",        outdoorHeatingPeriodAverageC:  1.0, heatingPeriodDurationDays: 165, outdoorDesignTemperatureC: -19, gsop: gsop20(1.0, 165) },
+  { id: "krasnodar",        label: "Краснодар",             outdoorHeatingPeriodAverageC:  2.7, heatingPeriodDurationDays: 147, outdoorDesignTemperatureC: -15, gsop: gsop20(2.7, 147) },
+  // Урал
+  { id: "ekb",              label: "Екатеринбург",          outdoorHeatingPeriodAverageC: -5.5, heatingPeriodDurationDays: 220, outdoorDesignTemperatureC: -32, gsop: gsop20(-5.5, 220) },
+  { id: "chelyabinsk",      label: "Челябинск",             outdoorHeatingPeriodAverageC: -6.0, heatingPeriodDurationDays: 218, outdoorDesignTemperatureC: -33, gsop: gsop20(-6.0, 218) },
+  { id: "perm",             label: "Пермь",                 outdoorHeatingPeriodAverageC: -5.7, heatingPeriodDurationDays: 225, outdoorDesignTemperatureC: -35, gsop: gsop20(-5.7, 225) },
+  // Западная Сибирь
+  { id: "tyumen",           label: "Тюмень",                outdoorHeatingPeriodAverageC: -7.2, heatingPeriodDurationDays: 226, outdoorDesignTemperatureC: -38, gsop: gsop20(-7.2, 226) },
+  { id: "omsk",             label: "Омск",                  outdoorHeatingPeriodAverageC: -8.0, heatingPeriodDurationDays: 221, outdoorDesignTemperatureC: -38, gsop: gsop20(-8.0, 221) },
+  { id: "novosibirsk",      label: "Новосибирск",           outdoorHeatingPeriodAverageC: -7.9, heatingPeriodDurationDays: 222, outdoorDesignTemperatureC: -37, gsop: gsop20(-7.9, 222) },
+  { id: "tomsk",            label: "Томск",                 outdoorHeatingPeriodAverageC: -8.9, heatingPeriodDurationDays: 235, outdoorDesignTemperatureC: -40, gsop: gsop20(-8.9, 235) },
+  // Восточная Сибирь и ДВ
+  { id: "krasnoyarsk",      label: "Красноярск",            outdoorHeatingPeriodAverageC: -8.8, heatingPeriodDurationDays: 234, outdoorDesignTemperatureC: -40, gsop: gsop20(-8.8, 234) },
+  { id: "irkutsk",          label: "Иркутск",               outdoorHeatingPeriodAverageC: -9.7, heatingPeriodDurationDays: 247, outdoorDesignTemperatureC: -40, gsop: gsop20(-9.7, 247) },
+  { id: "khabarovsk",       label: "Хабаровск",             outdoorHeatingPeriodAverageC: -9.0, heatingPeriodDurationDays: 218, outdoorDesignTemperatureC: -31, gsop: gsop20(-9.0, 218) },
 ];
 
 export function getSp131CityClimate(cityId: string | null | undefined): Sp131CityClimate | null {
@@ -33,4 +57,9 @@ export function getSp131CityClimate(cityId: string | null | undefined): Sp131Cit
 
 export function listSp131Cities(): Sp131CityClimate[] {
   return [...SP131_CITIES];
+}
+
+/** Опции для select «Климатический регион» в UI. */
+export function sp131CitySelectOptions(): Array<{ value: string; label: string }> {
+  return SP131_CITIES.map((city) => ({ value: city.id, label: city.label }));
 }

@@ -16,6 +16,24 @@ test("OrientationHelper3D renders compass block without duplicating the level la
   }
 });
 
+test("OrientationHelper3D rotates the needle from camera azimuth", () => {
+  const markup = renderToStaticMarkup(
+    <OrientationHelper3D
+      cameraState={{
+        position: { x: 0, y: 10, z: 10 },
+        target: { x: 0, y: 0, z: 0 },
+        azimuthRad: Math.PI / 2,
+        polarRad: Math.PI / 4,
+        distance: 14,
+      }}
+      levelName="Уровень 1"
+    />
+  );
+  if (!markup.includes('rotate(-90 50 50)')) {
+    throw new Error("Orientation helper should rotate the needle from the camera azimuth.");
+  }
+});
+
 test("ThreeDControlPanel keeps only active controls in the main 3D UI", () => {
   const markup = renderToStaticMarkup(
     <ThreeDControlPanel

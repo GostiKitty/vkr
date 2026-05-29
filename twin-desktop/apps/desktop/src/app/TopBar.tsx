@@ -1,8 +1,6 @@
 import { useMemo } from "react";
-import { useProjectStore } from "../entities/project/project.store";
 import { navigate } from "./router";
 import { routes } from "./routes";
-import { formatProjectDisplayLabel } from "../shared/utils/projectLabels";
 import { useWorkspaceStore } from "../entities/workspace/workspace.store";
 
 interface TopBarProps {
@@ -10,11 +8,9 @@ interface TopBarProps {
 }
 
 export function TopBar({ currentPath }: TopBarProps) {
-  const projectId = useProjectStore((state) => state.projectId);
   const setWorkspaceMode = useWorkspaceStore((state) => state.setMode);
   const dispatchProjectCommand = useWorkspaceStore((state) => state.dispatchProjectCommand);
 
-  const projectLabel = formatProjectDisplayLabel(projectId, { fallback: "Без проекта" });
   const isHome = currentPath === "/";
   const navigationRoutes = useMemo(
     () =>
@@ -24,6 +20,7 @@ export function TopBar({ currentPath }: TopBarProps) {
           (route.id === "model" ||
             route.id === "scenarios" ||
             route.id === "results" ||
+            route.id === "formulas" ||
             route.id === "drawing" ||
             route.id === "settings")
       ),
@@ -72,9 +69,6 @@ export function TopBar({ currentPath }: TopBarProps) {
           </nav>
 
           <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2">
-            <span className="hidden max-w-[10rem] truncate text-sm font-semibold text-[color:var(--text-muted)] xl:inline" title={projectLabel}>
-              {projectLabel}
-            </span>
             <button
               type="button"
               onClick={() => {

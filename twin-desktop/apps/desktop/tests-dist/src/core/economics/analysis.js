@@ -1,6 +1,15 @@
+import { getSp131CityClimate } from "../../norms/sp131_2025/climate";
+import { getCityEnergyProfile, gasM3TariffToKwh } from "./cityEnergyProfile";
 import { economicDefaults } from "./types";
 const HOURS_PER_DAY = 24;
 const KWH_PER_GCAL = 1163;
+/** Удельные выбросы CO₂ по источнику тепла, кг/кВт·ч тепловой энергии */
+const DEFAULT_CO2_FACTORS = {
+    gas: 0.22, // газовый котёл: ГОСТ Р 56277; природный газ 55.9 г/МДж / η=0.92
+    heat: 0.20, // ЦТ от ТЭЦ на газе (учитывает когенерационный КПД)
+    electricity: 0.35, // средний по ОЭС России (Приказ Минэнерго №1069-2021)
+    unknown: 0.22,
+};
 const ZONE_LABELS = {
     walls: "Наружные стены",
     windows: "Окна и светопрозрачные конструкции",
@@ -191,6 +200,12 @@ const MEASURE_LIBRARY = [
     },
 ];
 export function buildDefaultEconomicScenario(report) {
+    // getSp131CityClimate принимает и id («moscow»), и русскую метку («Москва») —
+    // именно это нужно, т.к. sourceData.city хранит русское название.
+    const climate = getSp131CityClimate(report.sourceData.city ?? null);
+    const profile = getCityEnergyProfile(climate?.id ?? null);
+    const heatTariff = profile?.heatTariffRubPerGcal ?? economicDefaults.heatTariffRubPerGcal;
+    const elecTariff = profile?.electricityTariffRubPerKwh ?? economicDefaults.electricityTariffRubPerKwh;
     return {
         id: "default-economic-scenario",
         name: "Комплексная модернизация",
@@ -198,9 +213,14 @@ export function buildDefaultEconomicScenario(report) {
         region: report.sourceData.city ?? economicDefaults.region,
         buildingType: mapBuildingType(report.sourceData.buildingCategory),
         heatingEnergySource: "heat",
-        heatTariffRubPerGcal: economicDefaults.heatTariffRubPerGcal,
-        electricityTariffRubPerKwh: economicDefaults.electricityTariffRubPerKwh,
-        regionalCostFactor: economicDefaults.regionalCostFactor,
+        heatTariffRubPerGcal: heatTariff,
+        electricityTariffRubPerKwh: elecTariff,
+        gasTariffRubPerM3: profile?.gasTariffRubPerM3 ?? 0,
+        gasUnderconsumptionPenaltyPercent: profile?.gasUnderconsumptionPenaltyPercent ?? 25,
+        gasMinimumOfftakePercent: profile?.gasMinimumOfftakePercent ?? 70,
+        heatContractMinimumPaymentFraction: profile?.heatContractMinimumPaymentFraction ?? 0,
+        regionalCostFactor: profile?.constructionCostFactor ?? economicDefaults.regionalCostFactor,
+        co2EmissionFactor_kgPerKWh: DEFAULT_CO2_FACTORS.heat,
         analysisPeriod_years: 15,
         discountRate: 0.1,
         annualTariffGrowthPercent: 5,
@@ -208,7 +228,7 @@ export function buildDefaultEconomicScenario(report) {
         annualMaintenancePercentOfCost: 0,
         residualValuePercent: 0,
         tariff: {
-            heatPrice_RUB_kWh: economicDefaults.heatTariffRubPerGcal / KWH_PER_GCAL,
+            heatPrice_RUB_kWh: heatTariff / KWH_PER_GCAL,
             currency: economicDefaults.currency,
         },
         defaults: economicDefaults,
@@ -227,6 +247,21 @@ export function runEconomicAssessment(report, scenario) {
     if (scenario.heatingEnergySource === "electricity" && scenario.electricityTariffRubPerKwh <= 0) {
         warnings.push("Тариф на электроэнергию не задан или равен нулю. Денежная экономия будет рассчитана как нулевая.");
     }
+    if (scenario.heatingEnergySource === "gas") {
+        const penaltyPct = scenario.gasUnderconsumptionPenaltyPercent ?? 0;
+        if (penaltyPct > 0) {
+            warnings.push(`Источник тепла — газовый котёл. При наличии договора с минимальным объёмом выборки экономия от снижения потребления уменьшается на штраф за недобор (~${penaltyPct} % от сэкономленной суммы). Колонка «Эффект. экономия» учитывает этот штраф.`);
+        }
+        if ((scenario.gasTariffRubPerM3 ?? 0) <= 0) {
+            warnings.push("Тариф на газ не задан. Денежная экономия для мероприятий рассчитана как нулевая.");
+        }
+    }
+    if (scenario.heatingEnergySource === "heat") {
+        const minFraction = scenario.heatContractMinimumPaymentFraction ?? 0;
+        if (minFraction > 0.05) {
+            warnings.push(`Для зданий без приборов учёта тепловой энергии часть оплаты (~${Math.round(minFraction * 100)} %) не зависит от фактического потребления. Эффективная экономия рассчитана с учётом этого ограничения.`);
+        }
+    }
     const totalHeatLoss_W = zones.reduce((sum, zone) => sum + zone.heatLoss_W, 0);
     zones.forEach((zone) => {
         zone.heatLossShare = totalHeatLoss_W > 0 ? zone.heatLoss_W / totalHeatLoss_W : 0;
@@ -243,15 +278,50 @@ export function runEconomicAssessment(report, scenario) {
     const packageMeasures = buildRecommendedPackage(ranked);
     const packageCost_RUB = packageMeasures.reduce((sum, entry) => sum + entry.totalCost_RUB, 0);
     const packageAnnualSaving_RUB = packageMeasures.reduce((sum, entry) => sum + entry.annualSaving_RUB, 0);
+    const packageContractPenalty_RUB = packageMeasures.reduce((sum, entry) => sum + entry.contractPenalty_RUB, 0);
+    const packageEffectiveAnnualSaving_RUB = Math.max(0, packageAnnualSaving_RUB - packageContractPenalty_RUB);
     const packageSavedEnergy_kWh_year = packageMeasures.reduce((sum, entry) => sum + entry.savedEnergy_kWh_year, 0);
     const packageSavedEnergy_Gcal_year = packageSavedEnergy_kWh_year / KWH_PER_GCAL;
-    const packagePayback_years = calculateSimplePayback_years(packageCost_RUB, packageAnnualSaving_RUB);
+    const packageSavedCO2_raw = packageMeasures.reduce((acc, entry) => {
+        if (entry.savedCO2_tCO2_year === null)
+            return acc;
+        return (acc ?? 0) + entry.savedCO2_tCO2_year;
+    }, null);
+    const packageSavedCO2_tCO2_year = packageSavedCO2_raw !== null ? Math.max(0, packageSavedCO2_raw) : null;
+    const packagePayback_years = calculateSimplePayback_years(packageCost_RUB, packageEffectiveAnnualSaving_RUB);
     const packageNpv_RUB = packageMeasures.reduce((sum, entry) => sum + (entry.npv_RUB ?? 0), 0);
     const beforeEnergy = report.energy.annualHeatingEnergy_kWh;
     const afterEnergy = Number.isFinite(beforeEnergy) && Number.isFinite(packageSavedEnergy_kWh_year)
         ? Math.max(0, (beforeEnergy ?? 0) - packageSavedEnergy_kWh_year)
         : null;
     const mainZone = zones.slice().sort((left, right) => right.heatLossShare - left.heatLossShare)[0] ?? null;
+    // Удельный расход и класс энергоэффективности
+    const heatedArea = report.sourceData.heatedAreaM2;
+    const qActual = report.energy.qByArea_kWh_m2;
+    const qNorm = report.energy.qHeatingNorm_kWh_m2;
+    const specificHeatConsumption_kWh_m2 = Number.isFinite(qActual) ? (qActual ?? null) : null;
+    const specificHeatConsumptionAfter_kWh_m2 = afterEnergy !== null && heatedArea != null && heatedArea > 0
+        ? afterEnergy / heatedArea
+        : null;
+    const sp50EnergyNorm_kWh_m2 = Number.isFinite(qNorm) ? (qNorm ?? null) : null;
+    const energyClassBefore = specificHeatConsumption_kWh_m2 !== null && sp50EnergyNorm_kWh_m2 !== null
+        ? classifyEnergyClass(specificHeatConsumption_kWh_m2, sp50EnergyNorm_kWh_m2)
+        : null;
+    const energyClassAfter = specificHeatConsumptionAfter_kWh_m2 !== null && sp50EnergyNorm_kWh_m2 !== null
+        ? classifyEnergyClass(specificHeatConsumptionAfter_kWh_m2, sp50EnergyNorm_kWh_m2)
+        : null;
+    const sp50EnergyComplies = specificHeatConsumption_kWh_m2 !== null && sp50EnergyNorm_kWh_m2 !== null
+        ? specificHeatConsumption_kWh_m2 <= sp50EnergyNorm_kWh_m2
+        : null;
+    // Чувствительность окупаемости к росту тарифа
+    const paybackAtZeroGrowth_years = calculateSimplePayback_years(packageCost_RUB, packageEffectiveAnnualSaving_RUB);
+    const paybackAtHighGrowth_years = calculateDiscountedPayback_years({
+        cost_RUB: packageCost_RUB,
+        annualSaving_RUB: packageEffectiveAnnualSaving_RUB,
+        discountRate: 0,
+        annualTariffGrowthPercent: 10,
+        analysisPeriod_years: scenario.analysisPeriod_years,
+    });
     const result = {
         scenario,
         sourceReport: report,
@@ -266,8 +336,11 @@ export function runEconomicAssessment(report, scenario) {
                 .sort((left, right) => (left.payback_years ?? Number.POSITIVE_INFINITY) - (right.payback_years ?? Number.POSITIVE_INFINITY))[0]?.measureId ?? null,
             packageCost_RUB,
             packageAnnualSaving_RUB,
+            packageContractPenalty_RUB,
+            packageEffectiveAnnualSaving_RUB,
             packageSavedEnergy_kWh_year,
             packageSavedEnergy_Gcal_year,
+            packageSavedCO2_tCO2_year,
             packagePayback_years,
             packagePaybackClass: classifyPayback(packagePayback_years, packageAnnualSaving_RUB),
             totalCost_RUB: packageCost_RUB,
@@ -278,6 +351,14 @@ export function runEconomicAssessment(report, scenario) {
             baseAnnualHeatingEnergy_kWh: beforeEnergy,
             estimatedAnnualHeatingEnergyBefore_kWh: beforeEnergy,
             estimatedAnnualHeatingEnergyAfter_kWh: afterEnergy,
+            specificHeatConsumption_kWh_m2,
+            specificHeatConsumptionAfter_kWh_m2,
+            sp50EnergyNorm_kWh_m2,
+            energyClassBefore,
+            energyClassAfter,
+            sp50EnergyComplies,
+            paybackAtZeroGrowth_years,
+            paybackAtHighGrowth_years,
             isApproximate: warnings.length > 0 || zones.some((zone) => zone.source === "derived"),
             hasAnyPayback: ranked.some((entry) => entry.status === "calculated" && entry.payback_years !== null),
             allMeasuresNonPayback: ranked.every((entry) => entry.status !== "calculated" || entry.payback_years === null),
@@ -485,7 +566,7 @@ function evaluateMeasure(report, scenario, measure, zones) {
     const reductionPercent = resolveReductionPercent(defaults.expectedHeatLossReductionPercent, scenario.mode);
     const systemSavingPercent = resolveReductionPercent(defaults.expectedEnergySavingPercent, scenario.mode);
     const heatingHours = resolveHeatingPeriodHours(report);
-    const baseEnergy_kWh = report.energy.annualHeatingEnergy_kWh;
+    const baseEnergy_kWh = report.energy.annualHeatingEnergy_kWh ?? null;
     const usesSystemSaving = measure.kind === "heating";
     if (applicationArea_m2 <= 0 && measure.application !== "building_complex") {
         warnings.push(`Для мероприятия «${defaults.name}» отсутствует корректная площадь применения.`);
@@ -514,28 +595,33 @@ function evaluateMeasure(report, scenario, measure, zones) {
     }
     const { materialCost_RUB, workCost_RUB } = splitCosts(applicationArea_m2, defaults, scenario.regionalCostFactor, totalCost_RUB);
     const annualSaving_RUB = calculateAnnualMoneySaving(savedEnergy_kWh_year ?? 0, scenario);
-    const payback_years = calculateSimplePayback_years(totalCost_RUB, annualSaving_RUB);
+    const contractPenalty_RUB = calculateContractPenalty(annualSaving_RUB, savedEnergy_kWh_year ?? 0, baseEnergy_kWh, scenario);
+    const effectiveAnnualSaving_RUB = Math.max(0, annualSaving_RUB - contractPenalty_RUB);
+    // Остаточная стоимость: автоматически из срока службы мероприятия
+    const residualValuePercent = resolveResidualValuePercent(defaults.lifetimeYears, scenario.analysisPeriod_years);
+    const payback_years = calculateSimplePayback_years(totalCost_RUB, effectiveAnnualSaving_RUB);
     const npv_RUB = calculateNpv_RUB({
         cost_RUB: totalCost_RUB,
-        annualSaving_RUB,
+        annualSaving_RUB: effectiveAnnualSaving_RUB,
         discountRate: scenario.discountRate,
         analysisPeriod_years: scenario.analysisPeriod_years,
         annualTariffGrowthPercent: scenario.annualTariffGrowthPercent,
         annualMaintenanceCost_RUB: scenario.annualMaintenanceCost_RUB,
         annualMaintenancePercentOfCost: scenario.annualMaintenancePercentOfCost,
-        residualValuePercent: scenario.residualValuePercent,
+        residualValuePercent,
     });
     const profitabilityIndex = calculateProfitabilityIndex({ cost_RUB: totalCost_RUB, npv_RUB });
     const discountedPayback_years = calculateDiscountedPayback_years({
         cost_RUB: totalCost_RUB,
-        annualSaving_RUB,
+        annualSaving_RUB: effectiveAnnualSaving_RUB,
         discountRate: scenario.discountRate,
         annualTariffGrowthPercent: scenario.annualTariffGrowthPercent,
         annualMaintenanceCost_RUB: scenario.annualMaintenanceCost_RUB,
         annualMaintenancePercentOfCost: scenario.annualMaintenancePercentOfCost,
         analysisPeriod_years: scenario.analysisPeriod_years,
-        residualValuePercent: scenario.residualValuePercent,
+        residualValuePercent,
     });
+    const savedCO2_tCO2_year = calculateCO2Saving(savedEnergy_kWh_year ?? 0, scenario);
     const comfortScore = mapComfortScore(defaults.comfortEffect);
     const riskScore = mapRiskScore(defaults.riskReduction);
     const paybackClass = classifyPayback(payback_years, annualSaving_RUB);
@@ -558,6 +644,9 @@ function evaluateMeasure(report, scenario, measure, zones) {
         savedEnergy_kWh_year: savedEnergy_kWh_year ?? 0,
         savedEnergy_Gcal_year: (savedEnergy_kWh_year ?? 0) / KWH_PER_GCAL,
         annualSaving_RUB,
+        contractPenalty_RUB,
+        effectiveAnnualSaving_RUB,
+        savedCO2_tCO2_year,
         payback_years,
         paybackClass,
         discountedPayback_years,
@@ -710,15 +799,46 @@ function buildRecommendationSet(results) {
         scenarioLeaderReason: first?.scenarioExplanation ?? null,
     });
 }
+/**
+ * Класс энергоэффективности по SP50.13330.2022 (таблица 15).
+ * Отклонение = (фактический удельный расход − нормативный) / нормативный × 100 %.
+ * Отрицательное отклонение означает, что здание экономит больше нормы.
+ */
+function classifyEnergyClass(qActual_kWh_m2, qNorm_kWh_m2) {
+    if (qNorm_kWh_m2 <= 0)
+        return "—";
+    const deviation = ((qActual_kWh_m2 - qNorm_kWh_m2) / qNorm_kWh_m2) * 100;
+    if (deviation < -60)
+        return "А++";
+    if (deviation < -45)
+        return "А+";
+    if (deviation < -30)
+        return "А";
+    if (deviation < -10)
+        return "В";
+    if (deviation < 5)
+        return "С";
+    if (deviation < 25)
+        return "D";
+    if (deviation < 50)
+        return "E";
+    if (deviation < 75)
+        return "F";
+    return "G";
+}
 function buildEngineeringConclusion(result) {
     const mainZoneSharePercent = (result.summary.mainLossShare ?? 0) * 100;
     const calculated = result.measureResults.filter((entry) => entry.status === "calculated");
     const best = calculated[0] ?? null;
     const cheapest = calculated.slice().sort((left, right) => left.totalCost_RUB - right.totalCost_RUB)[0] ?? null;
     const strongestEffect = calculated.slice().sort((left, right) => right.savedEnergy_kWh_year - left.savedEnergy_kWh_year)[0] ?? null;
+    const { energyClassBefore, energyClassAfter, specificHeatConsumption_kWh_m2, sp50EnergyNorm_kWh_m2 } = result.summary;
+    const energyClassSentence = energyClassBefore
+        ? ` Текущий класс энергоэффективности здания — ${energyClassBefore}${specificHeatConsumption_kWh_m2 != null ? ` (${new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(specificHeatConsumption_kWh_m2)} кВт·ч/(м²·год)` + (sp50EnergyNorm_kWh_m2 != null ? `, норма ${new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(sp50EnergyNorm_kWh_m2)}` : "") + ")" : ""}.${energyClassAfter && energyClassAfter !== energyClassBefore ? ` После реализации пакета ожидается переход в класс ${energyClassAfter}.` : ""}`
+        : "";
     const prefix = result.summary.mainLossZone
-        ? `Наибольшая доля теплопотерь приходится на ${result.summary.mainLossZone.toLowerCase()} — ${mainZoneSharePercent.toFixed(0)}%.`
-        : "Наиболее проблемная зона теплопотерь не определена из-за неполных данных.";
+        ? `Наибольшая доля теплопотерь приходится на ${result.summary.mainLossZone.toLowerCase()} — ${mainZoneSharePercent.toFixed(0)}%.${energyClassSentence}`
+        : `Наиболее проблемная зона теплопотерь не определена из-за неполных данных.${energyClassSentence}`;
     const bestSentence = best
         ? ` В сценарии ${translateScenarioMode(result.scenario.mode)} приоритет получает ${best.measureName.toLowerCase()}, поскольку ${best.priorityReasons.join(", ")}. Ориентировочная стоимость составляет ${formatRub(best.totalCost_RUB)} ₽, ожидаемая экономия — ${formatRub(best.annualSaving_RUB)} ₽/год, срок окупаемости — ${formatYears(best.payback_years)}.`
         : "";
@@ -731,8 +851,12 @@ function buildEngineeringConclusion(result) {
     const npvSentence = best && best.npv_RUB !== null && best.npv_RUB < 0
         ? " По NPV мероприятие окупается слабо, но остается полезным с точки зрения комфорта и снижения эксплуатационных рисков."
         : "";
+    const co2 = result.summary.packageSavedCO2_tCO2_year;
+    const co2Sentence = co2 !== null && co2 > 0
+        ? ` Реализация пакета мероприятий позволяет снизить выбросы CO₂ ориентировочно на ${new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 1 }).format(co2)} т CO₂/год.`
+        : "";
     const warningSentence = " Результат является предварительной технико-экономической оценкой при заданных тарифах и текущих исходных данных; фактическая стоимость зависит от региона, состояния здания, выбранных материалов, подрядчика и действующих тарифов.";
-    return `${prefix}${bestSentence}${cheapSentence}${maxEffectSentence}${npvSentence}${warningSentence}`;
+    return `${prefix}${bestSentence}${cheapSentence}${maxEffectSentence}${npvSentence}${co2Sentence}${warningSentence}`;
 }
 function buildEconomicExportData(result) {
     return {
@@ -762,14 +886,21 @@ function buildEconomicExportData(result) {
     };
 }
 function resolveHeatingPeriodHours(report) {
-    const days = report.sourceData.heatingPeriodDurationDays;
-    if (Number.isFinite(days)) {
-        return (days ?? 0) * HOURS_PER_DAY;
-    }
+    // ГСОП / ΔT_design × 24 — «эквивалентные часы полной нагрузки».
+    // Это правильный способ перевести мощностную экономию (Вт при расчётной ΔT)
+    // в годовую энергию: E = ΔQ_W / ΔT × ГСОП × 24 / 1000.
+    // Использование дней × 24 (полная длительность сезона) систематически завышает
+    // экономию, так как ΔQ рассчитан при максимальной ΔT, а не средней.
     const gsop = report.sourceData.gsop;
     const deltaT = getDeltaT(report);
     if (typeof gsop === "number" && Number.isFinite(gsop) && typeof deltaT === "number" && Number.isFinite(deltaT) && deltaT > 0) {
         return (gsop / deltaT) * HOURS_PER_DAY;
+    }
+    // Fallback: длительность сезона без корректировки на среднюю ΔT.
+    // Даёт завышенную оценку — показывается предупреждение в вызывающем коде.
+    const days = report.sourceData.heatingPeriodDurationDays;
+    if (Number.isFinite(days)) {
+        return (days ?? 0) * HOURS_PER_DAY;
     }
     return null;
 }
@@ -854,10 +985,77 @@ function resolveReductionPercent(range, mode) {
     }
 }
 function calculateAnnualMoneySaving(savedEnergy_kWh_year, scenario) {
+    const saved = Math.max(0, savedEnergy_kWh_year);
     if (scenario.heatingEnergySource === "electricity") {
-        return Math.max(0, savedEnergy_kWh_year) * Math.max(0, scenario.electricityTariffRubPerKwh);
+        return saved * Math.max(0, scenario.electricityTariffRubPerKwh);
     }
-    return (Math.max(0, savedEnergy_kWh_year) / KWH_PER_GCAL) * Math.max(0, scenario.heatTariffRubPerGcal);
+    if (scenario.heatingEnergySource === "gas") {
+        const gasTariffM3 = scenario.gasTariffRubPerM3 ?? 0;
+        if (gasTariffM3 <= 0) {
+            return 0;
+        }
+        return saved * gasM3TariffToKwh(gasTariffM3);
+    }
+    return (saved / KWH_PER_GCAL) * Math.max(0, scenario.heatTariffRubPerGcal);
+}
+/**
+ * Рассчитывает годовой штраф за недобор по договору.
+ *
+ * Для газа: штраф начисляется только тогда, когда экономия снижает потребление
+ * ниже договорного минимума (gasMinimumOfftakePercent). Если экономия невелика
+ * и здание остаётся выше порога — штрафа нет. Штраф = стоимость объёма ниже
+ * порога × gasUnderconsumptionPenaltyPercent.
+ *
+ * Для ЦТ без прибора учёта: минимальный платёж (доля счёта, не зависящая от
+ * фактического потребления) применяется равномерно ко всей экономии.
+ */
+function calculateContractPenalty(annualSaving_RUB, savedEnergy_kWh_year, baseEnergy_kWh, scenario) {
+    if (annualSaving_RUB <= 0)
+        return 0;
+    if (scenario.heatingEnergySource === "gas") {
+        const penaltyPct = scenario.gasUnderconsumptionPenaltyPercent ?? 0;
+        if (penaltyPct <= 0)
+            return 0;
+        const minOfftakeFraction = clamp((scenario.gasMinimumOfftakePercent ?? 70) / 100, 0, 1);
+        const gasTariffM3 = scenario.gasTariffRubPerM3 ?? 0;
+        if (baseEnergy_kWh && baseEnergy_kWh > 0 && gasTariffM3 > 0) {
+            const savingFraction = clamp(savedEnergy_kWh_year / baseEnergy_kWh, 0, 1);
+            const residualFraction = 1 - savingFraction;
+            if (residualFraction >= minOfftakeFraction) {
+                // Потребление выше договорного минимума — штрафа нет
+                return 0;
+            }
+            // Часть экономии, которая «уводит» потребление ниже порога
+            const penalizedEnergyFraction = minOfftakeFraction - residualFraction;
+            const penalizedEnergy_kWh = baseEnergy_kWh * penalizedEnergyFraction;
+            const penalizedValue_RUB = penalizedEnergy_kWh * gasM3TariffToKwh(gasTariffM3);
+            return Math.max(0, penalizedValue_RUB * (penaltyPct / 100));
+        }
+        // Fallback без данных о базовом потреблении: штраф от всей экономии
+        return annualSaving_RUB * clamp(penaltyPct / 100, 0, 1);
+    }
+    if (scenario.heatingEnergySource === "heat") {
+        const minFraction = scenario.heatContractMinimumPaymentFraction ?? 0;
+        return annualSaving_RUB * clamp(minFraction, 0, 1);
+    }
+    return 0;
+}
+function calculateCO2Saving(savedEnergy_kWh_year, scenario) {
+    const factor = scenario.co2EmissionFactor_kgPerKWh ?? DEFAULT_CO2_FACTORS[scenario.heatingEnergySource] ?? null;
+    if (!factor || !Number.isFinite(savedEnergy_kWh_year) || savedEnergy_kWh_year <= 0)
+        return null;
+    return Math.max(0, (savedEnergy_kWh_year * factor) / 1000); // кг → тонны
+}
+/**
+ * Остаточная стоимость мероприятия, % от CAPEX.
+ * Если срок службы длиннее горизонта анализа — возвращает пропорцию оставшегося ресурса.
+ * Меры с истёкшим ресурсом возвращают 0.
+ */
+function resolveResidualValuePercent(lifetimeYears, analysisPeriod_years) {
+    if (!lifetimeYears || lifetimeYears <= analysisPeriod_years)
+        return 0;
+    const remainingFraction = (lifetimeYears - analysisPeriod_years) / lifetimeYears;
+    return Math.round(remainingFraction * 100);
 }
 function splitCosts(area_m2, defaults, regionalFactor, totalCost_RUB) {
     if (defaults.materialCostRubM2 || defaults.workCostRubM2) {
@@ -903,6 +1101,9 @@ function buildInsufficientResult(measure, warnings, zoneLabel) {
         savedEnergy_kWh_year: 0,
         savedEnergy_Gcal_year: 0,
         annualSaving_RUB: 0,
+        contractPenalty_RUB: 0,
+        effectiveAnnualSaving_RUB: 0,
+        savedCO2_tCO2_year: null,
         payback_years: null,
         paybackClass: "не окупается по прямой экономии",
         discountedPayback_years: null,

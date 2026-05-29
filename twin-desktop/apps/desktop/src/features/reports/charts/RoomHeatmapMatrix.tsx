@@ -6,6 +6,7 @@ import {
   heatCellTextClass,
   heatColorLoad,
   heatColorTemperature,
+  formatZoneStatusLabel,
   statusBadgeClass,
   THERMAL_CHART_NOT_SET,
 } from "./thermalChartTheme";
@@ -61,13 +62,7 @@ export function RoomHeatmapMatrix({ rows, selectedRoomId, onSelectRoom }: RoomHe
               <HeatmapCell value={row.heatingPowerW} domain={loadDomain} formatter={formatChartPower} variant="load" />
               <HeatmapCell value={row.lossTotalW} domain={lossDomain} formatter={formatChartPower} variant="load" />
               <td className="px-4 py-3">
-                {row.statusNote ? (
-                  <span className={statusBadgeClass(row.status)} title={row.statusNote}>
-                    {row.statusNote}
-                  </span>
-                ) : (
-                  <span className="text-[color:var(--text-soft)]">{THERMAL_CHART_NOT_SET}</span>
-                )}
+                <span className={statusBadgeClass(row.status)}>{formatZoneStatusLabel(row.status)}</span>
               </td>
             </tr>
           ))}

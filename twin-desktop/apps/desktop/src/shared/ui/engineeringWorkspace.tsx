@@ -6,8 +6,20 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
+import { Badge } from "./Badge";
+import { AutoCalculatedSourceIcon } from "./AutoCalculatedSourceIcon";
+import { MetricInfoTooltip } from "./FormulaTooltip";
 
 type StatusTone = "neutral" | "info" | "success" | "warning" | "error";
+
+export interface MetricFormulaInfo {
+  title: string;
+  meaning: string;
+  formula?: string;
+  inputs?: string | string[];
+  notes?: string | string[];
+  linkedFormulaIds?: string[];
+}
 
 interface SectionShellProps {
   title: string;
@@ -16,6 +28,10 @@ interface SectionShellProps {
   action?: ReactNode;
   children: ReactNode;
   className?: string;
+  collapsible?: boolean;
+  open?: boolean;
+  defaultOpen?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
 interface StatusBadgeProps {
@@ -34,6 +50,8 @@ interface MetricCardProps {
   icon?: ReactNode;
   trend?: string;
   animateValue?: boolean;
+  /** При наличии — вместо текстового статуса показывается иконка «рассчитано» с формулой. */
+  metricInfo?: MetricFormulaInfo;
 }
 
 interface FormulaCardProps {
@@ -54,7 +72,10 @@ interface ResultSummaryCardProps {
   totalHeatLossKW: number | null;
   specificHeatLoss: number | null;
   weakElement?: string | null;
+  weakElementLabel?: string;
   recommendation?: string | null;
+  totalHeatLossMetricInfo?: MetricFormulaInfo;
+  specificHeatLossMetricInfo?: MetricFormulaInfo;
 }
 
 interface ReportPreviewCardProps {
@@ -159,6 +180,28 @@ function useAnimatedNumber(
   });
 }
 
+function SectionShellChevron({ open }: { open: boolean }) {
+  return (
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+      className={joinClasses("ui-section-shell__chevron", open && "ui-section-shell__chevron--open")}
+    >
+      <path
+        d="M6 9l6 6 6-6"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export function SectionShell({
   title,
   description,
@@ -166,24 +209,101 @@ export function SectionShell({
   action,
   children,
   className,
+  collapsible = false,
+  open: controlledOpen,
+  defaultOpen = true,
+  onOpenChange,
 }: SectionShellProps) {
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(defaultOpen);
+  const isControlled = controlledOpen !== undefined;
+  const isOpen = isControlled ? controlledOpen : uncontrolledOpen;
+  const bodyId = useRef(`section-shell-${Math.random().toString(36).slice(2, 9)}`).current;
+
+  const setOpen = (nextOpen: boolean) => {
+    if (!isControlled) {
+      setUncontrolledOpen(nextOpen);
+    }
+    onOpenChange?.(nextOpen);
+  };
+
+  const titleBlock = (
+    <div className="space-y-2">
+      {kicker ? <p className="ui-kicker">{kicker}</p> : null}
+      <h2 className="ui-section-shell__title">{title}</h2>
+      {description ? <p className="ui-section-shell__description">{description}</p> : null}
+    </div>
+  );
+
   return (
-    <section className={joinClasses("ui-section-shell", className)}>
+    <section
+      className={joinClasses(
+        "ui-section-shell",
+        collapsible && "ui-section-shell--collapsible",
+        collapsible && !isOpen && "ui-section-shell--collapsed",
+        className
+      )}
+    >
       <header className="ui-section-shell__header">
-        <div className="space-y-2">
-          {kicker ? <p className="ui-kicker">{kicker}</p> : null}
-          <h2 className="ui-section-shell__title">{title}</h2>
-          {description ? <p className="ui-section-shell__description">{description}</p> : null}
-        </div>
+        {collapsible ? (
+          <button
+            type="button"
+            className="ui-section-shell__toggle"
+            aria-expanded={isOpen}
+            aria-controls={bodyId}
+            onClick={() => setOpen(!isOpen)}
+          >
+            {titleBlock}
+            <SectionShellChevron open={isOpen} />
+          </button>
+        ) : (
+          titleBlock
+        )}
         {action ? <div className="ui-section-shell__action">{action}</div> : null}
       </header>
-      {children}
+      {(!collapsible || isOpen) && (
+        <div id={bodyId} className="ui-section-shell__body">
+          {children}
+        </div>
+      )}
     </section>
   );
 }
 
 export function StatusBadge({ tone = "neutral", children }: StatusBadgeProps) {
   return <span className={STATUS_CLASS[tone]}>{children}</span>;
+}
+
+export function CalculatedMetricSourceBadge({ info }: { info: MetricFormulaInfo }) {
+  return (
+    <MetricInfoTooltip
+      title={info.title}
+      formula={info.formula}
+      linkedFormulaIds={info.linkedFormulaIds}
+      className="inline-flex shrink-0"
+    >
+      <Badge tone="success" className="ui-build-badge--icon-only">
+        <AutoCalculatedSourceIcon size={20} />
+      </Badge>
+    </MetricInfoTooltip>
+  );
+}
+
+function MetricCardStatus({
+  value,
+  status,
+  metricInfo,
+}: {
+  value: number | null;
+  status: StatusTone;
+  metricInfo?: MetricFormulaInfo;
+}) {
+  if (metricInfo && value == null) {
+    return <StatusBadge tone="warning">Нет расчёта</StatusBadge>;
+  }
+  if (metricInfo) {
+    return null;
+  }
+  return <StatusBadge tone={status}>{mapStatusLabel(status)}</StatusBadge>;
 }
 
 export function MetricCard({
@@ -197,8 +317,13 @@ export function MetricCard({
   icon,
   trend,
   animateValue = true,
+  metricInfo,
 }: MetricCardProps) {
   const display = useAnimatedNumber(value, precision, 1000, animateValue);
+  const showCalculatedBadge = metricInfo != null && value != null;
+  const showStatusBadge = metricInfo ? value == null : true;
+  const showStatusRow = showStatusBadge || trend != null;
+
   return (
     <article className="ui-metric-card ui-hover-lift group">
       <div className="flex items-start justify-between gap-3">
@@ -206,16 +331,29 @@ export function MetricCard({
           <p className="ui-metric-card__label">{label}</p>
           {formula ? <p className="ui-metric-card__formula">{formula}</p> : null}
         </div>
-        {icon ? <span className="ui-metric-card__icon ui-icon-tap">{icon}</span> : null}
+        {showCalculatedBadge || icon ? (
+          <div className="ui-metric-card__icons">
+            {showCalculatedBadge ? (
+              <span className="ui-metric-card__source-badge">
+                <CalculatedMetricSourceBadge info={metricInfo!} />
+              </span>
+            ) : null}
+            {icon ? <span className="ui-metric-card__icon ui-icon-tap">{icon}</span> : null}
+          </div>
+        ) : null}
       </div>
       <div className="mt-4 flex items-end gap-2">
         <p className="ui-metric-card__value">{display}</p>
         {unit ? <p className="ui-metric-card__unit">{unit}</p> : null}
       </div>
-      <div className="mt-3 flex items-center justify-between gap-2">
-        <StatusBadge tone={status}>{mapStatusLabel(status)}</StatusBadge>
-        {trend ? <span className="ui-metric-card__trend">{trend}</span> : null}
-      </div>
+      {showStatusRow ? (
+        <div className="mt-3 flex items-center justify-between gap-2">
+          {showStatusBadge ? (
+            <MetricCardStatus value={value} status={status} metricInfo={metricInfo} />
+          ) : null}
+          {trend ? <span className="ui-metric-card__trend">{trend}</span> : null}
+        </div>
+      ) : null}
       {subtitle ? <p className="ui-metric-card__subtitle">{subtitle}</p> : null}
     </article>
   );
@@ -277,12 +415,14 @@ export function ResultSummaryCard({
   totalHeatLossKW,
   specificHeatLoss,
   weakElement,
+  weakElementLabel = "Наиболее слабая конструкция",
   recommendation,
+  totalHeatLossMetricInfo,
+  specificHeatLossMetricInfo,
 }: ResultSummaryCardProps) {
   return (
     <EngineeringPanel
       title="Итог расчёта"
-      description="Ключевые показатели теплопотерь и инженерная рекомендация."
       className="ui-result-summary-card"
     >
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -290,22 +430,20 @@ export function ResultSummaryCard({
           label="Суммарные теплопотери"
           value={totalHeatLossKW}
           unit="кВт"
-          formula="Q"
           precision={2}
           status={totalHeatLossKW != null ? "success" : "warning"}
-          subtitle="Расчётные потери здания"
+          metricInfo={totalHeatLossMetricInfo}
         />
         <MetricCard
           label="Удельные теплопотери"
           value={specificHeatLoss}
           unit="Вт/м²"
-          formula="q"
           precision={1}
           status={specificHeatLoss != null ? "info" : "warning"}
-          subtitle="Нагрузка на единицу площади"
+          metricInfo={specificHeatLossMetricInfo}
         />
         <article className="ui-result-note-card">
-          <p className="ui-result-note-card__label">Наиболее слабая конструкция</p>
+          <p className="ui-result-note-card__label">{weakElementLabel}</p>
           <p className="ui-result-note-card__value">{weakElement ?? "Определится после расчёта"}</p>
         </article>
         <article className="ui-result-note-card">

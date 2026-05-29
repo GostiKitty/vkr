@@ -122,6 +122,8 @@ export interface ScenarioConfig {
     night: number;
     dayStartHour: number;
     nightStartHour: number;
+    /** Плавный разгон уставки при переключении день/ночь, мин. 0 = ступень. */
+    setpointRampMinutes?: number | null;
   };
   internalGains: {
     dayGain_W_m2: number;
@@ -170,6 +172,7 @@ export function createDefaultScenarioConfig(): ScenarioConfig {
       night: 18,
       dayStartHour: 6,
       nightStartHour: 22,
+      setpointRampMinutes: 60,
     },
     internalGains: {
       dayGain_W_m2: 6,
@@ -204,7 +207,6 @@ export function createDefaultScenarioConfig(): ScenarioConfig {
       roomOverrides: {},
     },
     materials: {
-      bridgeAccountingMode: "disabled",
       homogeneityCoefficient: null,
       windowUValue_W_m2K: null,
       doorUValue_W_m2K: null,
@@ -348,6 +350,10 @@ export type ScenarioRunSnapshot = {
   peakLoadKW: number;
   totalEnergyKWh: number;
   discomfortHours: number;
+  infiltrationACH?: number | null;
+  ventilationACH?: number | null;
+  setpointDayC?: number | null;
+  climateCityId?: string | null;
 };
 
 interface WorkflowStoreState {

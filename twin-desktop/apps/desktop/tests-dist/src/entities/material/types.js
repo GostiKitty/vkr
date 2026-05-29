@@ -37,6 +37,22 @@ export const MATERIAL_LIBRARY = {
     glass: buildMaterialEntry("glass", 0.006),
     window_block: buildMaterialEntry("window_block", 0.02),
     pvc_double_glazed_unit_equivalent: buildMaterialEntry("pvc_double_glazed_unit_equivalent", 0.07),
+    lime_plaster: buildMaterialEntry("lime_plaster", 0.02),
+    hollow_ceramic_block: buildMaterialEntry("hollow_ceramic_block", 0.38),
+    osb: buildMaterialEntry("osb", 0.012),
+    steel_sheet: buildMaterialEntry("steel_sheet", 0.002),
+    slag_wool: buildMaterialEntry("slag_wool", 0.15),
+    foam_glass: buildMaterialEntry("foam_glass", 0.08),
+    expanded_clay_aggregate: buildMaterialEntry("expanded_clay_aggregate", 0.1),
+    glued_laminated_timber: buildMaterialEntry("glued_laminated_timber", 0.18),
+    parquet: buildMaterialEntry("parquet", 0.015),
+    ceramic_tile: buildMaterialEntry("ceramic_tile", 0.01),
+    sand_gravel: buildMaterialEntry("sand_gravel", 0.1),
+    acoustic_mat: buildMaterialEntry("acoustic_mat", 0.02),
+    bitumen_roll: buildMaterialEntry("bitumen_roll", 0.004),
+    rubber_membrane: buildMaterialEntry("rubber_membrane", 0.002),
+    green_roof_substrate: buildMaterialEntry("green_roof_substrate", 0.1),
+    concrete_screed: buildMaterialEntry("concrete_screed", 0.04),
 };
 export const WALL_ASSEMBLIES = {
     masonry: {

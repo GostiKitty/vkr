@@ -1,4 +1,4 @@
-import type { Room } from "../../entities/geometry/types";
+import type { BuildingModel, Room } from "../../entities/geometry/types";
 import type { Space } from "../api/types";
 import { sanitizeDisplayText } from "./displayText";
 
@@ -110,6 +110,29 @@ function getCandidateRoomName(room: RoomDisplaySource): string | null {
     }
   }
   return null;
+}
+
+/** Заменяет технические имена вроде Space 2 на локализованное «Помещение N». */
+export function normalizeStoredRoomName(room: RoomDisplaySource, index = 0): string | null {
+  const raw = typeof room.name === "string" ? room.name.trim() : "";
+  if (!raw || !looksLikeTechnicalRoomId(raw)) {
+    return null;
+  }
+  const display = getRoomDisplayName(room, index);
+  return display !== raw ? display : null;
+}
+
+export function normalizeModelRoomNames(model: BuildingModel): BuildingModel {
+  let changed = false;
+  const rooms = model.rooms.map((room, index) => {
+    const normalized = normalizeStoredRoomName(room, index);
+    if (!normalized) {
+      return room;
+    }
+    changed = true;
+    return { ...room, name: normalized };
+  });
+  return changed ? { ...model, rooms } : model;
 }
 
 export function getRoomDisplayName(room: RoomDisplaySource, index = 0): string {

@@ -97,10 +97,6 @@ export function MonteCarloScatterChart({
               calculatedIn={`src/core/uncertainty/thermalMonteCarlo.ts → samples + ${targetMetricOption.tooltipSeriesKey}`}
             />
           </div>
-          <p className="text-sm text-[color:var(--text-muted)]">
-            График показывает, как выбранный входной параметр связан с выбранной целевой метрикой по результатам
-            прогонов Монте-Карло.
-          </p>
         </div>
 
         <div className="grid gap-3 md:grid-cols-2">

@@ -5,7 +5,7 @@
  * Все координаты на выходе — в мм на листе (ось Y вниз).
  */
 
-import type { BuildingModel, Level } from "../../entities/geometry/types";
+import type { BuildingModel } from "../../entities/geometry/types";
 import type { SectionParams, Rect2D, DrawingScale } from "./drawingTypes";
 import { DEFAULT_SECTION_PARAMS, modelToSheet } from "./drawingTypes";
 
@@ -16,13 +16,13 @@ import { DEFAULT_SECTION_PARAMS, modelToSheet } from "./drawingTypes";
 export function extractSectionParams(model: BuildingModel): SectionParams {
   const levels = model.levels ?? [];
 
-  // Ширина здания — максимальный габарит по Y (перпендикулярно к разрезу 1-1)
-  let minY = Infinity, maxY = -Infinity;
+  // Ширина здания — максимальный габарит по X (горизонтальный размер разреза 7200)
+  let minX = Infinity, maxX = -Infinity;
   for (const w of model.walls) {
-    minY = Math.min(minY, w.a.y, w.b.y);
-    maxY = Math.max(maxY, w.a.y, w.b.y);
+    minX = Math.min(minX, w.a.x, w.b.x);
+    maxX = Math.max(maxX, w.a.x, w.b.x);
   }
-  const buildingWidthM = Number.isFinite(maxY - minY) && maxY > minY ? maxY - minY : 9.0;
+  const buildingWidthM = Number.isFinite(maxX - minX) && maxX > minX ? maxX - minX : 9.0;
 
   // Количество этажей и высота
   const floors = levels.length > 0 ? levels.length : DEFAULT_SECTION_PARAMS.floors;

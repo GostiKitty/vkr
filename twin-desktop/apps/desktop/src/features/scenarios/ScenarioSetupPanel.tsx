@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { listSp131Cities } from "../../norms/sp131_2025/climate";
+import { sp131CitySelectOptions } from "../../norms/sp131_2025/climate";
 import { notifyInfo } from "../../entities/notifications/notification.store";
 import { useWorkflowStore } from "../../entities/workflow/workflow.store";
 import { EngineeringCallout, EngineeringSectionHeader } from "../../shared/ui";
@@ -31,7 +31,7 @@ export function ScenarioSetupPanel() {
   const [mechVent, setMechVent] = useState(saved?.ventilation.mechanicalVentilationEnabled ?? true);
   const [climateCityId, setClimateCityId] = useState(saved?.climateCityId ?? "moscow");
   const [justSaved, setJustSaved] = useState(false);
-  const cities = listSp131Cities();
+  const climateCityOptions = sp131CitySelectOptions();
 
   useEffect(() => {
     if (!saved) {
@@ -114,8 +114,8 @@ export function ScenarioSetupPanel() {
             onChange={(e) => setClimateCityId(e.target.value)}
             className="ui-field mt-1 w-full px-3 py-2 text-sm"
           >
-            {cities.map((city) => (
-              <option key={city.id} value={city.id}>
+            {climateCityOptions.map((city) => (
+              <option key={city.value} value={city.value}>
                 {city.label}
               </option>
             ))}

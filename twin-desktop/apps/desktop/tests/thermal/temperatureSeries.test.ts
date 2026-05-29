@@ -179,6 +179,39 @@ test("temperature series: buildChartPoints produces non-empty temperature payloa
   }
 });
 
+test("heating series: setpoint ramp lowers ideal-mode peak power", () => {
+  const baseSetpoints = {
+    day: 21,
+    night: 18,
+    dayStartHour: 7,
+    nightStartHour: 22,
+  };
+  const stepped = runThermalSimulation(videoDemoHouse, {
+    ...BASE_OPTIONS,
+    setpoints: { ...baseSetpoints, setpointRampMinutes: 0 },
+    heatingMode: "ideal",
+  });
+  const ramped = runThermalSimulation(videoDemoHouse, {
+    ...BASE_OPTIONS,
+    setpoints: { ...baseSetpoints, setpointRampMinutes: 60 },
+    heatingMode: "ideal",
+  });
+  const peakFor = (result: ReturnType<typeof runThermalSimulation>) => {
+    const room = Object.values(result.rooms).find((entry) => entry.timeline.length > 0);
+    if (!room) {
+      return 0;
+    }
+    return room.timeline.reduce((peak, pt) => Math.max(peak, pt.heatingPowerW), 0);
+  };
+  const peakSteppedW = peakFor(stepped);
+  const peakRampedW = peakFor(ramped);
+  if (!(peakSteppedW > peakRampedW * 1.15)) {
+    throw new Error(
+      `Expected stepped setpoint peak (${peakSteppedW.toFixed(0)} W) to exceed ramped peak (${peakRampedW.toFixed(0)} W) by >15%.`
+    );
+  }
+});
+
 test("temperature series: chart points for 'Тепловой пункт' are valid when it exists", () => {
   // Verifies the specific room mentioned in the bug report
   const result = runDemo();
