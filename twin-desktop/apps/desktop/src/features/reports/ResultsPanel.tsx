@@ -19,7 +19,6 @@ import {
   AnimatedTabs,
   EmptyState,
   MetricInfoTooltip,
-  SummaryHero,
   SummaryHighlightGrid,
   TemperatureScaleLegend,
 } from "../../shared/ui";
@@ -185,7 +184,7 @@ export function ResultsPanel({ projectId: _projectId }: ResultsPanelProps) {
     setAutoRunState("running");
     setAutoRunError(null);
     setAutoRunMessage("Выполняются базовый RC-расчёт и вероятностный анализ Monte Carlo. Результаты обновятся автоматически.");
-    setActiveTab("probabilistic");
+    setActiveTab("overview");
 
     window.setTimeout(() => {
       try {
@@ -251,14 +250,10 @@ export function ResultsPanel({ projectId: _projectId }: ResultsPanelProps) {
   const tabContent: Record<WorkspaceTab, React.ReactNode> = {
     overview: (
       <OverviewTab
-        climateLabel={climateLabel}
-        economyAssessment={economyAssessment}
         lastThermalResult={visibleThermalResult}
         monteCarloResult={visibleMonteCarloResult}
         onOpenCalculation={handleRunCalculation}
-        onOpenEconomy={() => setActiveTab("economy")}
         onOpenMonteCarlo={() => navigate("/uncertainty")}
-        onOpenThermal={() => setActiveTab("thermal")}
       />
     ),
     thermal: (
@@ -310,37 +305,38 @@ export function ResultsPanel({ projectId: _projectId }: ResultsPanelProps) {
     // documents: <ProjectDocumentationPage projectId={projectId} />,
   };
 
+  const showResultAlerts =
+    autoRunState === "running" ||
+    (autoRunState === "error" && autoRunError != null) ||
+    thermalResultState === "stale" ||
+    monteCarloResultState === "stale";
+
   return (
     <div className="flex min-h-0 flex-col gap-4">
-      <SummaryHero title="Результаты проекта">
-        {autoRunState === "running" ? (
-          <div className="rounded-2xl border border-[color:var(--accent-base)]/20 bg-[color:var(--surface-muted)] px-4 py-3 text-sm text-[color:var(--text-base)]">
-            {autoRunMessage}
-          </div>
-        ) : null}
-        {autoRunState === "error" && autoRunError ? (
-          <div className="rounded-2xl border border-[color:var(--danger-border)] bg-[color:var(--danger-bg)] px-4 py-3 text-sm text-[color:var(--danger-fg)]">
-            {autoRunError}
-          </div>
-        ) : null}
-        {thermalResultState === "stale" || monteCarloResultState === "stale" ? (
-          <div className="rounded-2xl border border-[color:var(--warning-border)] bg-[color:var(--warning-bg)] px-4 py-3 text-sm text-[color:var(--warning-fg)]">
-            Результаты не соответствуют текущей модели. Выполните расчёт заново перед анализом и экспортом.
-          </div>
-        ) : null}
-        <ResultsSummaryBar
-          energy={visibleThermalResult?.summary.totalEnergyKWh ?? null}
-          peakLoad={visibleThermalResult?.summary.peakLoadKW ?? null}
-          discomfortHours={visibleThermalResult?.summary.discomfortHours ?? null}
-          monteCarloP50={visibleMonteCarloResult?.totalEnergy.p50 ?? null}
-          underheatingRisk={visibleMonteCarloResult?.underheatingBelow20CProbability ?? null}
-        />
-      </SummaryHero>
+      {showResultAlerts ? (
+        <div className="space-y-3">
+          {autoRunState === "running" ? (
+            <div className="rounded-2xl border border-[color:var(--accent-base)]/20 bg-[color:var(--surface-muted)] px-4 py-3 text-sm text-[color:var(--text-base)]">
+              {autoRunMessage}
+            </div>
+          ) : null}
+          {autoRunState === "error" && autoRunError ? (
+            <div className="rounded-2xl border border-[color:var(--danger-border)] bg-[color:var(--danger-bg)] px-4 py-3 text-sm text-[color:var(--danger-fg)]">
+              {autoRunError}
+            </div>
+          ) : null}
+          {thermalResultState === "stale" || monteCarloResultState === "stale" ? (
+            <div className="rounded-2xl border border-[color:var(--warning-border)] bg-[color:var(--warning-bg)] px-4 py-3 text-sm text-[color:var(--warning-fg)]">
+              Результаты не соответствуют текущей модели. Выполните расчёт заново перед анализом и экспортом.
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       <AnimatedTabs<WorkspaceTab> tabs={tabItems} value={activeTab} onChange={setActiveTab} />
 
       <div className="ui-panel min-h-0 p-4 sm:p-5 xl:p-6">
-        <div key={activeTab} className="animate-fade-slide min-h-[20rem]">
+        <div key={activeTab} className={`animate-fade-slide ${activeTab === "overview" ? "min-h-0" : "min-h-[20rem]"}`}>
           {tabContent[activeTab]}
         </div>
       </div>
@@ -348,95 +344,100 @@ export function ResultsPanel({ projectId: _projectId }: ResultsPanelProps) {
   );
 }
 
-function ResultsSummaryBar({
-  energy,
-  peakLoad,
-  discomfortHours,
-  monteCarloP50,
-  underheatingRisk,
-}: {
-  energy: number | null;
-  peakLoad: number | null;
-  discomfortHours: number | null;
-  monteCarloP50: number | null;
-  underheatingRisk: number | null;
-}) {
-  return (
-    <SummaryHighlightGrid
-      className="mt-1"
-      items={[
-        {
-          label: "Тепловая энергия",
-          value: formatEnergy(energy, "кВт·ч"),
-          metricInfo: resultsMetricInfo.energy,
-          calculated: energy != null,
-        },
-        {
-          label: "Пиковая нагрузка",
-          value: peakLoad == null ? "—" : `${formatNumber(peakLoad, { maximumFractionDigits: 2 })} кВт`,
-          metricInfo: resultsMetricInfo.peakLoad,
-          calculated: peakLoad != null,
-        },
-        {
-          label: "Часы дискомфорта",
-          value:
-            discomfortHours == null
-              ? "—"
-              : `${formatNumber(discomfortHours, { maximumFractionDigits: 1 })} ч`,
-          metricInfo: resultsMetricInfo.discomfort,
-          calculated: discomfortHours != null,
-        },
-        {
-          label: "Медиана Monte Carlo",
-          value: formatEnergy(monteCarloP50, "кВт·ч"),
-          tone: monteCarloP50 != null ? "info" : "neutral",
-          metricInfo: resultsMetricInfo.monteCarloP50,
-          calculated: monteCarloP50 != null,
-        },
-        {
-          label: "Риск недогрева",
-          value: formatPercentage(underheatingRisk),
-          tone: underheatingRisk != null && underheatingRisk > 0.15 ? "warning" : "neutral",
-          metricInfo: resultsMetricInfo.underheatingRisk,
-          calculated: underheatingRisk != null,
-        },
-      ]}
-    />
-  );
-}
-
 function OverviewTab({
-  climateLabel,
-  economyAssessment,
   lastThermalResult,
   monteCarloResult,
   onOpenCalculation,
-  onOpenEconomy,
   onOpenMonteCarlo,
-  onOpenThermal,
 }: {
-  climateLabel: string | null;
-  economyAssessment: ReturnType<typeof runEconomicAssessment> | null;
   lastThermalResult: ReturnType<typeof useTwinStore.getState>["lastThermalResult"];
   monteCarloResult: ReturnType<typeof useWorkflowStore.getState>["monteCarloResult"];
   onOpenCalculation: () => void;
-  onOpenEconomy: () => void;
   onOpenMonteCarlo: () => void;
-  onOpenThermal: () => void;
 }) {
+  const highlightItems = useMemo(() => {
+    const items: Array<{
+      label: string;
+      value: string;
+      metricInfo: (typeof resultsMetricInfo)[keyof typeof resultsMetricInfo];
+      tone?: "info" | "warning" | "neutral";
+      calculated?: boolean;
+    }> = [];
+
+    if (lastThermalResult) {
+      const buildingDiagnostics = lastThermalResult.diagnostics?.building ?? null;
+      const totalHeatLossKW = buildingDiagnostics ? buildingDiagnostics.totalLossW / 1000 : null;
+      const requiredPowerKW = buildingDiagnostics
+        ? Math.max(0, buildingDiagnostics.totalLossW - buildingDiagnostics.totalInternalGainsW) / 1000
+        : null;
+
+      items.push({
+        label: "Энергия за период",
+        value: formatEnergy(lastThermalResult.summary.totalEnergyKWh, "кВт·ч"),
+        metricInfo: resultsMetricInfo.energy,
+        calculated: true,
+      });
+
+      if (totalHeatLossKW != null) {
+        items.push({
+          label: "Суммарные теплопотери",
+          value: `${formatNumber(totalHeatLossKW, { maximumFractionDigits: 2 })} кВт`,
+          metricInfo: resultsMetricInfo.buildingTotalHeatLossKW,
+          calculated: true,
+        });
+      }
+
+      if (requiredPowerKW != null) {
+        items.push({
+          label: "Требуемая мощность",
+          value: `${formatNumber(requiredPowerKW, { maximumFractionDigits: 2 })} кВт`,
+          metricInfo: resultsMetricInfo.requiredHeatingPowerKW,
+          calculated: true,
+        });
+      }
+
+      items.push(
+        {
+          label: "Пиковая нагрузка",
+          value: `${formatNumber(lastThermalResult.summary.peakLoadKW, { maximumFractionDigits: 2 })} кВт`,
+          metricInfo: resultsMetricInfo.peakLoad,
+          calculated: true,
+        },
+        {
+          label: "Дискомфорт",
+          value: `${formatNumber(lastThermalResult.summary.discomfortHours, { maximumFractionDigits: 1 })} ч`,
+          metricInfo: resultsMetricInfo.discomfort,
+          calculated: true,
+        }
+      );
+    }
+
+    if (monteCarloResult) {
+      items.push({
+        label: "P50 (Monte Carlo)",
+        value: formatEnergy(monteCarloResult.totalEnergy.p50, "кВт·ч"),
+        metricInfo: resultsMetricInfo.monteCarloP50,
+        tone: "info",
+        calculated: true,
+      });
+    }
+
+    return items;
+  }, [lastThermalResult, monteCarloResult]);
+
   if (!lastThermalResult && !monteCarloResult) {
     return (
       <section className="rounded-2xl border border-dashed border-[color:var(--border-base)] bg-[color:var(--surface-muted)] p-5">
         <EmptyState
           title="Нет данных в результатах"
-          message="Выполните базовый RC-расчёт или запустите Monte Carlo, чтобы появились KPI, графики и сводка."
+          message="Запустите базовый RC-расчёт — на этой вкладке появятся ключевые показатели. Детальные графики и Monte Carlo — на соседних вкладках."
         />
         <div className="mt-4 flex flex-wrap gap-2">
           <button type="button" onClick={onOpenCalculation} className="ui-btn-primary px-4 py-2 text-sm">
             Запустить расчёт
           </button>
           <button type="button" onClick={onOpenMonteCarlo} className="ui-btn-secondary px-4 py-2 text-sm">
-            Перейти к анализу
+            Настроить Monte Carlo
           </button>
         </div>
       </section>
@@ -445,117 +446,18 @@ function OverviewTab({
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-4 xl:grid-cols-[1.15fr,0.85fr]">
-        <section className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)] p-4">
-          <div className="mb-3 flex items-center gap-1.5">
-            <p className="text-sm font-semibold text-[color:var(--text-base)]">Тепловой расчёт</p>
-            <MetricInfoTooltip {...resultsMetricInfo.rcBalance} />
-          </div>
-          {lastThermalResult ? (
-            <div className="space-y-4">
-              <div className="grid gap-3 sm:grid-cols-3">
-                <OverviewMetric
-                  label="Энергия за период"
-                  value={formatEnergy(lastThermalResult.summary.totalEnergyKWh, "кВт·ч")}
-                  info={resultsMetricInfo.energy}
-                />
-                <OverviewMetric
-                  label="Пиковая нагрузка"
-                  value={`${formatNumber(lastThermalResult.summary.peakLoadKW, { maximumFractionDigits: 2 })} кВт`}
-                  info={resultsMetricInfo.peakLoad}
-                />
-                <OverviewMetric
-                  label="Дискомфорт"
-                  value={`${formatNumber(lastThermalResult.summary.discomfortHours, { maximumFractionDigits: 1 })} ч`}
-                  info={resultsMetricInfo.discomfort}
-                />
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <button type="button" onClick={onOpenThermal} className="ui-btn-primary px-4 py-2 text-sm">
-                  Открыть тепловой расчёт
-                </button>
-                <button type="button" onClick={onOpenCalculation} className="ui-btn-secondary px-4 py-2 text-sm">
-                  Пересчитать
-                </button>
-              </div>
-            </div>
-          ) : (
-            <TabEmptyState
-              title="Нет RC-расчёта"
-              message="Сначала выполните базовый расчёт, чтобы появились сводка и динамика помещения."
-              buttonLabel="Запустить расчёт"
-              onClick={onOpenCalculation}
-            />
-          )}
-        </section>
+      <SummaryHighlightGrid items={highlightItems} />
 
-        <div className="space-y-4">
-          <section className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)] p-4">
-            <div className="mb-2 flex items-center gap-1.5">
-              <p className="text-sm font-semibold text-[color:var(--text-base)]">Monte Carlo</p>
-              <MetricInfoTooltip {...resultsMetricInfo.monteCarloP50} />
-            </div>
-            {monteCarloResult ? (
-              <div className="space-y-2 text-sm text-[color:var(--text-muted)]">
-                <p>P10–P90: {formatEnergy(monteCarloResult.totalEnergy.p10, "кВт·ч")} — {formatEnergy(monteCarloResult.totalEnergy.p90, "кВт·ч")}</p>
-                <p>P50: {formatEnergy(monteCarloResult.totalEnergy.p50, "кВт·ч")}</p>
-                <p>Риск недогрева: {formatPercentage(monteCarloResult.underheatingBelow20CProbability ?? null)}</p>
-                <p>Главный фактор: {monteCarloResult.sensitivity?.slice().sort((a, b) => b.valuePercent - a.valuePercent)[0]?.label ?? "—"}</p>
-              </div>
-            ) : (
-              <TabEmptyState
-                title="Monte Carlo не запускался"
-                message="Сначала нужен вероятностный анализ поверх RC-расчёта."
-                buttonLabel="Перейти к вероятностному анализу"
-                onClick={onOpenMonteCarlo}
-              />
-            )}
-          </section>
-
-          <section className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)] p-4">
-            <div className="mb-2 flex items-center gap-1.5">
-              <p className="text-sm font-semibold text-[color:var(--text-base)]">Экономика</p>
-              <MetricInfoTooltip {...resultsMetricInfo.payback} />
-            </div>
-            {economyAssessment ? (
-              <div className="space-y-2 text-sm text-[color:var(--text-muted)]">
-                <p>Потенциал экономии: {formatMoney(economyAssessment.summary.packageAnnualSaving_RUB)}/год</p>
-                <p>Окупаемость: {economyAssessment.summary.packagePayback_years == null ? "—" : `${formatNumber(economyAssessment.summary.packagePayback_years, { maximumFractionDigits: 1 })} лет`}</p>
-                <p>NPV: {formatMoney(economyAssessment.summary.npv_RUB)}</p>
-                <p>Климатическая база: {climateLabel ?? "не задана"}</p>
-              </div>
-            ) : (
-              <TabEmptyState
-                title="Экономика недоступна"
-                message="Для экономической оценки нужен нормативный/инженерный расчёт SP50."
-                buttonLabel="Открыть вкладку экономики"
-                onClick={onOpenEconomy}
-              />
-            )}
-          </section>
-        </div>
-      </div>
-
-    </div>
-  );
-}
-
-function OverviewMetric({
-  label,
-  value,
-  info,
-}: {
-  label: string;
-  value: string;
-  info: { title: string; meaning: string; formula?: string; inputs?: string | string[]; calculatedIn?: string; notes?: string | string[] };
-}) {
-  return (
-    <div className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] px-4 py-3">
-      <div className="flex items-center gap-1.5">
-        <p className="text-sm font-semibold text-[color:var(--text-muted)]">{label}</p>
-        <MetricInfoTooltip {...info} />
-      </div>
-      <p className="mt-1 text-base font-semibold text-[color:var(--text-base)]">{value}</p>
+      {!lastThermalResult ? (
+        <p className="text-xs text-[color:var(--text-soft)]">
+          Базовый RC-расчёт не выполнен — показаны только результаты Monte Carlo. Запустите тепловой расчёт для полной сводки.
+        </p>
+      ) : null}
+      {lastThermalResult && !monteCarloResult ? (
+        <p className="text-xs text-[color:var(--text-soft)]">
+          Вероятностный анализ не запускался. P10–P90, чувствительность и VaR — на вкладке «Вероятностный анализ».
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -862,28 +764,41 @@ function GraphPanel({
     );
   }
 
-  const width = 600;
-  const height = 320;
+  const W = 640;
+  const H = 420;
+  const CX = W / 2;
+  const CY = H / 2;
+
   const nodes = graph.nodes;
   const edges = graph.edges;
-  const frameTemps = frame ? Object.values(frame.temperatures).filter((value): value is number => Number.isFinite(value)) : [];
+  const frameTemps = frame
+    ? Object.values(frame.temperatures).filter((v): v is number => Number.isFinite(v))
+    : [];
   const dynamicMin = frameTemps.length ? Math.min(...frameTemps) : 15;
   const dynamicMax = frameTemps.length ? Math.max(...frameTemps) : 30;
   const legendMin = Math.min(15, dynamicMin);
   const legendMax = Math.max(30, dynamicMax);
   const scaleClamped = dynamicMin < 15 || dynamicMax > 30;
-  const positions = new Map<string, { x: number; y: number }>();
-  const spaceNodes = nodes.filter((node) => node.type === "space");
-  const radius = Math.min(width, height) / 2 - 40;
 
-  spaceNodes.forEach((node, index) => {
-    const angle = (index / Math.max(spaceNodes.length, 1)) * Math.PI * 2;
+  // outdoor at center; space nodes on a circle starting from top (-π/2)
+  const spaceNodes = nodes.filter((n) => n.type === "space");
+  const circleRadius = Math.min(CX, CY) - 72;
+  const positions = new Map<string, { x: number; y: number }>();
+  positions.set("outdoor", { x: CX, y: CY });
+  spaceNodes.forEach((node, i) => {
+    const angle = (i / Math.max(spaceNodes.length, 1)) * Math.PI * 2 - Math.PI / 2;
     positions.set(node.id, {
-      x: width / 2 + radius * Math.cos(angle),
-      y: height / 2 + radius * Math.sin(angle),
+      x: CX + circleRadius * Math.cos(angle),
+      y: CY + circleRadius * Math.sin(angle),
     });
   });
-  positions.set("outdoor", { x: width / 2, y: 40 });
+
+  // normalize edge widths to 1.5–5 px range
+  const conductances = edges.map((e) => e.conductance).filter(Number.isFinite);
+  const maxC = conductances.length ? Math.max(...conductances) : 1;
+  const minC = conductances.length ? Math.min(...conductances) : 0;
+  const rangeC = maxC - minC || 1;
+  const edgeStroke = (c: number) => 1.5 + ((c - minC) / rangeC) * 3.5;
 
   return (
     <section className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)] p-4">
@@ -894,7 +809,7 @@ function GraphPanel({
             <MetricInfoTooltip {...resultsMetricInfo.rcBalance} />
           </div>
           <p className="mt-1 text-sm text-[color:var(--text-muted)]">
-            Условная зональная сеть. Толщина линии пропорциональна проводимости, цвет узла — текущей температуре. Это не CFD.
+            Условная зональная сеть. Толщина линии — относительная теплопроводность, цвет узла — температура кадра.
           </p>
         </div>
         <TemperatureScaleLegend
@@ -906,55 +821,87 @@ function GraphPanel({
         />
       </div>
       <div className="w-full overflow-x-auto">
-        <svg width={width} height={height} className="max-w-full">
-          {edges.map((edge) => {
+        <svg width={W} height={H} className="max-w-full" style={{ display: "block" }}>
+          {edges.map((edge, ei) => {
             const from = positions.get(edge.from);
             const to = positions.get(edge.to);
-            if (!from || !to) {
-              return null;
-            }
+            if (!from || !to) return null;
             return (
               <line
-                key={`${edge.from}-${edge.to}`}
+                key={`e-${ei}`}
                 x1={from.x}
                 y1={from.y}
                 x2={to.x}
                 y2={to.y}
                 stroke="var(--chart-edge)"
-                strokeWidth={Math.max(1, edge.conductance * 4)}
-                strokeOpacity={0.85}
+                strokeWidth={edgeStroke(edge.conductance)}
+                strokeOpacity={0.6}
+                strokeLinecap="round"
               />
             );
           })}
           {nodes.map((node) => {
             const pos = positions.get(node.id);
-            if (!pos) {
-              return null;
-            }
+            if (!pos) return null;
             const temp = frame?.temperatures[node.id] ?? node.initialTemp;
             const color = temperatureToColor(temp, legendMin, legendMax);
-            const displayLabel = node.id === "outdoor" ? "Наружный воздух" : node.label;
+            const isOutdoor = node.id === "outdoor";
             const isSelected = selectedId === node.id;
+            const nodeR = isOutdoor ? 22 : isSelected ? 20 : 16;
+            const displayLabel = isOutdoor ? "Наружный воздух" : node.label;
+            const shortLabel = displayLabel.length > 14 ? `${displayLabel.slice(0, 13)}…` : displayLabel;
+
+            // radial label: away from center for space nodes, below for outdoor
+            let lx: number;
+            let ly: number;
+            if (isOutdoor) {
+              lx = pos.x;
+              ly = pos.y + nodeR + 15;
+            } else {
+              const dx = pos.x - CX;
+              const dy = pos.y - CY;
+              const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+              const offset = nodeR + 14;
+              lx = pos.x + (dx / dist) * offset;
+              ly = pos.y + (dy / dist) * offset;
+            }
+
             return (
               <g
                 key={node.id}
                 onClick={() => node.type === "space" && onSelect(node.id)}
-                cursor={node.type === "space" ? "pointer" : "default"}
+                style={{ cursor: node.type === "space" ? "pointer" : "default" }}
               >
                 <circle
                   cx={pos.x}
                   cy={pos.y}
-                  r={isSelected ? 18 : 14}
+                  r={nodeR}
                   fill={color}
-                  stroke={node.type === "space" ? "var(--text-base)" : "var(--text-soft)"}
-                  strokeWidth={node.type === "space" ? 2 : 1}
-                  opacity={node.type === "space" ? 0.95 : 0.7}
+                  stroke={isSelected ? "var(--accent-base)" : isOutdoor ? "var(--text-soft)" : "var(--text-base)"}
+                  strokeWidth={isSelected ? 2.5 : 1.5}
+                  opacity={isOutdoor ? 0.75 : 0.95}
                 />
-                <text x={pos.x} y={pos.y + 30} textAnchor="middle" className="text-xs font-medium fill-[color:var(--text-muted)]">
-                  {displayLabel}
-                </text>
-                <text x={pos.x} y={pos.y + 44} textAnchor="middle" className="text-[10px] fill-[color:var(--text-soft)]">
+                <text
+                  x={pos.x}
+                  y={pos.y}
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  fontSize={9}
+                  fontWeight={500}
+                  fill="var(--text-base)"
+                >
                   {formatTemperature(temp)}
+                </text>
+                <text
+                  x={lx}
+                  y={ly}
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  fontSize={10}
+                  fontWeight={isSelected ? 600 : 400}
+                  fill="var(--text-muted)"
+                >
+                  {shortLabel}
                 </text>
               </g>
             );
@@ -974,17 +921,6 @@ function formatFrameTime(timeHours: number) {
   const hours = Math.floor((totalMinutes % (24 * 60)) / 60);
   const minutes = totalMinutes % 60;
   return days > 0 ? `день ${days + 1}, ${hours}:${String(minutes).padStart(2, "0")}` : `${hours}:${String(minutes).padStart(2, "0")}`;
-}
-
-function formatMoney(value: number | null | undefined): string {
-  if (value == null || !Number.isFinite(value)) {
-    return "—";
-  }
-  return new Intl.NumberFormat("ru-RU", {
-    style: "currency",
-    currency: "RUB",
-    maximumFractionDigits: 0,
-  }).format(value);
 }
 
 export default ResultsPanel;

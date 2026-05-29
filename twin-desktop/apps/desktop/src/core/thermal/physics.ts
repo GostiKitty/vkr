@@ -11,6 +11,8 @@ import {
   type RoomVolumeDescriptor,
 } from "../geometry/bimPipeline";
 import { airflowFromACH } from "./formulas";
+import { computeSolarPosition } from "../solar/solarPosition";
+import { computeFacadeSolarAccessFactor, orientationToAzimuthDeg } from "../solar/solarShading";
 
 const AIR_DENSITY_KG_M3 = 1.204;
 const AIR_CP_J_KG_K = 1005;
@@ -41,6 +43,10 @@ export interface ThermalPhysicsOptions {
   equipmentGainMultiplier?: number;
   transientBlend?: number;
   fixedRoomTemperaturesC?: Record<string, number>;
+  /** Широта для расчёта положения солнца (астрономические формулы), °. По умолчанию 55.75 (Москва). */
+  solarLatitudeDeg?: number;
+  /** День года [1..365] для расчёта положения солнца. По умолчанию 15 (середина января). */
+  solarDayOfYear?: number;
 }
 
 export interface ThermalRoomBalance {
@@ -795,10 +801,14 @@ function computeSolarGainW(
   }
   const factor = options.solarGainFactor ?? DEFAULT_SOLAR_GAIN_FACTOR;
   const hour = options.timeHours ?? 12;
-  const solarProfile = Math.max(0, Math.sin(((hour - 6) / 12) * Math.PI));
-  const orientationWeight =
-    orientation === "S" ? 1 : orientation === "E" || orientation === "W" ? 0.74 : 0.42;
-  return windowAreaM2 * 115 * factor * solarProfile * orientationWeight;
+  const solarPosition = computeSolarPosition({
+    latitudeDeg: options.solarLatitudeDeg ?? 55.75,
+    dayOfYear: options.solarDayOfYear ?? 15,
+    hourDecimal: hour,
+  });
+  const facadeAzimuth = orientationToAzimuthDeg(orientation);
+  const accessFactor = computeFacadeSolarAccessFactor(solarPosition, facadeAzimuth);
+  return windowAreaM2 * 115 * factor * accessFactor;
 }
 
 function resolveRoomAtPoint<T extends Pick<RoomVolumeDescriptor, "levelId" | "polygon">>(

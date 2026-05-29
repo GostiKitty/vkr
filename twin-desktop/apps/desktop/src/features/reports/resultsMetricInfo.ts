@@ -86,6 +86,15 @@ export const resultsMetricInfo = {
     calculatedIn: "src/core/thermal/thermalDiagnostics.ts → building.totalTransmissionLossW + totalAirExchangeLossW",
     linkedFormulaIds: ["thermal_peak_load", "heat_loss_coefficient_total"],
   },
+  requiredHeatingPowerKW: {
+    title: "Требуемая мощность отопления",
+    meaning:
+      "Статический баланс в опорном срезе RC: суммарные теплопотери здания за вычетом внутренних теплопоступлений.",
+    formula: "Q_{req} = max(0, Q_{loss} − Q_{int}) / 1000",
+    inputs: ["diagnostics.building.totalLossW", "diagnostics.building.totalInternalGainsW"],
+    calculatedIn: "src/features/reports/MetricsResultsTab.tsx → staticQReqKW",
+    linkedFormulaIds: ["thermal_peak_load", "rc_heating_demand_step"],
+  },
   buildingTransmissionLossKW: {
     title: "Потери через ограждения",
     meaning: "Трансмиссионные потери через непрозрачные ограждения, окна и двери в опорном срезе.",

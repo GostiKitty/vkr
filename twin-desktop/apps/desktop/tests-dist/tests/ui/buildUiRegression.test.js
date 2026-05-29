@@ -38,9 +38,15 @@ test("canvas layout fit avoids render loops from unstable effect dependencies", 
         throw new Error("Canvas layout fit should call the stable ref indirection.");
     }
 });
-test("build workspace uses grid columns when the sidebar is open on desktop", () => {
+test("build workspace uses resizable grid columns when the sidebar is open on desktop", () => {
     const source = readFileSync(resolve(process.cwd(), "src/features/build/BuildPage.tsx"), "utf8");
-    if (!source.includes("md:grid md:grid-cols-[minmax(280px,336px)_minmax(0,1fr)]")) {
+    if (!source.includes("workspaceSidebarWidth")) {
+        throw new Error("BuildPage should support a resizable workspace sidebar width.");
+    }
+    if (!source.includes("WorkspaceSidebarResizeHandle")) {
+        throw new Error("BuildPage should expose a drag handle to resize the workspace sidebar.");
+    }
+    if (!source.includes("gridTemplateColumns: workspaceGridColumns")) {
         throw new Error("BuildPage should allocate a dedicated sidebar column on desktop.");
     }
 });

@@ -7,14 +7,12 @@ import type { SimulationFrame } from "../../entities/twin/types";
 import { useWorkflowStore, type UncertaintyConfig } from "../../entities/workflow/workflow.store";
 import {
   assumptions,
-  formulaContours,
   formulaRegistry,
   type Formula,
   type Assumption,
-  type FormulaContour,
   type FormulaVariable,
 } from "../../entities/formulas/registry";
-import { CollapsibleSection, SummaryHero, SummaryHighlightGrid } from "../../shared/ui";
+import { SummaryHero, SummaryHighlightGrid } from "../../shared/ui";
 
 interface FormulaValueContext {
   selectedSpace: Space | null;
@@ -49,7 +47,7 @@ interface FormulaTopic {
 const formulaTopics: FormulaTopic[] = [
   {
     id: "twin-3d",
-    title: "3D twin-граф (эвристика)",
+    title: "3D-граф двойника (эвристика)",
     description: "Упрощённые проводимости и теплоёмкости для визуализации цифрового двойника.",
     formulaIds: [
       "twin_graph_internal_conductance",
@@ -85,7 +83,7 @@ const formulaTopics: FormulaTopic[] = [
   },
   {
     id: "solver",
-    title: "Зональный RC-solver",
+    title: "Зональный RC-решатель",
     description: "Основной нестационарный расчёт: теплоёмкость, проводимости, дискретный баланс и отопление.",
     formulaIds: [
       "rc_zone_discrete_balance",
@@ -105,14 +103,14 @@ const formulaTopics: FormulaTopic[] = [
   },
   {
     id: "engineering-preview",
-    title: "Инженерный preview-баланс",
+    title: "Инженерный баланс предпросмотра",
     description: "Быстрый квазистационарный многозонный баланс до полного RC-прогона.",
     formulaIds: ["physics_multiroom_steady_balance", "thermal_balance_room"],
   },
   {
     id: "transient-1d",
-    title: "1D transient по толщине",
-    description: "Явная FTCS-схема по слоям конструкции, устойчивость сетки и Monte Carlo по свойствам.",
+    title: "1D нестационарный расчёт по толщине",
+    description: "Явная FTCS-схема по слоям конструкции, устойчивость сетки и метод Монте-Карло по свойствам.",
     formulaIds: [
       "transient_1d_explicit_ftcs",
       "transient_interface_flux_fourier",
@@ -301,9 +299,15 @@ const formulaTopics: FormulaTopic[] = [
       "specific_heat_load_norm_delta_t",
       "derived_compactness",
       "derived_wwr",
+      "derived_u_eq",
+      "derived_h_total",
       "derived_t_op",
       "derived_f_rsi",
       "derived_co2",
+      "derived_dh_underheat",
+      "derived_dh_overheat",
+      "steady_field",
+      "boundary_conditions",
       "diagnostics_balance_relative_residual",
       "diagnostics_envelope_split_deviation",
       "diagnostics_loss_share_percent",
@@ -338,7 +342,7 @@ const formulaTopics: FormulaTopic[] = [
   },
   {
     id: "uncertainty",
-    title: "Вероятностный анализ / Monte Carlo",
+    title: "Вероятностный анализ / Монте-Карло",
     description: "Распределения входов, число испытаний, перцентили и риск превышения.",
     formulaIds: [
       "uncertainty_mc",
@@ -496,6 +500,12 @@ const formulaUsageStatus: Record<string, FormulaUsageStatus> = {
   mc_cholesky_correlated_sampling: "используется в RC-модели",
   solar_declination_spencer: "справочная / пока не участвует в основном расчёте",
   climate_resolve_sp131_city: "используется в проверке СП 50",
+  steady_field: "используется в инженерном балансе",
+  boundary_conditions: "используется в инженерном балансе",
+  derived_u_eq: "используется в инженерном балансе",
+  derived_h_total: "используется в инженерном балансе",
+  derived_dh_underheat: "используется в RC-модели",
+  derived_dh_overheat: "используется в RC-модели",
   engineering_field_5point_stencil: "используется в инженерном балансе",
   physics_steady_room_balance: "используется в инженерном балансе",
   network_equipment_room_heat_sum: "используется в инженерной оценке оборудования",
@@ -506,90 +516,6 @@ const formulaUsageStatus: Record<string, FormulaUsageStatus> = {
 };
 
 const formulaById: Record<string, Formula> = Object.fromEntries(formulaRegistry.map((formula) => [formula.id, formula]));
-
-function inferFormulaContour(formula: Formula): FormulaContour {
-  if (formula.contour) {
-    return formula.contour;
-  }
-  const usage = formulaUsageStatus[formula.id];
-  switch (usage) {
-    case "используется в RC-модели":
-    case "используется в hydronic mode":
-      return "rc-runtime";
-    case "используется в инженерном балансе":
-    case "используется в инженерной оценке оборудования":
-      return "derived-only";
-    case "используется в проверке СП 50":
-      return "normative-check";
-    case "используется в 1D transient":
-      return "transient-1d";
-    case "используется только в legacy path":
-      return "legacy";
-    default:
-      if (formula.module === "Geometry") {
-        return "geometry";
-      }
-      if (formula.module === "Uncertainty") {
-        return "monte-carlo";
-      }
-      return "derived-only";
-  }
-}
-
-function contourLabel(contour: FormulaContour): string {
-  return formulaContours.find((item) => item.id === contour)?.label ?? contour;
-}
-
-function readableContourLabel(label: string): string {
-  switch (label) {
-    case "derived-only":
-      return "Дополнительная инженерная оценка";
-    case "normative-check":
-      return "Нормативная проверка";
-    case "report-only":
-      return "Только для отчёта";
-    case "rc-runtime":
-      return "Основной RC-расчёт";
-    case "transient-1d":
-      return "Послойный 1D-расчёт";
-    case "monte-carlo":
-      return "Вероятностный анализ";
-    case "geometry":
-      return "Геометрия и модель";
-    case "legacy":
-      return "Архивный контур";
-    default:
-      return label;
-  }
-}
-
-function readableFormulaStatus(status: string): string {
-  switch (status) {
-    case "derived-only":
-      return "Дополнительный показатель";
-    case "normative-check":
-      return "Нормативная проверка";
-    case "report-only":
-      return "Отчётный показатель";
-    case "experimental":
-      return "Экспериментальный блок";
-    case "core":
-      return "Основной расчёт";
-    default:
-      return status;
-  }
-}
-
-function readableUsageStatus(status: FormulaUsageStatus): string {
-  switch (status) {
-    case "используется в hydronic mode":
-      return "используется в режиме ограничения мощности";
-    case "используется только в legacy path":
-      return "используется только в архивном контуре";
-    default:
-      return status;
-  }
-}
 
 export default function FormulasPage() {
   const twin = useTwinStore((state) => state.twin);
@@ -620,6 +546,18 @@ export default function FormulasPage() {
     }),
     [assumptionMap, currentFrame, frames, selectedSpace, uncertaintyConfig]
   );
+  const totalFormulaCount = useMemo(() => {
+    const assigned = new Set<string>();
+    formulaTopics.forEach((topic) => {
+      topic.formulaIds.forEach((id) => {
+        if (formulaById[id]) {
+          assigned.add(id);
+        }
+      });
+    });
+    return assigned.size;
+  }, []);
+
   const filteredTopics = useMemo(() => {
     const assignedFormulaIds = new Set<string>();
 
@@ -659,8 +597,12 @@ export default function FormulasPage() {
               value: String(filteredTopics.length),
             },
             {
-              label: "Формулы",
+              label: "В теме",
               value: String(activeTopic?.formulas.length ?? 0),
+            },
+            {
+              label: "Всего",
+              value: String(totalFormulaCount),
             },
           ]}
         />
@@ -712,7 +654,6 @@ const FormulaGroup = ({
     <section className="ui-panel scroll-mt-24 space-y-3 p-5 sm:p-6" id={`topic-${topic.id}`}>
       <div className="flex flex-col gap-1">
         <h2 className="text-2xl font-semibold text-[color:var(--text-base)]">{topic.title}</h2>
-        <p className="text-sm text-[color:var(--text-soft)]">{topic.description}</p>
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
         {formulas.map((formula) => (
@@ -728,9 +669,6 @@ const FormulaCard = ({ formula, context }: { formula: Formula; context: FormulaV
     variable,
     data: resolveVariableValue(formula.id, variable, context),
   }));
-  const contour = inferFormulaContour(formula);
-  const statusLabel = formula.status ?? "derived-only";
-  const affectsSolver = formula.affectsSolver ?? false;
 
   const [copied, setCopied] = React.useState<"latex" | "text" | null>(null);
   const copy = async (mode: "latex" | "text") => {
@@ -747,42 +685,7 @@ const FormulaCard = ({ formula, context }: { formula: Formula; context: FormulaV
   return (
     <article id={`formula-${formula.id}`} className="flex flex-col gap-3 rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] p-4">
       <div>
-        <div className="flex flex-wrap items-center gap-2">
-          <p className="text-sm font-semibold text-[color:var(--text-muted)]">{readableUsageStatus(formulaUsageStatus[formula.id] ?? "справочная / пока не участвует в основном расчёте")}</p>
-        </div>
-        <div className="mt-2 flex flex-wrap items-center gap-2">
-          <span className="rounded-full bg-[color:var(--accent-soft)] px-2 py-0.5 text-[11px] font-semibold text-[color:var(--accent-base)]">
-            {readableContourLabel(contourLabel(contour))}
-          </span>
-          <span className="rounded-full border border-[color:var(--border-soft)] px-2 py-0.5 text-[11px] font-semibold text-[color:var(--text-muted)]">
-            {readableFormulaStatus(statusLabel)}
-          </span>
-          <span className="rounded-full border border-[color:var(--border-soft)] px-2 py-0.5 text-[11px] font-semibold text-[color:var(--text-muted)]">
-            Код: {formula.id}
-          </span>
-          <span
-            className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-              affectsSolver
-                ? "bg-[color:var(--success-bg)] text-[color:var(--success-fg)]"
-                : "bg-[color:var(--surface-base)] text-[color:var(--text-soft)]"
-            }`}
-          >
-            {affectsSolver ? "Влияет на основной расчёт" : "Справочный слой, без влияния на расчёт"}
-          </span>
-        </div>
         <h3 className="text-lg font-semibold text-[color:var(--text-base)]">{formula.titleRu ?? formula.title}</h3>
-        <p className="text-sm text-[color:var(--text-muted)]">{formula.description}</p>
-        <p className="mt-1 text-xs text-[color:var(--text-soft)]">
-          <span className="font-semibold text-[color:var(--text-muted)]">Метод:</span> {formula.methodName}
-        </p>
-        <p className="mt-1 text-xs text-[color:var(--text-soft)]">
-          <span className="font-semibold text-[color:var(--text-muted)]">Где используется:</span> {resolveFormulaUsage(formula)}
-        </p>
-        {formula.sourceFiles?.length ? (
-          <p className="mt-1 text-xs text-[color:var(--text-soft)]">
-            <span className="font-semibold text-[color:var(--text-muted)]">Файлы:</span> {formula.sourceFiles.join(", ")}
-          </p>
-        ) : null}
         {formula.relatedFormulaIds?.length ? (
           <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
             <span className="font-semibold text-[color:var(--text-muted)]">См. также:</span>
@@ -875,24 +778,6 @@ const FormulaCard = ({ formula, context }: { formula: Formula; context: FormulaV
         <p className="text-sm font-semibold text-[color:var(--text-base)]">Физический смысл</p>
         <p className="mt-2 text-sm text-[color:var(--text-muted)]">{formula.physicalMeaning}</p>
       </div>
-
-      <div className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)] px-3 py-3">
-        <p className="text-sm font-semibold text-[color:var(--text-base)]">Область применимости</p>
-        <p className="mt-2 text-sm text-[color:var(--text-muted)]">{formula.applicability}</p>
-      </div>
-
-      <CollapsibleSection title="Допущения и ограничения" description="Что важно помнить при чтении этой формулы.">
-        <ul className="space-y-1 text-sm text-[color:var(--text-muted)]">
-          {formula.assumptions.map((assumption) => (
-            <li key={`${formula.id}-${assumption}`}>{assumption}</li>
-          ))}
-          {formula.warnings?.map((warning) => (
-            <li key={`${formula.id}-warning-${warning}`} className="text-[color:var(--warning-fg)]">
-              {warning}
-            </li>
-          ))}
-        </ul>
-      </CollapsibleSection>
     </article>
   );
 };
@@ -912,66 +797,6 @@ const buildPlainText = (formula: Formula): string => {
     "Допущения:",
     assumptionsText,
   ].join("\n");
-};
-
-const resolveFormulaUsage = (formula: Formula): string => {
-  const explicitUsage: Record<string, string> = {
-    layer_resistance:
-      "Послойный инженерный баланс ограждений; служит входом для оценки конструкций и связанных теплотехнических проверок.",
-    total_resistance:
-      "Проверка сопротивления теплопередаче и формирование эквивалентного U в модуле СП 50; используется и в инженерной интерпретации ограждений.",
-    envelope_heat_loss:
-      "Инженерный квазистационарный баланс потерь через ограждения в результатах и диагностике.",
-    transmission_loss:
-      "Разложение потерь через стены, окна, двери, кровлю и пол в инженерном балансе.",
-    envelope_infiltration:
-      "Основной RC-расчёт через эквивалентную проводимость инфильтрации по ACH.",
-    ventilation_loss:
-      "Инженерный квазистационарный баланс вентиляционных и инфильтрационных потерь; не просто справочное допущение.",
-    internal_gains:
-      "RC-модель помещения и её сценарные входы по людям, освещению и оборудованию.",
-    thermal_balance:
-      "Основной RC-расчёт и интерпретация суммарного баланса мощности по зоне.",
-    thermal_balance_room:
-      "Инженерный квазистационарный срез по помещению для оценки дефицита тепла.",
-    rc_lumped:
-      "Основной зональный RC-расчёт, временные ряды температуры, энергии и мощности.",
-    weather_sinusoid:
-      "Климатический сценарий основного RC-расчёта.",
-    thermal_peak_load:
-      "Пиковая нагрузка основного RC расчёта и связанный подбор требуемой мощности.",
-    uncertainty_mc:
-      "Панель вероятностного анализа поверх RC-модели; это отдельный слой поверх базового расчёта, а не нормативный отчёт.",
-    uncertainty_std:
-      "Статистика разброса результатов вероятностного анализа поверх RC-модели.",
-    calibration_rmse:
-      "Только архивный отчётный путь и связанный калибровочный отчёт по данным движка.",
-    calibration_mape:
-      "Только архивный отчётный путь и связанный калибровочный отчёт по данным движка.",
-    radiator_heat_output:
-      "Используется в дополнительной инженерной оценке доступной мощности оборудования; пока не управляет основным зональным отоплением.",
-    coolant_flow_rate:
-      "Используется в дополнительной инженерной оценке требуемого расхода теплоносителя; прямой режим ограничения мощности пока не включён.",
-  };
-  if (explicitUsage[formula.id]) {
-    return explicitUsage[formula.id];
-  }
-  if (formula.id.includes("uncertainty")) {
-    return "Monte Carlo, панель рисков, отчётные перцентили";
-  }
-  if (formula.id.includes("calibration")) {
-    return "интерпретация калибровки и качества совпадения";
-  }
-  if (formula.module === "Envelope") {
-    return "оболочка здания, проводимости стен, теплопотери";
-  }
-  if (formula.module === "Thermal") {
-    return "RC-решатель, тепловой баланс, результаты расчёта";
-  }
-  if (formula.module === "Geometry") {
-    return "геометрия помещений, объём, площадь, удельные нагрузки";
-  }
-  return "справочный раздел и инженерные подсказки";
 };
 
 const AIR_DENSITY = 1.204; // kg/m3

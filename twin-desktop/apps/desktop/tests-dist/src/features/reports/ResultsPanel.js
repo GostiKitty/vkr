@@ -13,7 +13,7 @@ import { getSp131CityClimate } from "../../norms/sp131_2025/climate";
 import { navigate } from "../../app/router";
 import { useWorkflowStore } from "../../entities/workflow/workflow.store";
 import { useWorkspaceStore } from "../../entities/workspace/workspace.store";
-import { AnimatedTabs, EmptyState, MetricInfoTooltip, SummaryHero, SummaryHighlightGrid, TemperatureScaleLegend, } from "../../shared/ui";
+import { AnimatedTabs, EmptyState, MetricInfoTooltip, SummaryHighlightGrid, TemperatureScaleLegend, } from "../../shared/ui";
 import { formatEnergy, formatNumber, formatPercentage } from "../../shared/utils/format";
 import { getResultSyncState } from "../../shared/utils/modelSync";
 import { runLocalThermalCalculation } from "../runs/runLocalThermalCalculation";
@@ -141,7 +141,7 @@ export function ResultsPanel({ projectId: _projectId }) {
         setAutoRunState("running");
         setAutoRunError(null);
         setAutoRunMessage("Выполняются базовый RC-расчёт и вероятностный анализ Monte Carlo. Результаты обновятся автоматически.");
-        setActiveTab("probabilistic");
+        setActiveTab("overview");
         window.setTimeout(() => {
             try {
                 runLocalThermalCalculation();
@@ -200,7 +200,7 @@ export function ResultsPanel({ projectId: _projectId }) {
         handleRunFullAnalysis();
     }, [consumeProjectCommand, handleRunFullAnalysis, workspaceCommand, workspaceCommandNonce]);
     const tabContent = {
-        overview: (_jsx(OverviewTab, { climateLabel: climateLabel, economyAssessment: economyAssessment, lastThermalResult: visibleThermalResult, monteCarloResult: visibleMonteCarloResult, onOpenCalculation: handleRunCalculation, onOpenEconomy: () => setActiveTab("economy"), onOpenMonteCarlo: () => navigate("/uncertainty"), onOpenThermal: () => setActiveTab("thermal") })),
+        overview: (_jsx(OverviewTab, { lastThermalResult: visibleThermalResult, monteCarloResult: visibleMonteCarloResult, onOpenCalculation: handleRunCalculation, onOpenMonteCarlo: () => navigate("/uncertainty") })),
         thermal: (_jsx(MetricsResultsTab, { onRecalculate: handleRunCalculation, onEditUncertainty: () => navigate("/uncertainty") })),
         probabilistic: (_jsx(MonteCarloResultsSection, { baseResult: visibleThermalResult, baseOptions: activeOptions, buildingModel: buildModel, climateLabel: climateLabel, monteCarloResult: visibleMonteCarloResult, onEditUncertainty: () => navigate("/uncertainty"), onRunCalculation: handleRunCalculation })),
         economy: _jsx(ResultsEconomyTab, { report: sp50Report, onOpenBuild: () => navigate("/build") }),
@@ -209,54 +209,70 @@ export function ResultsPanel({ projectId: _projectId }) {
         // Temporarily hidden from UI. Will be restored after project documentation export redesign.
         // documents: <ProjectDocumentationPage projectId={projectId} />,
     };
-    return (_jsxs("div", { className: "flex min-h-0 flex-col gap-4", children: [_jsxs(SummaryHero, { title: "\u0420\u0435\u0437\u0443\u043B\u044C\u0442\u0430\u0442\u044B \u043F\u0440\u043E\u0435\u043A\u0442\u0430", children: [autoRunState === "running" ? (_jsx("div", { className: "rounded-2xl border border-[color:var(--accent-base)]/20 bg-[color:var(--surface-muted)] px-4 py-3 text-sm text-[color:var(--text-base)]", children: autoRunMessage })) : null, autoRunState === "error" && autoRunError ? (_jsx("div", { className: "rounded-2xl border border-[color:var(--danger-border)] bg-[color:var(--danger-bg)] px-4 py-3 text-sm text-[color:var(--danger-fg)]", children: autoRunError })) : null, thermalResultState === "stale" || monteCarloResultState === "stale" ? (_jsx("div", { className: "rounded-2xl border border-[color:var(--warning-border)] bg-[color:var(--warning-bg)] px-4 py-3 text-sm text-[color:var(--warning-fg)]", children: "\u0420\u0435\u0437\u0443\u043B\u044C\u0442\u0430\u0442\u044B \u043D\u0435 \u0441\u043E\u043E\u0442\u0432\u0435\u0442\u0441\u0442\u0432\u0443\u044E\u0442 \u0442\u0435\u043A\u0443\u0449\u0435\u0439 \u043C\u043E\u0434\u0435\u043B\u0438. \u0412\u044B\u043F\u043E\u043B\u043D\u0438\u0442\u0435 \u0440\u0430\u0441\u0447\u0451\u0442 \u0437\u0430\u043D\u043E\u0432\u043E \u043F\u0435\u0440\u0435\u0434 \u0430\u043D\u0430\u043B\u0438\u0437\u043E\u043C \u0438 \u044D\u043A\u0441\u043F\u043E\u0440\u0442\u043E\u043C." })) : null, _jsx(ResultsSummaryBar, { energy: visibleThermalResult?.summary.totalEnergyKWh ?? null, peakLoad: visibleThermalResult?.summary.peakLoadKW ?? null, discomfortHours: visibleThermalResult?.summary.discomfortHours ?? null, monteCarloP50: visibleMonteCarloResult?.totalEnergy.p50 ?? null, underheatingRisk: visibleMonteCarloResult?.underheatingBelow20CProbability ?? null })] }), _jsx(AnimatedTabs, { tabs: tabItems, value: activeTab, onChange: setActiveTab }), _jsx("div", { className: "ui-panel min-h-0 p-4 sm:p-5 xl:p-6", children: _jsx("div", { className: "animate-fade-slide min-h-[20rem]", children: tabContent[activeTab] }, activeTab) })] }));
+    const showResultAlerts = autoRunState === "running" ||
+        (autoRunState === "error" && autoRunError != null) ||
+        thermalResultState === "stale" ||
+        monteCarloResultState === "stale";
+    return (_jsxs("div", { className: "flex min-h-0 flex-col gap-4", children: [showResultAlerts ? (_jsxs("div", { className: "space-y-3", children: [autoRunState === "running" ? (_jsx("div", { className: "rounded-2xl border border-[color:var(--accent-base)]/20 bg-[color:var(--surface-muted)] px-4 py-3 text-sm text-[color:var(--text-base)]", children: autoRunMessage })) : null, autoRunState === "error" && autoRunError ? (_jsx("div", { className: "rounded-2xl border border-[color:var(--danger-border)] bg-[color:var(--danger-bg)] px-4 py-3 text-sm text-[color:var(--danger-fg)]", children: autoRunError })) : null, thermalResultState === "stale" || monteCarloResultState === "stale" ? (_jsx("div", { className: "rounded-2xl border border-[color:var(--warning-border)] bg-[color:var(--warning-bg)] px-4 py-3 text-sm text-[color:var(--warning-fg)]", children: "\u0420\u0435\u0437\u0443\u043B\u044C\u0442\u0430\u0442\u044B \u043D\u0435 \u0441\u043E\u043E\u0442\u0432\u0435\u0442\u0441\u0442\u0432\u0443\u044E\u0442 \u0442\u0435\u043A\u0443\u0449\u0435\u0439 \u043C\u043E\u0434\u0435\u043B\u0438. \u0412\u044B\u043F\u043E\u043B\u043D\u0438\u0442\u0435 \u0440\u0430\u0441\u0447\u0451\u0442 \u0437\u0430\u043D\u043E\u0432\u043E \u043F\u0435\u0440\u0435\u0434 \u0430\u043D\u0430\u043B\u0438\u0437\u043E\u043C \u0438 \u044D\u043A\u0441\u043F\u043E\u0440\u0442\u043E\u043C." })) : null] })) : null, _jsx(AnimatedTabs, { tabs: tabItems, value: activeTab, onChange: setActiveTab }), _jsx("div", { className: "ui-panel min-h-0 p-4 sm:p-5 xl:p-6", children: _jsx("div", { className: `animate-fade-slide ${activeTab === "overview" ? "min-h-0" : "min-h-[20rem]"}`, children: tabContent[activeTab] }, activeTab) })] }));
 }
-function ResultsSummaryBar({ energy, peakLoad, discomfortHours, monteCarloP50, underheatingRisk, }) {
-    return (_jsx(SummaryHighlightGrid, { className: "mt-1", items: [
-            {
-                label: "Тепловая энергия",
-                value: formatEnergy(energy, "кВт·ч"),
+function OverviewTab({ lastThermalResult, monteCarloResult, onOpenCalculation, onOpenMonteCarlo, }) {
+    const highlightItems = useMemo(() => {
+        const items = [];
+        if (lastThermalResult) {
+            const buildingDiagnostics = lastThermalResult.diagnostics?.building ?? null;
+            const totalHeatLossKW = buildingDiagnostics ? buildingDiagnostics.totalLossW / 1000 : null;
+            const requiredPowerKW = buildingDiagnostics
+                ? Math.max(0, buildingDiagnostics.totalLossW - buildingDiagnostics.totalInternalGainsW) / 1000
+                : null;
+            items.push({
+                label: "Энергия за период",
+                value: formatEnergy(lastThermalResult.summary.totalEnergyKWh, "кВт·ч"),
                 metricInfo: resultsMetricInfo.energy,
-                calculated: energy != null,
-            },
-            {
+                calculated: true,
+            });
+            if (totalHeatLossKW != null) {
+                items.push({
+                    label: "Суммарные теплопотери",
+                    value: `${formatNumber(totalHeatLossKW, { maximumFractionDigits: 2 })} кВт`,
+                    metricInfo: resultsMetricInfo.buildingTotalHeatLossKW,
+                    calculated: true,
+                });
+            }
+            if (requiredPowerKW != null) {
+                items.push({
+                    label: "Требуемая мощность",
+                    value: `${formatNumber(requiredPowerKW, { maximumFractionDigits: 2 })} кВт`,
+                    metricInfo: resultsMetricInfo.requiredHeatingPowerKW,
+                    calculated: true,
+                });
+            }
+            items.push({
                 label: "Пиковая нагрузка",
-                value: peakLoad == null ? "—" : `${formatNumber(peakLoad, { maximumFractionDigits: 2 })} кВт`,
+                value: `${formatNumber(lastThermalResult.summary.peakLoadKW, { maximumFractionDigits: 2 })} кВт`,
                 metricInfo: resultsMetricInfo.peakLoad,
-                calculated: peakLoad != null,
-            },
-            {
-                label: "Часы дискомфорта",
-                value: discomfortHours == null
-                    ? "—"
-                    : `${formatNumber(discomfortHours, { maximumFractionDigits: 1 })} ч`,
+                calculated: true,
+            }, {
+                label: "Дискомфорт",
+                value: `${formatNumber(lastThermalResult.summary.discomfortHours, { maximumFractionDigits: 1 })} ч`,
                 metricInfo: resultsMetricInfo.discomfort,
-                calculated: discomfortHours != null,
-            },
-            {
-                label: "Медиана Monte Carlo",
-                value: formatEnergy(monteCarloP50, "кВт·ч"),
-                tone: monteCarloP50 != null ? "info" : "neutral",
+                calculated: true,
+            });
+        }
+        if (monteCarloResult) {
+            items.push({
+                label: "P50 (Monte Carlo)",
+                value: formatEnergy(monteCarloResult.totalEnergy.p50, "кВт·ч"),
                 metricInfo: resultsMetricInfo.monteCarloP50,
-                calculated: monteCarloP50 != null,
-            },
-            {
-                label: "Риск недогрева",
-                value: formatPercentage(underheatingRisk),
-                tone: underheatingRisk != null && underheatingRisk > 0.15 ? "warning" : "neutral",
-                metricInfo: resultsMetricInfo.underheatingRisk,
-                calculated: underheatingRisk != null,
-            },
-        ] }));
-}
-function OverviewTab({ climateLabel, economyAssessment, lastThermalResult, monteCarloResult, onOpenCalculation, onOpenEconomy, onOpenMonteCarlo, onOpenThermal, }) {
+                tone: "info",
+                calculated: true,
+            });
+        }
+        return items;
+    }, [lastThermalResult, monteCarloResult]);
     if (!lastThermalResult && !monteCarloResult) {
-        return (_jsxs("section", { className: "rounded-2xl border border-dashed border-[color:var(--border-base)] bg-[color:var(--surface-muted)] p-5", children: [_jsx(EmptyState, { title: "\u041D\u0435\u0442 \u0434\u0430\u043D\u043D\u044B\u0445 \u0432 \u0440\u0435\u0437\u0443\u043B\u044C\u0442\u0430\u0442\u0430\u0445", message: "\u0412\u044B\u043F\u043E\u043B\u043D\u0438\u0442\u0435 \u0431\u0430\u0437\u043E\u0432\u044B\u0439 RC-\u0440\u0430\u0441\u0447\u0451\u0442 \u0438\u043B\u0438 \u0437\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u0435 Monte Carlo, \u0447\u0442\u043E\u0431\u044B \u043F\u043E\u044F\u0432\u0438\u043B\u0438\u0441\u044C KPI, \u0433\u0440\u0430\u0444\u0438\u043A\u0438 \u0438 \u0441\u0432\u043E\u0434\u043A\u0430." }), _jsxs("div", { className: "mt-4 flex flex-wrap gap-2", children: [_jsx("button", { type: "button", onClick: onOpenCalculation, className: "ui-btn-primary px-4 py-2 text-sm", children: "\u0417\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u044C \u0440\u0430\u0441\u0447\u0451\u0442" }), _jsx("button", { type: "button", onClick: onOpenMonteCarlo, className: "ui-btn-secondary px-4 py-2 text-sm", children: "\u041F\u0435\u0440\u0435\u0439\u0442\u0438 \u043A \u0430\u043D\u0430\u043B\u0438\u0437\u0443" })] })] }));
+        return (_jsxs("section", { className: "rounded-2xl border border-dashed border-[color:var(--border-base)] bg-[color:var(--surface-muted)] p-5", children: [_jsx(EmptyState, { title: "\u041D\u0435\u0442 \u0434\u0430\u043D\u043D\u044B\u0445 \u0432 \u0440\u0435\u0437\u0443\u043B\u044C\u0442\u0430\u0442\u0430\u0445", message: "\u0417\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u0435 \u0431\u0430\u0437\u043E\u0432\u044B\u0439 RC-\u0440\u0430\u0441\u0447\u0451\u0442 \u2014 \u043D\u0430 \u044D\u0442\u043E\u0439 \u0432\u043A\u043B\u0430\u0434\u043A\u0435 \u043F\u043E\u044F\u0432\u044F\u0442\u0441\u044F \u043A\u043B\u044E\u0447\u0435\u0432\u044B\u0435 \u043F\u043E\u043A\u0430\u0437\u0430\u0442\u0435\u043B\u0438. \u0414\u0435\u0442\u0430\u043B\u044C\u043D\u044B\u0435 \u0433\u0440\u0430\u0444\u0438\u043A\u0438 \u0438 Monte Carlo \u2014 \u043D\u0430 \u0441\u043E\u0441\u0435\u0434\u043D\u0438\u0445 \u0432\u043A\u043B\u0430\u0434\u043A\u0430\u0445." }), _jsxs("div", { className: "mt-4 flex flex-wrap gap-2", children: [_jsx("button", { type: "button", onClick: onOpenCalculation, className: "ui-btn-primary px-4 py-2 text-sm", children: "\u0417\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u044C \u0440\u0430\u0441\u0447\u0451\u0442" }), _jsx("button", { type: "button", onClick: onOpenMonteCarlo, className: "ui-btn-secondary px-4 py-2 text-sm", children: "\u041D\u0430\u0441\u0442\u0440\u043E\u0438\u0442\u044C Monte Carlo" })] })] }));
     }
-    return (_jsx("div", { className: "space-y-4", children: _jsxs("div", { className: "grid gap-4 xl:grid-cols-[1.15fr,0.85fr]", children: [_jsxs("section", { className: "rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)] p-4", children: [_jsxs("div", { className: "mb-3 flex items-center gap-1.5", children: [_jsx("p", { className: "text-sm font-semibold text-[color:var(--text-base)]", children: "\u0422\u0435\u043F\u043B\u043E\u0432\u043E\u0439 \u0440\u0430\u0441\u0447\u0451\u0442" }), _jsx(MetricInfoTooltip, { ...resultsMetricInfo.rcBalance })] }), lastThermalResult ? (_jsxs("div", { className: "space-y-4", children: [_jsxs("div", { className: "grid gap-3 sm:grid-cols-3", children: [_jsx(OverviewMetric, { label: "\u042D\u043D\u0435\u0440\u0433\u0438\u044F \u0437\u0430 \u043F\u0435\u0440\u0438\u043E\u0434", value: formatEnergy(lastThermalResult.summary.totalEnergyKWh, "кВт·ч"), info: resultsMetricInfo.energy }), _jsx(OverviewMetric, { label: "\u041F\u0438\u043A\u043E\u0432\u0430\u044F \u043D\u0430\u0433\u0440\u0443\u0437\u043A\u0430", value: `${formatNumber(lastThermalResult.summary.peakLoadKW, { maximumFractionDigits: 2 })} кВт`, info: resultsMetricInfo.peakLoad }), _jsx(OverviewMetric, { label: "\u0414\u0438\u0441\u043A\u043E\u043C\u0444\u043E\u0440\u0442", value: `${formatNumber(lastThermalResult.summary.discomfortHours, { maximumFractionDigits: 1 })} ч`, info: resultsMetricInfo.discomfort })] }), _jsxs("div", { className: "flex flex-wrap gap-2", children: [_jsx("button", { type: "button", onClick: onOpenThermal, className: "ui-btn-primary px-4 py-2 text-sm", children: "\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u0442\u0435\u043F\u043B\u043E\u0432\u043E\u0439 \u0440\u0430\u0441\u0447\u0451\u0442" }), _jsx("button", { type: "button", onClick: onOpenCalculation, className: "ui-btn-secondary px-4 py-2 text-sm", children: "\u041F\u0435\u0440\u0435\u0441\u0447\u0438\u0442\u0430\u0442\u044C" })] })] })) : (_jsx(TabEmptyState, { title: "\u041D\u0435\u0442 RC-\u0440\u0430\u0441\u0447\u0451\u0442\u0430", message: "\u0421\u043D\u0430\u0447\u0430\u043B\u0430 \u0432\u044B\u043F\u043E\u043B\u043D\u0438\u0442\u0435 \u0431\u0430\u0437\u043E\u0432\u044B\u0439 \u0440\u0430\u0441\u0447\u0451\u0442, \u0447\u0442\u043E\u0431\u044B \u043F\u043E\u044F\u0432\u0438\u043B\u0438\u0441\u044C \u0441\u0432\u043E\u0434\u043A\u0430 \u0438 \u0434\u0438\u043D\u0430\u043C\u0438\u043A\u0430 \u043F\u043E\u043C\u0435\u0449\u0435\u043D\u0438\u044F.", buttonLabel: "\u0417\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u044C \u0440\u0430\u0441\u0447\u0451\u0442", onClick: onOpenCalculation }))] }), _jsxs("div", { className: "space-y-4", children: [_jsxs("section", { className: "rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)] p-4", children: [_jsxs("div", { className: "mb-2 flex items-center gap-1.5", children: [_jsx("p", { className: "text-sm font-semibold text-[color:var(--text-base)]", children: "Monte Carlo" }), _jsx(MetricInfoTooltip, { ...resultsMetricInfo.monteCarloP50 })] }), monteCarloResult ? (_jsxs("div", { className: "space-y-2 text-sm text-[color:var(--text-muted)]", children: [_jsxs("p", { children: ["P10\u2013P90: ", formatEnergy(monteCarloResult.totalEnergy.p10, "кВт·ч"), " \u2014 ", formatEnergy(monteCarloResult.totalEnergy.p90, "кВт·ч")] }), _jsxs("p", { children: ["P50: ", formatEnergy(monteCarloResult.totalEnergy.p50, "кВт·ч")] }), _jsxs("p", { children: ["\u0420\u0438\u0441\u043A \u043D\u0435\u0434\u043E\u0433\u0440\u0435\u0432\u0430: ", formatPercentage(monteCarloResult.underheatingBelow20CProbability ?? null)] }), _jsxs("p", { children: ["\u0413\u043B\u0430\u0432\u043D\u044B\u0439 \u0444\u0430\u043A\u0442\u043E\u0440: ", monteCarloResult.sensitivity?.slice().sort((a, b) => b.valuePercent - a.valuePercent)[0]?.label ?? "—"] })] })) : (_jsx(TabEmptyState, { title: "Monte Carlo \u043D\u0435 \u0437\u0430\u043F\u0443\u0441\u043A\u0430\u043B\u0441\u044F", message: "\u0421\u043D\u0430\u0447\u0430\u043B\u0430 \u043D\u0443\u0436\u0435\u043D \u0432\u0435\u0440\u043E\u044F\u0442\u043D\u043E\u0441\u0442\u043D\u044B\u0439 \u0430\u043D\u0430\u043B\u0438\u0437 \u043F\u043E\u0432\u0435\u0440\u0445 RC-\u0440\u0430\u0441\u0447\u0451\u0442\u0430.", buttonLabel: "\u041F\u0435\u0440\u0435\u0439\u0442\u0438 \u043A \u0432\u0435\u0440\u043E\u044F\u0442\u043D\u043E\u0441\u0442\u043D\u043E\u043C\u0443 \u0430\u043D\u0430\u043B\u0438\u0437\u0443", onClick: onOpenMonteCarlo }))] }), _jsxs("section", { className: "rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)] p-4", children: [_jsxs("div", { className: "mb-2 flex items-center gap-1.5", children: [_jsx("p", { className: "text-sm font-semibold text-[color:var(--text-base)]", children: "\u042D\u043A\u043E\u043D\u043E\u043C\u0438\u043A\u0430" }), _jsx(MetricInfoTooltip, { ...resultsMetricInfo.payback })] }), economyAssessment ? (_jsxs("div", { className: "space-y-2 text-sm text-[color:var(--text-muted)]", children: [_jsxs("p", { children: ["\u041F\u043E\u0442\u0435\u043D\u0446\u0438\u0430\u043B \u044D\u043A\u043E\u043D\u043E\u043C\u0438\u0438: ", formatMoney(economyAssessment.summary.packageAnnualSaving_RUB), "/\u0433\u043E\u0434"] }), _jsxs("p", { children: ["\u041E\u043A\u0443\u043F\u0430\u0435\u043C\u043E\u0441\u0442\u044C: ", economyAssessment.summary.packagePayback_years == null ? "—" : `${formatNumber(economyAssessment.summary.packagePayback_years, { maximumFractionDigits: 1 })} лет`] }), _jsxs("p", { children: ["NPV: ", formatMoney(economyAssessment.summary.npv_RUB)] }), _jsxs("p", { children: ["\u041A\u043B\u0438\u043C\u0430\u0442\u0438\u0447\u0435\u0441\u043A\u0430\u044F \u0431\u0430\u0437\u0430: ", climateLabel ?? "не задана"] })] })) : (_jsx(TabEmptyState, { title: "\u042D\u043A\u043E\u043D\u043E\u043C\u0438\u043A\u0430 \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u043D\u0430", message: "\u0414\u043B\u044F \u044D\u043A\u043E\u043D\u043E\u043C\u0438\u0447\u0435\u0441\u043A\u043E\u0439 \u043E\u0446\u0435\u043D\u043A\u0438 \u043D\u0443\u0436\u0435\u043D \u043D\u043E\u0440\u043C\u0430\u0442\u0438\u0432\u043D\u044B\u0439/\u0438\u043D\u0436\u0435\u043D\u0435\u0440\u043D\u044B\u0439 \u0440\u0430\u0441\u0447\u0451\u0442 SP50.", buttonLabel: "\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u0432\u043A\u043B\u0430\u0434\u043A\u0443 \u044D\u043A\u043E\u043D\u043E\u043C\u0438\u043A\u0438", onClick: onOpenEconomy }))] })] })] }) }));
-}
-function OverviewMetric({ label, value, info, }) {
-    return (_jsxs("div", { className: "rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] px-4 py-3", children: [_jsxs("div", { className: "flex items-center gap-1.5", children: [_jsx("p", { className: "text-sm font-semibold text-[color:var(--text-muted)]", children: label }), _jsx(MetricInfoTooltip, { ...info })] }), _jsx("p", { className: "mt-1 text-base font-semibold text-[color:var(--text-base)]", children: value })] }));
+    return (_jsxs("div", { className: "space-y-4", children: [_jsx(SummaryHighlightGrid, { items: highlightItems }), !lastThermalResult ? (_jsx("p", { className: "text-xs text-[color:var(--text-soft)]", children: "\u0411\u0430\u0437\u043E\u0432\u044B\u0439 RC-\u0440\u0430\u0441\u0447\u0451\u0442 \u043D\u0435 \u0432\u044B\u043F\u043E\u043B\u043D\u0435\u043D \u2014 \u043F\u043E\u043A\u0430\u0437\u0430\u043D\u044B \u0442\u043E\u043B\u044C\u043A\u043E \u0440\u0435\u0437\u0443\u043B\u044C\u0442\u0430\u0442\u044B Monte Carlo. \u0417\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u0435 \u0442\u0435\u043F\u043B\u043E\u0432\u043E\u0439 \u0440\u0430\u0441\u0447\u0451\u0442 \u0434\u043B\u044F \u043F\u043E\u043B\u043D\u043E\u0439 \u0441\u0432\u043E\u0434\u043A\u0438." })) : null, lastThermalResult && !monteCarloResult ? (_jsx("p", { className: "text-xs text-[color:var(--text-soft)]", children: "\u0412\u0435\u0440\u043E\u044F\u0442\u043D\u043E\u0441\u0442\u043D\u044B\u0439 \u0430\u043D\u0430\u043B\u0438\u0437 \u043D\u0435 \u0437\u0430\u043F\u0443\u0441\u043A\u0430\u043B\u0441\u044F. P10\u2013P90, \u0447\u0443\u0432\u0441\u0442\u0432\u0438\u0442\u0435\u043B\u044C\u043D\u043E\u0441\u0442\u044C \u0438 VaR \u2014 \u043D\u0430 \u0432\u043A\u043B\u0430\u0434\u043A\u0435 \u00AB\u0412\u0435\u0440\u043E\u044F\u0442\u043D\u043E\u0441\u0442\u043D\u044B\u0439 \u0430\u043D\u0430\u043B\u0438\u0437\u00BB." })) : null] }));
 }
 function RoomsTab({ rows, hasRcResults, onOpenCalculation, onSelectRoom, }) {
     if (!hasRcResults) {
@@ -298,46 +314,73 @@ function GraphPanel({ graph, frame, selectedId, onSelect, }) {
     if (!graph || !graph.nodes.length) {
         return (_jsx("div", { className: "rounded-2xl border border-dashed border-[color:var(--border-base)] bg-[color:var(--surface-muted)] p-4 text-sm text-[color:var(--text-muted)]", children: "\u0422\u0435\u043F\u043B\u043E\u0432\u043E\u0439 \u0433\u0440\u0430\u0444 \u043F\u043E\u044F\u0432\u0438\u0442\u0441\u044F \u043F\u043E\u0441\u043B\u0435 \u0437\u0430\u0433\u0440\u0443\u0437\u043A\u0438 \u043C\u043E\u0434\u0435\u043B\u0438 \u0438 \u043F\u043E\u044F\u0432\u043B\u0435\u043D\u0438\u044F simulation frames." }));
     }
-    const width = 600;
-    const height = 320;
+    const W = 640;
+    const H = 420;
+    const CX = W / 2;
+    const CY = H / 2;
     const nodes = graph.nodes;
     const edges = graph.edges;
-    const frameTemps = frame ? Object.values(frame.temperatures).filter((value) => Number.isFinite(value)) : [];
+    const frameTemps = frame
+        ? Object.values(frame.temperatures).filter((v) => Number.isFinite(v))
+        : [];
     const dynamicMin = frameTemps.length ? Math.min(...frameTemps) : 15;
     const dynamicMax = frameTemps.length ? Math.max(...frameTemps) : 30;
     const legendMin = Math.min(15, dynamicMin);
     const legendMax = Math.max(30, dynamicMax);
     const scaleClamped = dynamicMin < 15 || dynamicMax > 30;
+    // outdoor at center; space nodes on a circle starting from top (-π/2)
+    const spaceNodes = nodes.filter((n) => n.type === "space");
+    const circleRadius = Math.min(CX, CY) - 72;
     const positions = new Map();
-    const spaceNodes = nodes.filter((node) => node.type === "space");
-    const radius = Math.min(width, height) / 2 - 40;
-    spaceNodes.forEach((node, index) => {
-        const angle = (index / Math.max(spaceNodes.length, 1)) * Math.PI * 2;
+    positions.set("outdoor", { x: CX, y: CY });
+    spaceNodes.forEach((node, i) => {
+        const angle = (i / Math.max(spaceNodes.length, 1)) * Math.PI * 2 - Math.PI / 2;
         positions.set(node.id, {
-            x: width / 2 + radius * Math.cos(angle),
-            y: height / 2 + radius * Math.sin(angle),
+            x: CX + circleRadius * Math.cos(angle),
+            y: CY + circleRadius * Math.sin(angle),
         });
     });
-    positions.set("outdoor", { x: width / 2, y: 40 });
-    return (_jsxs("section", { className: "rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)] p-4", children: [_jsxs("div", { className: "mb-3 flex flex-wrap items-end justify-between gap-3", children: [_jsxs("div", { children: [_jsxs("div", { className: "flex items-center gap-1.5", children: [_jsx("h3", { className: "text-sm font-semibold text-[color:var(--text-base)]", children: "\u0422\u0435\u043F\u043B\u043E\u0432\u043E\u0439 \u0433\u0440\u0430\u0444 \u0437\u043E\u043D" }), _jsx(MetricInfoTooltip, { ...resultsMetricInfo.rcBalance })] }), _jsx("p", { className: "mt-1 text-sm text-[color:var(--text-muted)]", children: "\u0423\u0441\u043B\u043E\u0432\u043D\u0430\u044F \u0437\u043E\u043D\u0430\u043B\u044C\u043D\u0430\u044F \u0441\u0435\u0442\u044C. \u0422\u043E\u043B\u0449\u0438\u043D\u0430 \u043B\u0438\u043D\u0438\u0438 \u043F\u0440\u043E\u043F\u043E\u0440\u0446\u0438\u043E\u043D\u0430\u043B\u044C\u043D\u0430 \u043F\u0440\u043E\u0432\u043E\u0434\u0438\u043C\u043E\u0441\u0442\u0438, \u0446\u0432\u0435\u0442 \u0443\u0437\u043B\u0430 \u2014 \u0442\u0435\u043A\u0443\u0449\u0435\u0439 \u0442\u0435\u043C\u043F\u0435\u0440\u0430\u0442\u0443\u0440\u0435. \u042D\u0442\u043E \u043D\u0435 CFD." })] }), _jsx(TemperatureScaleLegend, { caption: scaleClamped
+    // normalize edge widths to 1.5–5 px range
+    const conductances = edges.map((e) => e.conductance).filter(Number.isFinite);
+    const maxC = conductances.length ? Math.max(...conductances) : 1;
+    const minC = conductances.length ? Math.min(...conductances) : 0;
+    const rangeC = maxC - minC || 1;
+    const edgeStroke = (c) => 1.5 + ((c - minC) / rangeC) * 3.5;
+    return (_jsxs("section", { className: "rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)] p-4", children: [_jsxs("div", { className: "mb-3 flex flex-wrap items-end justify-between gap-3", children: [_jsxs("div", { children: [_jsxs("div", { className: "flex items-center gap-1.5", children: [_jsx("h3", { className: "text-sm font-semibold text-[color:var(--text-base)]", children: "\u0422\u0435\u043F\u043B\u043E\u0432\u043E\u0439 \u0433\u0440\u0430\u0444 \u0437\u043E\u043D" }), _jsx(MetricInfoTooltip, { ...resultsMetricInfo.rcBalance })] }), _jsx("p", { className: "mt-1 text-sm text-[color:var(--text-muted)]", children: "\u0423\u0441\u043B\u043E\u0432\u043D\u0430\u044F \u0437\u043E\u043D\u0430\u043B\u044C\u043D\u0430\u044F \u0441\u0435\u0442\u044C. \u0422\u043E\u043B\u0449\u0438\u043D\u0430 \u043B\u0438\u043D\u0438\u0438 \u2014 \u043E\u0442\u043D\u043E\u0441\u0438\u0442\u0435\u043B\u044C\u043D\u0430\u044F \u0442\u0435\u043F\u043B\u043E\u043F\u0440\u043E\u0432\u043E\u0434\u043D\u043E\u0441\u0442\u044C, \u0446\u0432\u0435\u0442 \u0443\u0437\u043B\u0430 \u2014 \u0442\u0435\u043C\u043F\u0435\u0440\u0430\u0442\u0443\u0440\u0430 \u043A\u0430\u0434\u0440\u0430." })] }), _jsx(TemperatureScaleLegend, { caption: scaleClamped
                             ? `Шкала ${legendMin.toFixed(0)}…${legendMax.toFixed(0)} °C (кадр: ${dynamicMin.toFixed(1)}…${dynamicMax.toFixed(1)} °C).`
-                            : `Шкала ${legendMin.toFixed(0)}…${legendMax.toFixed(0)} °C для узлов кадра.` })] }), _jsx("div", { className: "w-full overflow-x-auto", children: _jsxs("svg", { width: width, height: height, className: "max-w-full", children: [edges.map((edge) => {
+                            : `Шкала ${legendMin.toFixed(0)}…${legendMax.toFixed(0)} °C для узлов кадра.` })] }), _jsx("div", { className: "w-full overflow-x-auto", children: _jsxs("svg", { width: W, height: H, className: "max-w-full", style: { display: "block" }, children: [edges.map((edge, ei) => {
                             const from = positions.get(edge.from);
                             const to = positions.get(edge.to);
-                            if (!from || !to) {
+                            if (!from || !to)
                                 return null;
-                            }
-                            return (_jsx("line", { x1: from.x, y1: from.y, x2: to.x, y2: to.y, stroke: "var(--chart-edge)", strokeWidth: Math.max(1, edge.conductance * 4), strokeOpacity: 0.85 }, `${edge.from}-${edge.to}`));
+                            return (_jsx("line", { x1: from.x, y1: from.y, x2: to.x, y2: to.y, stroke: "var(--chart-edge)", strokeWidth: edgeStroke(edge.conductance), strokeOpacity: 0.6, strokeLinecap: "round" }, `e-${ei}`));
                         }), nodes.map((node) => {
                             const pos = positions.get(node.id);
-                            if (!pos) {
+                            if (!pos)
                                 return null;
-                            }
                             const temp = frame?.temperatures[node.id] ?? node.initialTemp;
                             const color = temperatureToColor(temp, legendMin, legendMax);
-                            const displayLabel = node.id === "outdoor" ? "Наружный воздух" : node.label;
+                            const isOutdoor = node.id === "outdoor";
                             const isSelected = selectedId === node.id;
-                            return (_jsxs("g", { onClick: () => node.type === "space" && onSelect(node.id), cursor: node.type === "space" ? "pointer" : "default", children: [_jsx("circle", { cx: pos.x, cy: pos.y, r: isSelected ? 18 : 14, fill: color, stroke: node.type === "space" ? "var(--text-base)" : "var(--text-soft)", strokeWidth: node.type === "space" ? 2 : 1, opacity: node.type === "space" ? 0.95 : 0.7 }), _jsx("text", { x: pos.x, y: pos.y + 30, textAnchor: "middle", className: "text-xs font-medium fill-[color:var(--text-muted)]", children: displayLabel }), _jsx("text", { x: pos.x, y: pos.y + 44, textAnchor: "middle", className: "text-[10px] fill-[color:var(--text-soft)]", children: formatTemperature(temp) })] }, node.id));
+                            const nodeR = isOutdoor ? 22 : isSelected ? 20 : 16;
+                            const displayLabel = isOutdoor ? "Наружный воздух" : node.label;
+                            const shortLabel = displayLabel.length > 14 ? `${displayLabel.slice(0, 13)}…` : displayLabel;
+                            // radial label: away from center for space nodes, below for outdoor
+                            let lx;
+                            let ly;
+                            if (isOutdoor) {
+                                lx = pos.x;
+                                ly = pos.y + nodeR + 15;
+                            }
+                            else {
+                                const dx = pos.x - CX;
+                                const dy = pos.y - CY;
+                                const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+                                const offset = nodeR + 14;
+                                lx = pos.x + (dx / dist) * offset;
+                                ly = pos.y + (dy / dist) * offset;
+                            }
+                            return (_jsxs("g", { onClick: () => node.type === "space" && onSelect(node.id), style: { cursor: node.type === "space" ? "pointer" : "default" }, children: [_jsx("circle", { cx: pos.x, cy: pos.y, r: nodeR, fill: color, stroke: isSelected ? "var(--accent-base)" : isOutdoor ? "var(--text-soft)" : "var(--text-base)", strokeWidth: isSelected ? 2.5 : 1.5, opacity: isOutdoor ? 0.75 : 0.95 }), _jsx("text", { x: pos.x, y: pos.y, textAnchor: "middle", dominantBaseline: "central", fontSize: 9, fontWeight: 500, fill: "var(--text-base)", children: formatTemperature(temp) }), _jsx("text", { x: lx, y: ly, textAnchor: "middle", dominantBaseline: "central", fontSize: 10, fontWeight: isSelected ? 600 : 400, fill: "var(--text-muted)", children: shortLabel })] }, node.id));
                         })] }) })] }));
 }
 function formatFrameTime(timeHours) {
@@ -349,15 +392,5 @@ function formatFrameTime(timeHours) {
     const hours = Math.floor((totalMinutes % (24 * 60)) / 60);
     const minutes = totalMinutes % 60;
     return days > 0 ? `день ${days + 1}, ${hours}:${String(minutes).padStart(2, "0")}` : `${hours}:${String(minutes).padStart(2, "0")}`;
-}
-function formatMoney(value) {
-    if (value == null || !Number.isFinite(value)) {
-        return "—";
-    }
-    return new Intl.NumberFormat("ru-RU", {
-        style: "currency",
-        currency: "RUB",
-        maximumFractionDigits: 0,
-    }).format(value);
 }
 export default ResultsPanel;

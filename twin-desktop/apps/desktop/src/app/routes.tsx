@@ -75,6 +75,7 @@ export const routes: AppRoute[] = [
     path: "/drawing",
     title: "Чертёж",
     component: DrawingSheetPage,
+    hiddenInNav: true,
   },
   {
     id: "settings",

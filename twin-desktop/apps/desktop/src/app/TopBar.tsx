@@ -21,7 +21,6 @@ export function TopBar({ currentPath }: TopBarProps) {
             route.id === "scenarios" ||
             route.id === "results" ||
             route.id === "formulas" ||
-            route.id === "drawing" ||
             route.id === "settings")
       ),
     []

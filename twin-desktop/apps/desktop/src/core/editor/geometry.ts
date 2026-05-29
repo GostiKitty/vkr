@@ -22,6 +22,39 @@ export function snapToPoint(point: Vec2, anchors: readonly Vec2[], tolerance: nu
   return { x: bestPointX, y: bestPointY };
 }
 
+/**
+ * Vertex snap first, then independent axis alignment using only anchors that are
+ * also close on the perpendicular axis (avoids snapping X to a far-away point).
+ */
+export function snapAxesToNearbyAnchors(
+  point: Vec2,
+  anchors: readonly Vec2[],
+  axisTolerance: number,
+  vertexTolerance = 0.25
+): Vec2 {
+  const vertexSnap = snapToPoint(point, anchors, vertexTolerance);
+  if (Math.hypot(vertexSnap.x - point.x, vertexSnap.y - point.y) > 1e-6) {
+    return vertexSnap;
+  }
+  let snappedX = point.x;
+  let snappedY = point.y;
+  let bestX = axisTolerance;
+  let bestY = axisTolerance;
+  anchors.forEach((anchor) => {
+    const dx = Math.abs(anchor.x - point.x);
+    if (dx < bestX && Math.abs(anchor.y - point.y) <= axisTolerance) {
+      bestX = dx;
+      snappedX = anchor.x;
+    }
+    const dy = Math.abs(anchor.y - point.y);
+    if (dy < bestY && Math.abs(anchor.x - point.x) <= axisTolerance) {
+      bestY = dy;
+      snappedY = anchor.y;
+    }
+  });
+  return { x: snappedX, y: snappedY };
+}
+
 export function snapToSegment(point: Vec2, walls: readonly Wall[], tolerance: number): SegmentSnapCandidate | null {
   let best: SegmentSnapCandidate | null = null;
   walls.forEach((wall) => {
@@ -39,6 +72,28 @@ export function snapToSegment(point: Vec2, walls: readonly Wall[], tolerance: nu
     }
   });
   return best;
+}
+
+/** Snap to the nearest edge of one or more closed polygons (e.g. room contour on a reference level). */
+export function snapToPolygonBoundary(point: Vec2, polygons: readonly Vec2[][], tolerance: number): Vec2 | null {
+  let bestDistance = tolerance;
+  let bestPoint: Vec2 | null = null;
+  polygons.forEach((polygon) => {
+    if (polygon.length < 2) {
+      return;
+    }
+    for (let index = 0; index < polygon.length; index += 1) {
+      const start = polygon[index];
+      const end = polygon[(index + 1) % polygon.length];
+      const projection = projectPointToSegment(point, start, end);
+      if (!projection || projection.distance > bestDistance) {
+        continue;
+      }
+      bestDistance = projection.distance;
+      bestPoint = projection.point;
+    }
+  });
+  return bestPoint;
 }
 
 export function detectIntersection(a1: Vec2, a2: Vec2, b1: Vec2, b2: Vec2): Vec2 | null {

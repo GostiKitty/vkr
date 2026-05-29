@@ -3,6 +3,7 @@ import type { BuildingModel } from "../../entities/geometry/types";
 import { buildAdjacencyGraph } from "../graph/adjacency";
 import { buildGeometryRenderModel } from "../geometry/bimPipeline";
 import { airflowFromACH, ventilationLoss } from "./formulas";
+import { calculateAirSpecificWeight } from "./sp50/calculations";
 
 const DEFAULT_FALLBACK_ACH = 0.5;
 const DEFAULT_AIR_DENSITY_KG_M3 = 1.204;
@@ -324,19 +325,18 @@ function resolvePressureBasedLeakage(
   );
   const stackHeightM = positiveOrFallback(input?.stackHeightM, geometry.stackHeightM);
   const mechanicalPressurePa = nonNegativeOrFallback(input?.mechanicalPressurePa, 0);
-  const indoorKelvin = Math.max(context.indoorTemperatureC + ABSOLUTE_ZERO_OFFSET_K, 1);
-  const pressureWindPa = 0.5 * density * windSpeedMps * windSpeedMps * windPressureCoefficient;
-  const pressureStackPa =
-    density *
-    DEFAULT_GRAVITY_M_S2 *
-    stackHeightM *
-    Math.max(0, context.indoorTemperatureC - context.outdoorTemperatureC) /
-    indoorKelvin;
+  // Нормативные формулы СП 50.13330.2024 (формулы Г.3, Г.4):
+  // ΔP_wind = 0.03 * γout * v²  (коэффициент 0.03 включает Cp и долю от полного напора)
+  // ΔP_stack = 0.55 * H * (γout − γin)  где γ = 3463/(273+T) — удельный вес воздуха, Па/м
+  const gammaOut = calculateAirSpecificWeight(context.outdoorTemperatureC);
+  const gammaIn = calculateAirSpecificWeight(context.indoorTemperatureC);
+  const pressureWindPa = 0.03 * gammaOut * windSpeedMps * windSpeedMps * windPressureCoefficient;
+  const pressureStackPa = Math.max(0, 0.55 * stackHeightM * (gammaOut - gammaIn));
   const pressureTotalPa = Math.max(0, pressureWindPa + pressureStackPa + mechanicalPressurePa);
 
   const assumptions = [
-    "ΔP_wind = 0.5 * rho * v^2 * Cp.",
-    "ΔP_stack = rho * g * h * (Tin - Tout) / TinK.",
+    "ΔP_wind = 0.03 * γout * v² * Cp (СП 50.13330.2024, формула Г.4).",
+    "ΔP_stack = 0.55 * H * (γout − γin), γ = 3463/(273+T) (СП 50.13330.2024, формула Г.3).",
   ];
   if ((input?.mechanicalPressurePa ?? null) != null) {
     assumptions.push("К суммарному перепаду добавлено заданное давление механической вентиляции.");

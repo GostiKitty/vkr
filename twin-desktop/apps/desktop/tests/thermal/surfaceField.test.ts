@@ -190,3 +190,179 @@ test("surface thermal field generates patch diagnostics and local gradients", ()
     throw new Error("A non-empty surface field result should produce a non-empty Three.js overlay group.");
   }
 });
+
+test("interfloor floor and ceiling surfaces couple to the adjacent level air temperature", () => {
+  const footprint = [
+    { x: 0, y: 0 },
+    { x: 4, y: 0 },
+    { x: 4, y: 4 },
+    { x: 0, y: 4 },
+  ];
+  const model: BuildingModel = {
+    levels: [
+      { id: "level-1", name: "Level 1", elevation_m: 0, height_m: 3 },
+      { id: "level-2", name: "Level 2", elevation_m: 3, height_m: 3 },
+    ],
+    rooms: [
+      { id: "room-l1", name: "Lower", levelId: "level-1", polygon: footprint },
+      { id: "room-l2", name: "Upper", levelId: "level-2", polygon: footprint },
+    ],
+    walls: [
+      { id: "wall-south", levelId: "level-1", a: { x: 0, y: 0 }, b: { x: 4, y: 0 }, thickness_m: 0.24, height_m: 3, wallAssemblyId: "masonry" },
+      { id: "wall-east", levelId: "level-1", a: { x: 4, y: 0 }, b: { x: 4, y: 4 }, thickness_m: 0.24, height_m: 3, wallAssemblyId: "masonry" },
+      { id: "wall-north", levelId: "level-1", a: { x: 4, y: 4 }, b: { x: 0, y: 4 }, thickness_m: 0.24, height_m: 3, wallAssemblyId: "masonry" },
+      { id: "wall-west", levelId: "level-1", a: { x: 0, y: 4 }, b: { x: 0, y: 0 }, thickness_m: 0.24, height_m: 3, wallAssemblyId: "masonry" },
+      { id: "wall-south-2", levelId: "level-2", a: { x: 0, y: 0 }, b: { x: 4, y: 0 }, thickness_m: 0.24, height_m: 3, wallAssemblyId: "masonry" },
+      { id: "wall-east-2", levelId: "level-2", a: { x: 4, y: 0 }, b: { x: 4, y: 4 }, thickness_m: 0.24, height_m: 3, wallAssemblyId: "masonry" },
+      { id: "wall-north-2", levelId: "level-2", a: { x: 4, y: 4 }, b: { x: 0, y: 4 }, thickness_m: 0.24, height_m: 3, wallAssemblyId: "masonry" },
+      { id: "wall-west-2", levelId: "level-2", a: { x: 0, y: 4 }, b: { x: 0, y: 0 }, thickness_m: 0.24, height_m: 3, wallAssemblyId: "masonry" },
+    ],
+    roofs: [
+      {
+        id: "roof-2",
+        levelId: "level-2",
+        name: "Roof",
+        kind: "flat",
+        boundary: footprint,
+        elevationBase_m: 6,
+        thickness_m: 0.28,
+        layers: [{ materialId: "reinforced_concrete", thickness_m: 0.18 }],
+      },
+    ],
+    floorSlabs: [
+      {
+        id: "slab-inter",
+        levelId: "level-1",
+        name: "Interfloor",
+        kind: "interfloor",
+        boundary: footprint,
+        elevation_m: 3,
+        thickness_m: 0.24,
+        layers: [{ materialId: "reinforced_concrete", thickness_m: 0.24 }],
+      },
+    ],
+    doors: [],
+    windows: [],
+    pipes: [],
+    ducts: [],
+    equipment: [],
+    sensors: [],
+    scenarios: [],
+    activeScenarioId: null,
+    events: [],
+    meta: {},
+  };
+
+  const result = buildSurfaceFieldResult({
+    model,
+    roomAirTemperaturesC: { "room-l1": 24, "room-l2": 18 },
+    outdoorTemperatureC: -2,
+    indoorRelativeHumidity: 0.5,
+  });
+
+  const lowerCeiling = result.surfaces.find((surface) => surface.id === "surface:ceiling:room-l1");
+  const upperFloor = result.surfaces.find((surface) => surface.id === "surface:floor:room-l2");
+  if (!lowerCeiling || !upperFloor) {
+    throw new Error("Expected interfloor-linked floor and ceiling surface descriptors.");
+  }
+  if (lowerCeiling.boundaryType !== "internal" || upperFloor.boundaryType !== "internal") {
+    throw new Error("Interfloor horizontal surfaces should use internal boundary coupling.");
+  }
+  if (!(lowerCeiling.baseTemperatureC > 19.5)) {
+    throw new Error("Warm lower room should pull the interfloor ceiling above a cold neutral offset.");
+  }
+  if (!(upperFloor.baseTemperatureC > 19)) {
+    throw new Error("Upper floor should inherit warmth from the heated room below through the slab.");
+  }
+  if (!(upperFloor.baseTemperatureC < lowerCeiling.baseTemperatureC + 0.2)) {
+    throw new Error("Upper floor and lower ceiling should converge toward a shared slab temperature.");
+  }
+});
+
+test("upper-level wall patches are warmer near the floor when the level below is heated", () => {
+  const footprint = [
+    { x: 0, y: 0 },
+    { x: 4, y: 0 },
+    { x: 4, y: 4 },
+    { x: 0, y: 4 },
+  ];
+  const model: BuildingModel = {
+    levels: [
+      { id: "level-1", name: "Level 1", elevation_m: 0, height_m: 3 },
+      { id: "level-2", name: "Level 2", elevation_m: 3, height_m: 3 },
+    ],
+    rooms: [
+      { id: "room-l1", name: "Lower", levelId: "level-1", polygon: footprint },
+      { id: "room-l2", name: "Upper", levelId: "level-2", polygon: footprint },
+    ],
+    walls: [
+      { id: "wall-south-2", levelId: "level-2", a: { x: 0, y: 0 }, b: { x: 4, y: 0 }, thickness_m: 0.24, height_m: 3, wallAssemblyId: "masonry" },
+      { id: "wall-east-2", levelId: "level-2", a: { x: 4, y: 0 }, b: { x: 4, y: 4 }, thickness_m: 0.24, height_m: 3, wallAssemblyId: "masonry" },
+      { id: "wall-north-2", levelId: "level-2", a: { x: 4, y: 4 }, b: { x: 0, y: 4 }, thickness_m: 0.24, height_m: 3, wallAssemblyId: "masonry" },
+      { id: "wall-west-2", levelId: "level-2", a: { x: 0, y: 4 }, b: { x: 0, y: 0 }, thickness_m: 0.24, height_m: 3, wallAssemblyId: "masonry" },
+      { id: "wall-south", levelId: "level-1", a: { x: 0, y: 0 }, b: { x: 4, y: 0 }, thickness_m: 0.24, height_m: 3, wallAssemblyId: "masonry" },
+      { id: "wall-east", levelId: "level-1", a: { x: 4, y: 0 }, b: { x: 4, y: 4 }, thickness_m: 0.24, height_m: 3, wallAssemblyId: "masonry" },
+      { id: "wall-north", levelId: "level-1", a: { x: 4, y: 4 }, b: { x: 0, y: 4 }, thickness_m: 0.24, height_m: 3, wallAssemblyId: "masonry" },
+      { id: "wall-west", levelId: "level-1", a: { x: 0, y: 4 }, b: { x: 0, y: 0 }, thickness_m: 0.24, height_m: 3, wallAssemblyId: "masonry" },
+    ],
+    roofs: [
+      {
+        id: "roof-2",
+        levelId: "level-2",
+        name: "Roof",
+        kind: "flat",
+        boundary: footprint,
+        elevationBase_m: 6,
+        thickness_m: 0.28,
+        layers: [{ materialId: "reinforced_concrete", thickness_m: 0.18 }],
+      },
+    ],
+    floorSlabs: [
+      {
+        id: "slab-inter",
+        levelId: "level-1",
+        name: "Interfloor",
+        kind: "interfloor",
+        boundary: footprint,
+        elevation_m: 3,
+        thickness_m: 0.24,
+        layers: [{ materialId: "reinforced_concrete", thickness_m: 0.24 }],
+      },
+    ],
+    doors: [],
+    windows: [],
+    pipes: [],
+    ducts: [],
+    equipment: [],
+    sensors: [],
+    scenarios: [],
+    activeScenarioId: null,
+    events: [],
+    meta: {},
+  };
+
+  const result = buildSurfaceFieldResult({
+    model,
+    roomAirTemperaturesC: { "room-l1": 24, "room-l2": 18 },
+    outdoorTemperatureC: -2,
+    indoorRelativeHumidity: 0.5,
+  });
+
+  const upperWallPatches = result.patches.filter(
+    (patch) => patch.levelId === "level-2" && patch.surfaceKind === "wall"
+  );
+  if (!upperWallPatches.length) {
+    throw new Error("Expected wall patches on the upper level.");
+  }
+  const lowestRowPatches = upperWallPatches.filter((patch) => patch.row === 0);
+  const highestRowPatches = upperWallPatches.filter(
+    (patch) => patch.row === Math.max(...upperWallPatches.map((entry) => entry.row))
+  );
+  const avgLow =
+    lowestRowPatches.reduce((sum, patch) => sum + patch.patchTemperatureC, 0) / lowestRowPatches.length;
+  const avgHigh =
+    highestRowPatches.reduce((sum, patch) => sum + patch.patchTemperatureC, 0) / highestRowPatches.length;
+  if (!(avgLow > avgHigh + 0.25)) {
+    throw new Error("Upper-level wall base should be warmer than the upper wall zone due to heat from below.");
+  }
+});

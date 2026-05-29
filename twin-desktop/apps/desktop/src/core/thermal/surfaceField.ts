@@ -43,6 +43,9 @@ const DEFAULT_ROOM_MEAN_RADIATIVE_COUPLING = 0.11;
 const DEFAULT_NEUTRAL_FLOOR_OFFSET_C = 0.4;
 const DEFAULT_NEUTRAL_CEILING_OFFSET_C = 0.25;
 const DEFAULT_GROUND_OFFSET_C = 4;
+/** How far warmth from the level below rises along an upper-level wall (m).
+ *  Increased from 1.45 → 2.1 so the gradient spans visibly across a 3 m wall. */
+const DEFAULT_WALL_BELOW_WARMTH_RISE_M = 2.1;
 
 export type SurfaceFieldSurfaceKind =
   | "wall"
@@ -212,6 +215,9 @@ interface SurfaceDescriptor {
   localPolygon: Vec2[];
   centroid: Vec3;
   baseTemperatureC: number;
+  /** Max extra °C at the wall base from the heated level below (0 = none). */
+  warmthFromLevelBelowMaxC: number;
+  belowLevelId: string | null;
 }
 
 interface SurfaceSample {
@@ -662,8 +668,11 @@ function buildSurfaceDescriptors(args: {
       surface,
       openings,
       roomIds,
+      roomVolumes: args.roomVolumes,
       roomAirTemperatures: args.roomAirTemperatures,
       levelElevationById: args.levelElevationById,
+      levelHeightById: args.levelHeightById,
+      slabs: args.renderGeometry.floorSlabs,
       overlayOffsetM: args.overlayOffsetM,
       warnings: args.warnings,
       outdoorTemperatureC: args.outdoorTemperatureC,
@@ -674,6 +683,7 @@ function buildSurfaceDescriptors(args: {
   args.roomVolumes.forEach((room) => {
     const floorDescriptor = buildHorizontalSurfaceDescriptor({
       room,
+      roomVolumes: args.roomVolumes,
       roomAirTemperatures: args.roomAirTemperatures,
       levelElevationById: args.levelElevationById,
       levelHeightById: args.levelHeightById,
@@ -684,6 +694,7 @@ function buildSurfaceDescriptors(args: {
     });
     const ceilingDescriptor = buildHorizontalSurfaceDescriptor({
       room,
+      roomVolumes: args.roomVolumes,
       roomAirTemperatures: args.roomAirTemperatures,
       levelElevationById: args.levelElevationById,
       levelHeightById: args.levelHeightById,
@@ -698,12 +709,47 @@ function buildSurfaceDescriptors(args: {
   return descriptors;
 }
 
+function computeWallWarmthFromLevelBelow(args: {
+  wallLevelId: string;
+  roomAirTemperatureC: number;
+  wallMidPlan: Vec2;
+  roomVolumes: RoomVolumeDescriptor[];
+  roomAirTemperatures: Map<string, number>;
+  levelElevationById: Map<string, number>;
+  levelHeightById: Map<string, number>;
+  slabs: FloorSlab[];
+}): { belowLevelId: string | null; warmthFromLevelBelowMaxC: number } {
+  const belowLevelId = findLevelIdDirectlyBelow(args.wallLevelId, args.levelElevationById, args.levelHeightById);
+  if (!belowLevelId) {
+    return { belowLevelId: null, warmthFromLevelBelowMaxC: 0 };
+  }
+  // Heat always conducts through the floor between levels whenever there is a room
+  // directly below — regardless of whether the user explicitly drew an interfloor slab.
+  // The slab element is optional geometry; the physical coupling exists either way.
+  const belowRoom = args.roomVolumes.find(
+    (room) => room.levelId === belowLevelId && polygonContainsPoint(args.wallMidPlan, room.polygon)
+  );
+  if (!belowRoom) {
+    return { belowLevelId, warmthFromLevelBelowMaxC: 0 };
+  }
+  const belowAirC = args.roomAirTemperatures.get(belowRoom.roomId) ?? args.roomAirTemperatureC;
+  const airDeltaC = Math.max(0, belowAirC - args.roomAirTemperatureC);
+  const conductiveBleedC = airDeltaC > 0.08 ? airDeltaC * 0.78 + 0.25 : 0.55;
+  return {
+    belowLevelId,
+    warmthFromLevelBelowMaxC: Math.min(conductiveBleedC, 4.2),
+  };
+}
+
 function buildWallSurfaceDescriptors(args: {
   surface: ThermalSurfaceEstimate;
   openings: OpeningCutDescriptor[];
   roomIds: Set<string>;
+  roomVolumes: RoomVolumeDescriptor[];
   roomAirTemperatures: Map<string, number>;
   levelElevationById: Map<string, number>;
+  levelHeightById: Map<string, number>;
+  slabs: FloorSlab[];
   overlayOffsetM: number;
   warnings: string[];
   outdoorTemperatureC: number;
@@ -725,6 +771,10 @@ function buildWallSurfaceDescriptors(args: {
   const baseWallStart = { x: wall.a.x, y: levelElevationM, z: wall.a.y } satisfies Vec3;
   const halfThickness = Math.max(wall.thickness_m * 0.5, 0.04);
   const totalResistance = Math.max(args.surface.effectiveR_m2K_W, DEFAULT_INTERNAL_SURFACE_RESISTANCE + DEFAULT_EXTERNAL_SURFACE_RESISTANCE + 0.12);
+  const wallMidPlan = {
+    x: (wall.a.x + wall.b.x) * 0.5,
+    y: (wall.a.y + wall.b.y) * 0.5,
+  };
 
   const createDescriptorForRoom = (
     roomId: string | null,
@@ -766,6 +816,26 @@ function buildWallSurfaceDescriptors(args: {
       wallLengthM * 0.5,
       Math.max(wall.height_m * 0.5, 0.1)
     );
+    // Offset the check point 0.3 m into the room interior so that
+    // polygonContainsPoint (ray-casting) succeeds even when the wall segment
+    // lies exactly on the boundary of the lower floor's room polygon — which
+    // is the common case for exterior walls and produces `false` with a strict
+    // boundary test.
+    const WALL_BELOW_CHECK_OFFSET_M = 0.3;
+    const wallInteriorCheckPlan: Vec2 = {
+      x: wallMidPlan.x + normalPlan.x * sideSign * WALL_BELOW_CHECK_OFFSET_M,
+      y: wallMidPlan.y + normalPlan.y * sideSign * WALL_BELOW_CHECK_OFFSET_M,
+    };
+    const { belowLevelId, warmthFromLevelBelowMaxC } = computeWallWarmthFromLevelBelow({
+      wallLevelId: wall.levelId,
+      roomAirTemperatureC: airTemperatureC,
+      wallMidPlan: wallInteriorCheckPlan,
+      roomVolumes: args.roomVolumes,
+      roomAirTemperatures: args.roomAirTemperatures,
+      levelElevationById: args.levelElevationById,
+      levelHeightById: args.levelHeightById,
+      slabs: args.slabs,
+    });
     descriptors.push({
       id: `surface:wall:${wall.id}:${roomId}`,
       roomId,
@@ -798,6 +868,8 @@ function buildWallSurfaceDescriptors(args: {
       ],
       centroid,
       baseTemperatureC,
+      warmthFromLevelBelowMaxC,
+      belowLevelId,
     });
 
     args.openings.forEach((opening) => {
@@ -863,6 +935,8 @@ function buildWallSurfaceDescriptors(args: {
           Math.max(0.12, opening.heightM) * 0.5
         ),
         baseTemperatureC: openingBaseTemperatureC,
+        warmthFromLevelBelowMaxC: 0,
+        belowLevelId: null,
       });
     });
   };
@@ -896,8 +970,110 @@ function buildWallSurfaceDescriptors(args: {
   return descriptors;
 }
 
+function findLevelIdDirectlyBelow(
+  levelId: string,
+  levelElevationById: Map<string, number>,
+  levelHeightById: Map<string, number>
+): string | null {
+  const roomElevationM = levelElevationById.get(levelId) ?? 0;
+  let best: { levelId: string; top_m: number } | null = null;
+  levelElevationById.forEach((elevationM, candidateId) => {
+    if (candidateId === levelId) {
+      return;
+    }
+    const topM = elevationM + Math.max(levelHeightById.get(candidateId) ?? 3, 2.2);
+    if (topM > roomElevationM + 0.15) {
+      return;
+    }
+    if (!best || topM > best.top_m) {
+      best = { levelId: candidateId, top_m: topM };
+    }
+  });
+  if (!best || Math.abs(best.top_m - roomElevationM) > 0.15) {
+    return null;
+  }
+  return best.levelId;
+}
+
+function findLevelIdDirectlyAbove(
+  levelId: string,
+  levelElevationById: Map<string, number>,
+  levelHeightById: Map<string, number>
+): string | null {
+  const roomTopM = (levelElevationById.get(levelId) ?? 0) + Math.max(levelHeightById.get(levelId) ?? 3, 2.2);
+  let best: { levelId: string; elevation_m: number } | null = null;
+  levelElevationById.forEach((elevationM, candidateId) => {
+    if (candidateId === levelId) {
+      return;
+    }
+    if (elevationM + 0.15 < roomTopM) {
+      return;
+    }
+    if (!best || elevationM < best.elevation_m) {
+      best = { levelId: candidateId, elevation_m: elevationM };
+    }
+  });
+  if (!best || Math.abs(best.elevation_m - roomTopM) > 0.15) {
+    return null;
+  }
+  return best.levelId;
+}
+
+function resolveInterfloorSlabForHorizontalSurface(args: {
+  room: RoomVolumeDescriptor;
+  kind: "floor" | "ceiling";
+  centroid2D: Vec2;
+  slabs: FloorSlab[];
+  levelElevationById: Map<string, number>;
+  levelHeightById: Map<string, number>;
+}): FloorSlab | undefined {
+  if (args.kind === "ceiling") {
+    return args.slabs.find(
+      (slab) =>
+        slab.levelId === args.room.levelId &&
+        slab.kind === "interfloor" &&
+        polygonContainsPoint(args.centroid2D, slab.boundary)
+    );
+  }
+  const belowLevelId = findLevelIdDirectlyBelow(args.room.levelId, args.levelElevationById, args.levelHeightById);
+  if (!belowLevelId) {
+    return undefined;
+  }
+  return args.slabs.find(
+    (slab) =>
+      slab.levelId === belowLevelId &&
+      slab.kind === "interfloor" &&
+      polygonContainsPoint(args.centroid2D, slab.boundary)
+  );
+}
+
+function resolveFloorSlabForRoom(args: {
+  room: RoomVolumeDescriptor;
+  centroid2D: Vec2;
+  slabs: FloorSlab[];
+  levelElevationById: Map<string, number>;
+  levelHeightById: Map<string, number>;
+}): FloorSlab | undefined {
+  const onLevel = args.slabs.filter(
+    (slab) => slab.levelId === args.room.levelId && polygonContainsPoint(args.centroid2D, slab.boundary)
+  );
+  const groundOrBasement = onLevel.find((slab) => slab.kind === "ground" || slab.kind === "basement");
+  if (groundOrBasement) {
+    return groundOrBasement;
+  }
+  return resolveInterfloorSlabForHorizontalSurface({
+    room: args.room,
+    kind: "floor",
+    centroid2D: args.centroid2D,
+    slabs: args.slabs,
+    levelElevationById: args.levelElevationById,
+    levelHeightById: args.levelHeightById,
+  });
+}
+
 function buildHorizontalSurfaceDescriptor(args: {
   room: RoomVolumeDescriptor;
+  roomVolumes: RoomVolumeDescriptor[];
   roomAirTemperatures: Map<string, number>;
   levelElevationById: Map<string, number>;
   levelHeightById: Map<string, number>;
@@ -914,9 +1090,40 @@ function buildHorizontalSurfaceDescriptor(args: {
   const matchingRoof = args.roofs.find(
     (roof) => roof.levelId === args.room.levelId && polygonContainsPoint(centroid2D, roof.boundary)
   );
-  const matchingSlab = args.slabs.find(
-    (slab) => slab.levelId === args.room.levelId && polygonContainsPoint(centroid2D, slab.boundary)
-  );
+  const matchingSlab =
+    args.kind === "floor"
+      ? resolveFloorSlabForRoom({
+          room: args.room,
+          centroid2D,
+          slabs: args.slabs,
+          levelElevationById: args.levelElevationById,
+          levelHeightById: args.levelHeightById,
+        })
+      : undefined;
+  const interfloorSlab = resolveInterfloorSlabForHorizontalSurface({
+    room: args.room,
+    kind: args.kind,
+    centroid2D,
+    slabs: args.slabs,
+    levelElevationById: args.levelElevationById,
+    levelHeightById: args.levelHeightById,
+  });
+  const adjacentLevelId =
+    args.kind === "ceiling"
+      ? findLevelIdDirectlyAbove(args.room.levelId, args.levelElevationById, args.levelHeightById)
+      : findLevelIdDirectlyBelow(args.room.levelId, args.levelElevationById, args.levelHeightById);
+  // Look for a room on the adjacent level regardless of whether an explicit
+  // interfloor slab element exists — physical conduction happens in any case.
+  const adjacentRoomAcrossSlab =
+    adjacentLevelId
+      ? args.roomVolumes.find(
+          (entry) => entry.levelId === adjacentLevelId && polygonContainsPoint(centroid2D, entry.polygon)
+        ) ?? null
+      : null;
+  const adjacentRoomAirTemperatureC =
+    adjacentRoomAcrossSlab !== null
+      ? args.roomAirTemperatures.get(adjacentRoomAcrossSlab.roomId) ?? roomAirTemperatureC
+      : null;
 
   // Если у крыши heatedSide = "above" — значит тёплое помещение НАД крышей
   // (холодный чердак снизу), крыша не является внешним ограждением этой комнаты
@@ -926,6 +1133,13 @@ function buildHorizontalSurfaceDescriptor(args: {
     if (args.kind === "ceiling" && matchingRoof && roofHeatedBelow) {
       return resolveConstructionResistance(matchingRoof.layers, 2.7);
     }
+    // Use the explicit slab layers when available; otherwise fall back to a
+    // reasonable interfloor default (R = 2.2 m²K/W, ~0.2 m reinforced concrete slab).
+    if (adjacentRoomAcrossSlab) {
+      return interfloorSlab
+        ? resolveConstructionResistance(interfloorSlab.layers, 2.2)
+        : 2.2;
+    }
     if (args.kind === "floor" && matchingSlab) {
       return resolveConstructionResistance(matchingSlab.layers, matchingSlab.kind === "ground" ? 3.4 : 2.2);
     }
@@ -933,6 +1147,10 @@ function buildHorizontalSurfaceDescriptor(args: {
   })();
 
   const boundaryType = (() => {
+    // Internal boundary: adjacent heated room exists (slab element is optional geometry)
+    if (adjacentRoomAcrossSlab && adjacentRoomAirTemperatureC !== null) {
+      return "internal" as const;
+    }
     if (args.kind === "ceiling" && matchingRoof && roofHeatedBelow) {
       return "external" as const;
     }
@@ -946,6 +1164,9 @@ function buildHorizontalSurfaceDescriptor(args: {
   })();
 
   const boundaryTemperatureC = (() => {
+    if (adjacentRoomAcrossSlab && adjacentRoomAirTemperatureC !== null) {
+      return adjacentRoomAirTemperatureC;
+    }
     if (args.kind === "ceiling" && matchingRoof && roofHeatedBelow) {
       return args.outdoorTemperatureC;
     }
@@ -958,11 +1179,14 @@ function buildHorizontalSurfaceDescriptor(args: {
     return roomAirTemperatureC - DEFAULT_NEUTRAL_CEILING_OFFSET_C;
   })();
 
-  const surfaceResistanceM2K_W = DEFAULT_INTERNAL_SURFACE_RESISTANCE;
+  const surfaceResistanceM2K_W =
+    boundaryType === "internal" ? DEFAULT_INTERNAL_COUPLING_SURFACE_RESISTANCE : DEFAULT_INTERNAL_SURFACE_RESISTANCE;
   const effectiveResistance =
-    boundaryType === "neutral"
-      ? Math.max(totalResistance, surfaceResistanceM2K_W + 0.22)
-      : Math.max(totalResistance, surfaceResistanceM2K_W + DEFAULT_EXTERNAL_SURFACE_RESISTANCE + 0.2);
+    boundaryType === "internal"
+      ? Math.max(totalResistance + DEFAULT_INTERNAL_COUPLING_SURFACE_RESISTANCE * 2, 0.24)
+      : boundaryType === "neutral"
+        ? Math.max(totalResistance, surfaceResistanceM2K_W + 0.22)
+        : Math.max(totalResistance, surfaceResistanceM2K_W + DEFAULT_EXTERNAL_SURFACE_RESISTANCE + 0.2);
   const baseTemperatureC =
     boundaryType === "neutral"
       ? roomAirTemperatureC -
@@ -1011,6 +1235,8 @@ function buildHorizontalSurfaceDescriptor(args: {
     localPolygon: polygon.map((point) => ({ x: point.x, y: point.y })),
     centroid: { x: centroid2D.x, y: elevationM, z: centroid2D.y },
     baseTemperatureC: baseTemperatureC,
+    warmthFromLevelBelowMaxC: 0,
+    belowLevelId: null,
   };
 }
 
@@ -1163,21 +1389,37 @@ function sampleSurfaceAtPoint(
       const isSameLevel = source.levelId === surface.levelId;
 
       if (!isSameLevel) {
-        // Inter-level effect: only meaningful for floor/ceiling surfaces.
-        if (!isHorizontalSurface) return null;
-        // Use horizontal XZ distance so the effect is driven by room position,
-        // not by the elevation gap between levels.
-        const horizDistM = horizontalDistanceToSource(worldPoint, source);
-        const INTER_LEVEL_RADIUS_M = 1.8;
-        if (horizDistM > INTER_LEVEL_RADIUS_M * 3.0) return null;
-        const VERTICAL_TRANSFER_FACTOR = 0.25;
-        const MAX_INTER_LEVEL_DELTA_C = 2.5;
-        const deltaTMaxC = resolveSourceDeltaTMaxC(source);
-        const falloff = Math.exp((-1.4 * horizDistM) / INTER_LEVEL_RADIUS_M);
-        return {
-          id: source.id,
-          deltaC: Math.min(deltaTMaxC * falloff * VERTICAL_TRANSFER_FACTOR, MAX_INTER_LEVEL_DELTA_C),
-        };
+        if (isHorizontalSurface) {
+          const horizDistM = horizontalDistanceToSource(worldPoint, source);
+          const INTER_LEVEL_RADIUS_M = 1.8;
+          if (horizDistM > INTER_LEVEL_RADIUS_M * 3.0) return null;
+          const VERTICAL_TRANSFER_FACTOR = 0.25;
+          const MAX_INTER_LEVEL_DELTA_C = 2.5;
+          const deltaTMaxC = resolveSourceDeltaTMaxC(source);
+          const falloff = Math.exp((-1.4 * horizDistM) / INTER_LEVEL_RADIUS_M);
+          return {
+            id: source.id,
+            deltaC: Math.min(deltaTMaxC * falloff * VERTICAL_TRANSFER_FACTOR, MAX_INTER_LEVEL_DELTA_C),
+          };
+        }
+        if (
+          surface.kind === "wall" &&
+          surface.belowLevelId &&
+          source.levelId === surface.belowLevelId &&
+          surface.warmthFromLevelBelowMaxC > 0.05
+        ) {
+          const horizDistM = horizontalDistanceToSource(worldPoint, source);
+          const INTER_LEVEL_RADIUS_M = 1.8;
+          if (horizDistM > INTER_LEVEL_RADIUS_M * 3.0) return null;
+          const heightAttenuation = Math.exp(-localPoint.y / DEFAULT_WALL_BELOW_WARMTH_RISE_M);
+          const deltaTMaxC = resolveSourceDeltaTMaxC(source);
+          const falloff = Math.exp((-1.4 * horizDistM) / INTER_LEVEL_RADIUS_M);
+          return {
+            id: source.id,
+            deltaC: Math.min(deltaTMaxC * falloff * 0.42 * heightAttenuation, 2.8),
+          };
+        }
+        return null;
       }
 
       // Same level: pipes and floor-heating are distributed linearly and can
@@ -1232,8 +1474,14 @@ function sampleSurfaceAtPoint(
         localPoint.x,
         Math.max(surface.widthM - localPoint.x, 0)
       );
-      // Floor-wall junction: cold stripe along bottom edge (wider + stronger)
-      const floorJunctionPenalty = 0.72 * Math.exp((-2.1 * localPoint.y) / DEFAULT_CORNER_RADIUS_M);
+      // Floor-wall junction: cold stripe along bottom edge; weakened when warm level below.
+      const rawFloorJunctionPenalty = 0.72 * Math.exp((-2.1 * localPoint.y) / DEFAULT_CORNER_RADIUS_M);
+      const floorJunctionPenalty =
+        surface.warmthFromLevelBelowMaxC > 0.15
+          ? rawFloorJunctionPenalty *
+            Math.max(0.08, 1 - surface.warmthFromLevelBelowMaxC / 3.5) *
+            Math.exp(-localPoint.y / (DEFAULT_WALL_BELOW_WARMTH_RISE_M * 0.85))
+          : rawFloorJunctionPenalty;
       // Ceiling-wall junction: mild cold stripe along top edge
       const ceilingJunctionPenalty =
         0.38 * Math.exp((-2.1 * Math.max(surface.heightM - localPoint.y, 0)) / DEFAULT_CORNER_RADIUS_M);
@@ -1245,7 +1493,12 @@ function sampleSurfaceAtPoint(
     return 0.55 * Math.exp((-1.4 * edgeDistanceM) / DEFAULT_PERIMETER_RADIUS_M);
   })();
   const bridgePenaltyC = thermalBridgeContributions.reduce((sum, entry) => sum + entry.penaltyC, 0) + edgePenaltyC;
-  const rawTemperatureC = surface.baseTemperatureC + sourceDeltaC - bridgePenaltyC;
+  const belowLevelWarmthC =
+    surface.kind === "wall" && surface.warmthFromLevelBelowMaxC > 0
+      ? surface.warmthFromLevelBelowMaxC *
+        Math.exp(-localPoint.y / Math.max(DEFAULT_WALL_BELOW_WARMTH_RISE_M, 0.35))
+      : 0;
+  const rawTemperatureC = surface.baseTemperatureC + sourceDeltaC + belowLevelWarmthC - bridgePenaltyC;
   // Reduced convective blend so radiator warm spots and cold corners are not
   // washed out toward the uniform air temperature.
   const convectiveBlend = clamp(

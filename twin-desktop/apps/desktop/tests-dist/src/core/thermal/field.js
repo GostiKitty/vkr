@@ -114,6 +114,72 @@ export function sampleSmoothedThermalFieldAtPoint(field, levelId, point, radiusM
     });
     return totalWeight > 0 ? weightedSum / totalWeight : sampleThermalFieldAtPoint(field, levelId, point);
 }
+/** Sorted by `elevation_m` — used for vertical coupling in 3D floor overlays. */
+export function buildLevelAdjacencyMap(levels) {
+    const sorted = [...levels].sort((left, right) => left.elevation_m - right.elevation_m);
+    const map = new Map();
+    sorted.forEach((level, index) => {
+        map.set(level.id, {
+            levelId: level.id,
+            belowLevelId: index > 0 ? sorted[index - 1].id : null,
+            aboveLevelId: index < sorted.length - 1 ? sorted[index + 1].id : null,
+        });
+    });
+    return map;
+}
+/** Blend factor for heat conducted through interfloor slabs (3D visualization only). */
+const FLOOR_OVERLAY_VERTICAL_BLEND_FROM_BELOW = 0.42;
+const FLOOR_OVERLAY_VERTICAL_BLEND_FROM_ABOVE = 0.16;
+/**
+ * Smoothed plan sample with mild vertical coupling for floor/ceiling overlays.
+ * Warmer/cooler spots on the level below (or above) bleed through the slab when
+ * both levels have a room at the same plan point.
+ */
+export function sampleSmoothedThermalFieldForFloorOverlay(field, levelId, point, levelAdjacency, radiusM = DEFAULT_SMOOTHING_RADIUS_M) {
+    const self = sampleSmoothedThermalFieldAtPoint(field, levelId, point, radiusM);
+    const adjacency = levelAdjacency.get(levelId);
+    if (!adjacency) {
+        return self;
+    }
+    const hasRoomHere = resolveRoomAtPoint(field.rooms, levelId, point) !== null;
+    if (!hasRoomHere) {
+        return self;
+    }
+    let blended = self;
+    if (adjacency.belowLevelId && resolveRoomAtPoint(field.rooms, adjacency.belowLevelId, point)) {
+        const below = sampleSmoothedThermalFieldAtPoint(field, adjacency.belowLevelId, point, radiusM);
+        blended += (below - self) * FLOOR_OVERLAY_VERTICAL_BLEND_FROM_BELOW;
+    }
+    if (adjacency.aboveLevelId && resolveRoomAtPoint(field.rooms, adjacency.aboveLevelId, point)) {
+        const above = sampleSmoothedThermalFieldAtPoint(field, adjacency.aboveLevelId, point, radiusM);
+        blended += (above - self) * FLOOR_OVERLAY_VERTICAL_BLEND_FROM_ABOVE;
+    }
+    return blended;
+}
+/**
+ * Temperature on an interfloor slab face: weighted mix of the thermal fields on
+ * the level below (slab.levelId) and the level above at the same plan point.
+ */
+export function sampleSmoothedThermalFieldForInterfloorSlab(field, slabLevelId, point, levelAdjacency, face, radiusM = DEFAULT_SMOOTHING_RADIUS_M) {
+    const adjacency = levelAdjacency.get(slabLevelId);
+    const aboveLevelId = adjacency?.aboveLevelId ?? null;
+    const roomBelow = resolveRoomAtPoint(field.rooms, slabLevelId, point);
+    const roomAbove = aboveLevelId ? resolveRoomAtPoint(field.rooms, aboveLevelId, point) : null;
+    if (!roomBelow && !roomAbove) {
+        return null;
+    }
+    const belowTemp = roomBelow
+        ? sampleSmoothedThermalFieldAtPoint(field, slabLevelId, point, radiusM)
+        : null;
+    const aboveTemp = roomAbove && aboveLevelId
+        ? sampleSmoothedThermalFieldAtPoint(field, aboveLevelId, point, radiusM)
+        : null;
+    if (belowTemp !== null && aboveTemp !== null) {
+        const belowWeight = face === "bottom" ? 0.62 : 0.38;
+        return belowTemp * belowWeight + aboveTemp * (1 - belowWeight);
+    }
+    return belowTemp ?? aboveTemp;
+}
 export function sampleWallSurfaceTemperatures(field, wallId) {
     const boundary = field.boundaryByWallId.get(wallId);
     if (!boundary) {

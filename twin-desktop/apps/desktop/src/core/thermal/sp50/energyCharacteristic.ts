@@ -9,6 +9,47 @@ import {
 /** Теплоёмкость воздуха в энергетической характеристике СП 50, кВт·ч/(м³·К). */
 export const SP50_AIR_HEAT_CAPACITY_KWH_M3K = 0.28;
 
+/**
+ * Удельная плотность бытовых тепловых поступлений q_int по СП 50.13330.2024 Таблица Д.2, Вт/м².
+ * Для жилых — расчётная площадь, для прочих — площадь помещений.
+ */
+export function sp50InternalGainDensity_W_m2(category: Sp50BuildingCategory | null | undefined): number {
+  switch (category) {
+    case "public":
+    case "administrative":
+    case "educational":
+      return 10;
+    case "preschool":
+    case "medical":
+      return 8;
+    case "industrialDry":
+    case "industrialWet":
+    case "industrialHighHeat":
+    case "agricultural":
+    case "storage":
+      return 12;
+    default:
+      return 17;
+  }
+}
+
+/**
+ * Коэффициент ξ в формуле β_kpi = 1/(1 + ξ·n_kpi) по СП 50.13330.2024 п. 9.3.
+ * Жилые: 0.8; общественные и прочие: 0.5.
+ */
+export function sp50GainUseCoefficientXi(category: Sp50BuildingCategory | null | undefined): number {
+  switch (category) {
+    case "public":
+    case "administrative":
+    case "educational":
+    case "preschool":
+    case "medical":
+      return 0.5;
+    default:
+      return 0.8;
+  }
+}
+
 /** Средняя плотность воздуха в отопительный период по СП 50: γ = 353/(273+t), кг/м³. */
 export function sp50AverageAirDensityKgM3(outdoorHeatingPeriodAverageC: number): number {
   return 353 / (273 + outdoorHeatingPeriodAverageC);
@@ -155,9 +196,10 @@ export function computeSp50EnergyCharacteristic(input: Sp50EnergyCharacteristicI
       : null;
 
   const deltaT = tIndoor !== null && tOutdoor !== null ? tIndoor - tOutdoor : null;
+  const qIntDensity = sp50InternalGainDensity_W_m2(input.buildingCategory);
   const qbyt =
     volume && deltaT && deltaT > 0
-      ? ((residentialAreaM2 ?? area ?? 0) * 17) / (volume * deltaT)
+      ? ((residentialAreaM2 ?? area ?? 0) * qIntDensity) / (volume * deltaT)
       : null;
 
   const solarData =
@@ -168,7 +210,8 @@ export function computeSp50EnergyCharacteristic(input: Sp50EnergyCharacteristicI
   const qrad =
     volume && gsop && gsop > 0 ? (11.6 * (solarIavg * 0.001)) / (volume * gsop) : 0;
 
-  const betaKpi = averageAirExchange !== null ? 1 / (1 + 0.5 * averageAirExchange) : null;
+  const xi = sp50GainUseCoefficientXi(input.buildingCategory);
+  const betaKpi = averageAirExchange !== null ? 1 / (1 + xi * averageAirExchange) : null;
 
   const qHeatingCharacteristic =
     kob_W_m3K !== null && kVent !== null && betaKpi !== null
