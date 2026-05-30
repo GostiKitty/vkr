@@ -1,9 +1,14 @@
 import { segmentLength } from "../../../entities/geometry/geom";
 import type { BuildingModel } from "../../../entities/geometry/types";
 import type {
+  EngineeringEquipmentParameters,
+  EngineeringSystemsModel,
+} from "../../../entities/engineering/types";
+import type {
   ScenarioConfig,
   ScenarioEngineeringSystemsConfig,
 } from "../../../entities/workflow/workflow.store";
+import { buildHeatingModelSnapshot } from "../../networks/heatingModel";
 
 type EngineeringFluidType = NonNullable<ScenarioEngineeringSystemsConfig["fluidType"]>;
 import type { ThermalSimulationResult } from "../solver";
@@ -44,14 +49,218 @@ export interface ModelEngineeringSummary {
 const DEFAULT_SUPPLY_TEMPERATURE_C = 70;
 const DEFAULT_RETURN_DELTA_K = 20;
 const HEATING_EQUIPMENT_TYPES = new Set(["radiator", "fancoil", "boiler", "heat_exchanger", "pump"]);
+const WATER_DENSITY_KG_M3 = 1000;
+const VOLUME_FLOW_M3H_TO_MASS_FLOW_KGS = WATER_DENSITY_KG_M3 / 3600;
 
-export function summarizeModelEngineering(model: BuildingModel): ModelEngineeringSummary {
+function readParamNumber(params: EngineeringEquipmentParameters, key: string): number | null {
+  const value = params[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function volumeFlowM3HToMassFlowKgS(flowM3H: number): number {
+  return Math.max(0, flowM3H) * VOLUME_FLOW_M3H_TO_MASS_FLOW_KGS;
+}
+
+function representativeDiameterMm(diameters: number[]): number | null {
+  const sorted = diameters
+    .filter((value) => Number.isFinite(value) && value > 0)
+    .sort((left, right) => left - right);
+  return sorted.length ? sorted[Math.floor(sorted.length / 2)] : null;
+}
+
+type ModelEngineeringSummaryPatch = Partial<ModelEngineeringSummary> & {
+  emitterLabels?: string[];
+};
+
+function mergeModelEngineeringSummary(
+  base: ModelEngineeringSummary,
+  patch: ModelEngineeringSummaryPatch
+): ModelEngineeringSummary {
+  const emitterLabels = [
+    ...(base.emitterLabel ? base.emitterLabel.split(", ") : []),
+    ...(patch.emitterLabels ?? []),
+  ].filter(Boolean);
+  const diameters = [
+    base.representativePipeDiameterMm,
+    patch.representativePipeDiameterMm,
+  ].filter((value): value is number => value != null && value > 0);
+
+  return {
+    totalPipeLengthM: Math.max(base.totalPipeLengthM, patch.totalPipeLengthM ?? 0),
+    representativePipeDiameterMm: representativeDiameterMm(diameters),
+    anyPipeInsulated: base.anyPipeInsulated || (patch.anyPipeInsulated ?? false),
+    heatCarrier: patch.heatCarrier ?? base.heatCarrier,
+    meanPipeFluidTemperatureC: patch.meanPipeFluidTemperatureC ?? base.meanPipeFluidTemperatureC,
+    installedPowerW: Math.max(base.installedPowerW, patch.installedPowerW ?? 0),
+    designMassFlowKgS: Math.max(base.designMassFlowKgS, patch.designMassFlowKgS ?? 0),
+    supplyTemperatureC:
+      base.supplyTemperatureC == null
+        ? (patch.supplyTemperatureC ?? null)
+        : patch.supplyTemperatureC == null
+          ? base.supplyTemperatureC
+          : Math.max(base.supplyTemperatureC, patch.supplyTemperatureC),
+    returnTemperatureC:
+      base.returnTemperatureC == null
+        ? (patch.returnTemperatureC ?? null)
+        : patch.returnTemperatureC == null
+          ? base.returnTemperatureC
+          : Math.min(base.returnTemperatureC, patch.returnTemperatureC),
+    emitterLabel: emitterLabels.length ? Array.from(new Set(emitterLabels)).join(", ") : null,
+  };
+}
+
+function summarizeHeatingNetworkModel(model: BuildingModel): ModelEngineeringSummaryPatch {
+  const snapshot = buildHeatingModelSnapshot(model);
+  const system = snapshot.systems[0];
+  if (!system) {
+    const unassignedEquipment = model.equipment.filter((item) =>
+      snapshot.unassignedHeatingEquipmentIds.includes(item.id)
+    );
+    const installedPowerW = Math.max(snapshot.totalLoadW, ...unassignedEquipment.map((item) => item.params.nominalPowerW ?? 0));
+    const designMassFlowKgS = unassignedEquipment.reduce(
+      (sum, item) => sum + Math.max(0, item.params.designFlow_kg_s ?? 0),
+      0
+    );
+    const supplyValues = unassignedEquipment
+      .map((item) => item.params.supplyTemperatureC)
+      .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+    const returnValues = unassignedEquipment
+      .map((item) => item.params.returnTemperatureC)
+      .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+    if (!installedPowerW && !designMassFlowKgS && !supplyValues.length && !returnValues.length) {
+      return {};
+    }
+    return {
+      installedPowerW,
+      designMassFlowKgS,
+      supplyTemperatureC: supplyValues.length ? Math.max(...supplyValues) : null,
+      returnTemperatureC: returnValues.length ? Math.min(...returnValues) : null,
+      emitterLabels: unassignedEquipment.map((item) => item.type),
+    };
+  }
+
+  const segmentDiameters = system.segments
+    .map((segment) => segment.diameter_mm)
+    .filter((value) => Number.isFinite(value) && value > 0);
+  const pipeTemps = system.segments
+    .map((segment) => segment.fluidTemperatureC)
+    .filter((value) => Number.isFinite(value));
+
+  return {
+    totalPipeLengthM: Math.max(snapshot.totalLength_m, system.totalLength_m),
+    representativePipeDiameterMm: representativeDiameterMm(segmentDiameters),
+    heatCarrier: system.heatCarrier,
+    meanPipeFluidTemperatureC:
+      pipeTemps.length > 0 ? pipeTemps.reduce((sum, value) => sum + value, 0) / pipeTemps.length : null,
+    installedPowerW: Math.max(snapshot.totalLoadW, system.totalLoadW),
+    designMassFlowKgS: system.estimatedFlow_kg_s,
+    supplyTemperatureC: system.supplyTemperatureC,
+    returnTemperatureC: system.returnTemperatureC,
+    emitterLabels: system.equipmentConnections.map((connection) => connection.equipmentType),
+  };
+}
+
+function summarizeEngineeringSystemsModel(systems: EngineeringSystemsModel | undefined): ModelEngineeringSummaryPatch {
+  if (!systems) {
+    return {};
+  }
+
+  const diameters: number[] = [];
+  const pipeTemps: number[] = [];
+  let totalPipeLengthM = 0;
+  let anyPipeInsulated = false;
+  let designMassFlowKgS = 0;
+  let installedPowerW = 0;
+  const supplyValues: number[] = [];
+  const returnValues: number[] = [];
+  const emitterLabels: string[] = [];
+
+  for (const pipe of systems.pipes) {
+    totalPipeLengthM += polylineLengthM(pipe.points);
+    if (pipe.diameter > 0) {
+      diameters.push(pipe.diameter);
+    }
+    if ((pipe.insulation ?? 0) > 0) {
+      anyPipeInsulated = true;
+    }
+    if (pipe.temperature != null && Number.isFinite(pipe.temperature)) {
+      pipeTemps.push(pipe.temperature);
+    }
+    if (pipe.flowRate != null && pipe.flowRate > 0) {
+      designMassFlowKgS = Math.max(designMassFlowKgS, volumeFlowM3HToMassFlowKgS(pipe.flowRate));
+    }
+    if (pipe.medium === "supply" && pipe.temperature != null) {
+      supplyValues.push(pipe.temperature);
+    }
+    if (pipe.medium === "return" && pipe.temperature != null) {
+      returnValues.push(pipe.temperature);
+    }
+  }
+
+  for (const item of systems.equipment) {
+    emitterLabels.push(item.type);
+    const params = item.parameters;
+    const supplyTemperatureC =
+      readParamNumber(params, "supplyTemperatureC") ??
+      readParamNumber(params, "primaryTemperatureC") ??
+      readParamNumber(params, "secondaryTemperatureC") ??
+      readParamNumber(params, "designTemperatureC");
+    const returnTemperatureC = readParamNumber(params, "returnTemperatureC");
+    if (supplyTemperatureC != null) {
+      supplyValues.push(supplyTemperatureC);
+    }
+    if (returnTemperatureC != null) {
+      returnValues.push(returnTemperatureC);
+    }
+    const powerKW =
+      readParamNumber(params, "powerKW") ??
+      readParamNumber(params, "heatPowerKW");
+    const nominalPowerW = readParamNumber(params, "nominalPowerW");
+    if (powerKW != null) {
+      installedPowerW = Math.max(installedPowerW, powerKW * 1000);
+    }
+    if (nominalPowerW != null) {
+      installedPowerW = Math.max(installedPowerW, nominalPowerW);
+    }
+    const flowRateM3H = readParamNumber(params, "flowRateM3H");
+    if (flowRateM3H != null) {
+      designMassFlowKgS = Math.max(designMassFlowKgS, volumeFlowM3HToMassFlowKgS(flowRateM3H));
+    }
+  }
+
+  if (
+    !totalPipeLengthM &&
+    !diameters.length &&
+    !anyPipeInsulated &&
+    !designMassFlowKgS &&
+    !installedPowerW &&
+    !supplyValues.length &&
+    !returnValues.length &&
+    !pipeTemps.length
+  ) {
+    return { emitterLabels: [] };
+  }
+
+  return {
+    totalPipeLengthM,
+    representativePipeDiameterMm: representativeDiameterMm(diameters),
+    anyPipeInsulated,
+    meanPipeFluidTemperatureC:
+      pipeTemps.length > 0 ? pipeTemps.reduce((sum, value) => sum + value, 0) / pipeTemps.length : null,
+    installedPowerW,
+    designMassFlowKgS,
+    supplyTemperatureC: supplyValues.length ? Math.max(...supplyValues) : null,
+    returnTemperatureC: returnValues.length ? Math.min(...returnValues) : null,
+    emitterLabels,
+  };
+}
+
+function summarizeBimEngineering(model: BuildingModel): ModelEngineeringSummary {
   const totalPipeLengthM = model.pipes.reduce((sum, pipe) => sum + polylineLengthM(pipe.path), 0);
   const diameters = model.pipes
     .map((pipe) => pipe.diameter_mm)
-    .filter((value): value is number => typeof value === "number" && Number.isFinite(value) && value > 0)
-    .sort((left, right) => left - right);
-  const representativePipeDiameterMm = diameters.length ? diameters[Math.floor(diameters.length / 2)] : null;
+    .filter((value): value is number => typeof value === "number" && Number.isFinite(value) && value > 0);
+  const representativePipeDiameterMm = representativeDiameterMm(diameters);
   const anyPipeInsulated = model.pipes.some((pipe) => (pipe.insulationThickness_mm ?? 0) > 0);
   const heatCarrier = model.pipes.find((pipe) => typeof pipe.heatCarrier === "string")?.heatCarrier ?? null;
   const pipeTemps = model.pipes
@@ -62,9 +271,9 @@ export function summarizeModelEngineering(model: BuildingModel): ModelEngineerin
 
   const heatingEquipment = model.equipment.filter((item) => HEATING_EQUIPMENT_TYPES.has(item.type));
   const installedPowerW = heatingEquipment.reduce((sum, item) => sum + Math.max(0, item.params.nominalPowerW ?? 0), 0);
-  const designMassFlowKgS = heatingEquipment.reduce(
-    (sum, item) => sum + Math.max(0, item.params.designFlow_kg_s ?? 0),
-    0
+  const designMassFlowKgS = Math.max(
+    heatingEquipment.reduce((sum, item) => sum + Math.max(0, item.params.designFlow_kg_s ?? 0), 0),
+    model.pipes.reduce((sum, pipe) => sum + Math.max(0, pipe.flowRate_kg_s ?? 0), 0)
   );
   const supplyValues = heatingEquipment
     .map((item) => item.params.supplyTemperatureC)
@@ -86,6 +295,13 @@ export function summarizeModelEngineering(model: BuildingModel): ModelEngineerin
     returnTemperatureC: returnValues.length ? Math.min(...returnValues) : null,
     emitterLabel: emitterTypes.length ? emitterTypes.join(", ") : null,
   };
+}
+
+export function summarizeModelEngineering(model: BuildingModel): ModelEngineeringSummary {
+  let summary = summarizeBimEngineering(model);
+  summary = mergeModelEngineeringSummary(summary, summarizeHeatingNetworkModel(model));
+  summary = mergeModelEngineeringSummary(summary, summarizeEngineeringSystemsModel(model.engineeringSystems));
+  return summary;
 }
 
 function resolveScalar(

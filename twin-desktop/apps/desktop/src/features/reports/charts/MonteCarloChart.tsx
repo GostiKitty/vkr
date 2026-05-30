@@ -59,7 +59,7 @@ export function MonteCarloChart({ result, baselineEnergyKWh = null }: MonteCarlo
 
       <div className="ui-chart-shell__body rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] p-3">
         <ResponsiveContainer width="100%" height={260}>
-          <ComposedChart data={histogramData} margin={{ top: 8, right: 16, bottom: 6, left: 4 }}>
+          <ComposedChart data={histogramData} margin={{ top: 28, right: 16, bottom: 24, left: 4 }}>
             <CartesianGrid stroke="var(--chart-grid)" strokeDasharray="3 3" />
             <XAxis
               type="number"
@@ -108,6 +108,7 @@ export function MonteCarloChart({ result, baselineEnergyKWh = null }: MonteCarlo
                 label={{
                   value: marker.label,
                   position: "top",
+                  offset: 6,
                   fill: marker.stroke,
                   fontSize: 11,
                 }}

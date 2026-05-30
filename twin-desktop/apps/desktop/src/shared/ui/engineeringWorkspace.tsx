@@ -90,6 +90,7 @@ interface ReportPreviewCardProps {
 interface AnimatedTabsProps<T extends string> {
   value: T;
   onChange: (value: T) => void;
+  className?: string;
   tabs: Array<{
     id: T;
     label: string;
@@ -497,6 +498,7 @@ export function ReportPreviewCard({
 export function AnimatedTabs<T extends string>({
   value,
   onChange,
+  className,
   tabs,
 }: AnimatedTabsProps<T>) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -519,7 +521,7 @@ export function AnimatedTabs<T extends string>({
   }, [tabs, value]);
 
   return (
-    <div ref={containerRef} className="ui-animated-tabs ui-tabs-track" role="tablist">
+    <div ref={containerRef} className={joinClasses("ui-animated-tabs ui-tabs-track", className)} role="tablist">
       <span
         className="ui-animated-tabs__indicator"
         style={

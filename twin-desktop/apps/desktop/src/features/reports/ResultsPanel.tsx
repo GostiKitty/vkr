@@ -16,18 +16,21 @@ import { navigate } from "../../app/router";
 import { useWorkflowStore, type ScenarioConfig } from "../../entities/workflow/workflow.store";
 import { useWorkspaceStore } from "../../entities/workspace/workspace.store";
 import {
-  AnimatedTabs,
   EmptyState,
   MetricInfoTooltip,
-  SummaryHighlightGrid,
-  TemperatureScaleLegend,
+  WorkspaceInlineNotice,
 } from "../../shared/ui";
 import { formatEnergy, formatNumber, formatPercentage } from "../../shared/utils/format";
 import { getResultSyncState } from "../../shared/utils/modelSync";
-import { runLocalThermalCalculation } from "../runs/runLocalThermalCalculation";
+import {
+  MISSING_BUILD_GEOMETRY_MESSAGE,
+  runLocalThermalCalculation,
+} from "../runs/runLocalThermalCalculation";
 import { runThermalMonteCarloAnalysis } from "../scenarios/runThermalMonteCarloAnalysis";
 import MetricsResultsTab from "./MetricsResultsTab";
 import MonteCarloResultsSection from "./MonteCarloResultsSection";
+import { ResultsOverviewSummary } from "./ResultsOverviewSummary";
+import { ResultsTabBar, type ResultsTabId } from "./ResultsTabBar";
 import {
   TemperatureHeatmapPanel,
   type TemperatureHeatmapHover,
@@ -41,7 +44,7 @@ import SpaceDetails from "../twin/SpaceDetails";
 import SpaceViewer3D from "../twin/SpaceViewer3D";
 import { formatTemperature, temperatureToColor } from "../twin/twin.theme";
 
-type WorkspaceTab = "overview" | "thermal" | "probabilistic" | "economy" | "rooms" | "map";
+type WorkspaceTab = ResultsTabId | "rooms";
 
 interface ResultsPanelProps {
   projectId: string | null;
@@ -50,20 +53,11 @@ interface ResultsPanelProps {
 // Temporarily hidden from UI. Will be restored after project documentation export redesign.
 // const HIDDEN_DOCUMENTS_TAB = { id: "documents" as const, label: "Документы", hint: "Существующий экспертный контур ProjectDocumentationPage / ПП РФ №87" };
 
-const tabItems = [
-  { id: "overview" as const, label: "Обзор", hint: "Краткий инженерный обзор результатов" },
-  { id: "thermal" as const, label: "Тепловой расчёт", hint: "Нестационарный RC-расчёт и исходные графики" },
-  { id: "probabilistic" as const, label: "Вероятностный анализ", hint: "Monte Carlo: P10/P50/P90, гистограмма и чувствительность" },
-  { id: "economy" as const, label: "Экономика", hint: "Экономическая оценка на базе существующего SP50/engineering контура" },
-  { id: "map" as const, label: "Карта", hint: "3D-карта, тепловой граф и таймлайн" },
-];
-
 // projectId оставлен в props для будущей привязки к ProjectDocumentationPage
 // (см. комментарий «Temporarily hidden from UI»). Пока не используется в UI.
 export function ResultsPanel({ projectId: _projectId }: ResultsPanelProps) {
   const frames = useTwinStore((state) => state.simulationFrames);
   const timeIndex = useTwinStore((state) => state.timeIndex);
-  const setTimeIndex = useTwinStore((state) => state.setTimeIndex);
   const thermalGraph = useTwinStore((state) => state.thermalGraph);
   const lastThermalResult = useTwinStore((state) => state.lastThermalResult);
   const lastThermalResultBinding = useTwinStore((state) => state.lastThermalResultBinding);
@@ -79,11 +73,8 @@ export function ResultsPanel({ projectId: _projectId }: ResultsPanelProps) {
   const workspaceCommandNonce = useWorkspaceStore((state) => state.commandNonce);
   const consumeProjectCommand = useWorkspaceStore((state) => state.consumeProjectCommand);
 
-  const [playing, setPlaying] = useState(false);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("overview");
-  const [autoRunState, setAutoRunState] = useState<"idle" | "running" | "success" | "error">("idle");
-  const [autoRunError, setAutoRunError] = useState<string | null>(null);
-  const [autoRunMessage, setAutoRunMessage] = useState<string | null>(null);
+  const [calculationError, setCalculationError] = useState<string | null>(null);
   const thermalRunInFlightRef = useRef(false);
 
   const thermalResultState = getResultSyncState(
@@ -104,7 +95,6 @@ export function ResultsPanel({ projectId: _projectId }: ResultsPanelProps) {
   const visibleFrames = thermalResultState === "current" ? frames : [];
   const visibleThermalGraph = thermalResultState === "current" ? thermalGraph : null;
   const currentFrame = visibleFrames[timeIndex] ?? null;
-  const timeLabel = currentFrame ? formatFrameTime(currentFrame.time) : "—";
   const activeOptions = useMemo(() => buildThermalOptionsFromWorkflow(scenarioConfig), [scenarioConfig]);
   const climateLabel = scenarioConfig?.climateCityId
     ? getSp131CityClimate(scenarioConfig.climateCityId)?.label ?? scenarioConfig.climateCityId
@@ -155,20 +145,14 @@ export function ResultsPanel({ projectId: _projectId }: ResultsPanelProps) {
     }
 
     thermalRunInFlightRef.current = true;
-    setAutoRunState("running");
-    setAutoRunError(null);
-    setAutoRunMessage("Выполняется базовый RC-расчёт. После завершения метрики и графики обновятся автоматически.");
+    setCalculationError(null);
 
     window.setTimeout(() => {
       try {
         runLocalThermalCalculation();
-        setAutoRunState("success");
-        setAutoRunMessage("Базовый расчёт обновлён. Отчёты и графики синхронизированы с текущей моделью.");
       } catch (error) {
         const message = error instanceof Error ? error.message : "Не удалось выполнить расчёт.";
-        setAutoRunError(message);
-        setAutoRunState("error");
-        setAutoRunMessage(null);
+        setCalculationError(message);
       } finally {
         thermalRunInFlightRef.current = false;
       }
@@ -181,45 +165,21 @@ export function ResultsPanel({ projectId: _projectId }: ResultsPanelProps) {
     }
 
     thermalRunInFlightRef.current = true;
-    setAutoRunState("running");
-    setAutoRunError(null);
-    setAutoRunMessage("Выполняются базовый RC-расчёт и вероятностный анализ Monte Carlo. Результаты обновятся автоматически.");
+    setCalculationError(null);
     setActiveTab("overview");
 
     window.setTimeout(() => {
       try {
         runLocalThermalCalculation();
         runThermalMonteCarloAnalysis();
-        setAutoRunState("success");
-        setAutoRunMessage(null);
       } catch (error) {
         const message = error instanceof Error ? error.message : "Не удалось выполнить полный анализ.";
-        setAutoRunError(message);
-        setAutoRunState("error");
-        setAutoRunMessage(null);
+        setCalculationError(message);
       } finally {
         thermalRunInFlightRef.current = false;
       }
     }, 0);
   }, []);
-
-  useEffect(() => {
-    if (!playing || visibleFrames.length < 2) {
-      return;
-    }
-    const interval = setInterval(() => {
-      const { setTimeIndex: update, timeIndex: current } = useTwinStore.getState();
-      const next = current + 1 >= visibleFrames.length ? 0 : current + 1;
-      update(next);
-    }, 800);
-    return () => clearInterval(interval);
-  }, [playing, visibleFrames.length]);
-
-  useEffect(() => {
-    if (!visibleFrames.length) {
-      setPlaying(false);
-    }
-  }, [visibleFrames.length]);
 
   useEffect(() => {
     if (workspaceCommand !== "export-report") {
@@ -253,13 +213,11 @@ export function ResultsPanel({ projectId: _projectId }: ResultsPanelProps) {
         lastThermalResult={visibleThermalResult}
         monteCarloResult={visibleMonteCarloResult}
         onOpenCalculation={handleRunCalculation}
-        onOpenMonteCarlo={() => navigate("/uncertainty")}
       />
     ),
     thermal: (
       <MetricsResultsTab
         onRecalculate={handleRunCalculation}
-        onEditUncertainty={() => navigate("/uncertainty")}
       />
     ),
     probabilistic: (
@@ -269,11 +227,10 @@ export function ResultsPanel({ projectId: _projectId }: ResultsPanelProps) {
         buildingModel={buildModel}
         climateLabel={climateLabel}
         monteCarloResult={visibleMonteCarloResult}
-        onEditUncertainty={() => navigate("/uncertainty")}
         onRunCalculation={handleRunCalculation}
       />
     ),
-    economy: <ResultsEconomyTab report={sp50Report} onOpenBuild={() => navigate("/build")} />,
+    economy: <ResultsEconomyTab report={sp50Report} />,
     rooms: (
       <RoomsTab
         rows={roomRows}
@@ -289,15 +246,10 @@ export function ResultsPanel({ projectId: _projectId }: ResultsPanelProps) {
         frames={visibleFrames}
         graph={visibleThermalGraph}
         onSelectRoom={selectSpace}
-        onSliderChange={(value) => setTimeIndex(value)}
-        onTogglePlay={() => setPlaying((prev) => !prev)}
-        playing={playing}
         scenarioConfig={scenarioConfig}
         selectedRoomId={selectedSpaceId}
         simulationOptions={activeOptions}
         thermalResult={visibleThermalResult}
-        timeIndex={timeIndex}
-        timeLabel={timeLabel}
         onOpenCalculation={handleRunCalculation}
       />
     ),
@@ -306,40 +258,92 @@ export function ResultsPanel({ projectId: _projectId }: ResultsPanelProps) {
   };
 
   const showResultAlerts =
-    autoRunState === "running" ||
-    (autoRunState === "error" && autoRunError != null) ||
-    thermalResultState === "stale" ||
-    monteCarloResultState === "stale";
+    calculationError != null || thermalResultState === "stale" || monteCarloResultState === "stale";
+  const isOverviewPanel = activeTab === "overview";
 
   return (
     <div className="flex min-h-0 flex-col gap-4">
       {showResultAlerts ? (
-        <div className="space-y-3">
-          {autoRunState === "running" ? (
-            <div className="rounded-2xl border border-[color:var(--accent-base)]/20 bg-[color:var(--surface-muted)] px-4 py-3 text-sm text-[color:var(--text-base)]">
-              {autoRunMessage}
-            </div>
-          ) : null}
-          {autoRunState === "error" && autoRunError ? (
-            <div className="rounded-2xl border border-[color:var(--danger-border)] bg-[color:var(--danger-bg)] px-4 py-3 text-sm text-[color:var(--danger-fg)]">
-              {autoRunError}
-            </div>
-          ) : null}
-          {thermalResultState === "stale" || monteCarloResultState === "stale" ? (
-            <div className="rounded-2xl border border-[color:var(--warning-border)] bg-[color:var(--warning-bg)] px-4 py-3 text-sm text-[color:var(--warning-fg)]">
-              Результаты не соответствуют текущей модели. Выполните расчёт заново перед анализом и экспортом.
-            </div>
-          ) : null}
-        </div>
+        <ResultsWorkspaceAlerts
+          calculationError={calculationError}
+          onDismissCalculationError={() => setCalculationError(null)}
+          onRecalculate={handleRunCalculation}
+          showStaleWarning={thermalResultState === "stale" || monteCarloResultState === "stale"}
+        />
       ) : null}
 
-      <AnimatedTabs<WorkspaceTab> tabs={tabItems} value={activeTab} onChange={setActiveTab} />
-
-      <div className="ui-panel min-h-0 p-4 sm:p-5 xl:p-6">
-        <div key={activeTab} className={`animate-fade-slide ${activeTab === "overview" ? "min-h-0" : "min-h-[20rem]"}`}>
-          {tabContent[activeTab]}
+      <div className="ui-results-workspace">
+        <ResultsTabBar
+          value={activeTab === "rooms" ? "overview" : activeTab}
+          onChange={(tab) => setActiveTab(tab)}
+        />
+        <div className="ui-results-workspace__panel ui-results-workspace__panel--flush">
+          <div
+            key={activeTab}
+            className={`ui-results-workspace__body animate-fade-slide ${isOverviewPanel ? "min-h-0" : "min-h-[20rem]"}`}
+          >
+            {tabContent[activeTab]}
+          </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function isMissingGeometryCalculationError(message: string): boolean {
+  return message === MISSING_BUILD_GEOMETRY_MESSAGE || message.includes("помещения и стены");
+}
+
+function ResultsWorkspaceAlerts({
+  calculationError,
+  onDismissCalculationError,
+  onRecalculate,
+  showStaleWarning,
+}: {
+  calculationError: string | null;
+  onDismissCalculationError: () => void;
+  onRecalculate: () => void;
+  showStaleWarning: boolean;
+}) {
+  return (
+    <div className="space-y-2">
+      {calculationError ? (
+        <WorkspaceInlineNotice
+          message={
+            isMissingGeometryCalculationError(calculationError)
+              ? "Нет модели для расчёта."
+              : calculationError
+          }
+          actions={
+            isMissingGeometryCalculationError(calculationError) ? (
+              <button
+                type="button"
+                onClick={() => {
+                  onDismissCalculationError();
+                  navigate("/model");
+                }}
+                className="ui-btn-primary px-4 py-2 text-sm"
+              >
+                Открыть модель
+              </button>
+            ) : (
+              <button type="button" onClick={onDismissCalculationError} className="ui-btn-secondary px-3 py-1.5 text-sm">
+                Закрыть
+              </button>
+            )
+          }
+        />
+      ) : null}
+      {showStaleWarning ? (
+        <WorkspaceInlineNotice
+          message="Модель изменилась — пересчитайте."
+          actions={
+            <button type="button" onClick={onRecalculate} className="ui-btn-primary px-4 py-2 text-sm">
+              Пересчитать
+            </button>
+          }
+        />
+      ) : null}
     </div>
   );
 }
@@ -348,116 +352,77 @@ function OverviewTab({
   lastThermalResult,
   monteCarloResult,
   onOpenCalculation,
-  onOpenMonteCarlo,
 }: {
   lastThermalResult: ReturnType<typeof useTwinStore.getState>["lastThermalResult"];
   monteCarloResult: ReturnType<typeof useWorkflowStore.getState>["monteCarloResult"];
   onOpenCalculation: () => void;
-  onOpenMonteCarlo: () => void;
 }) {
-  const highlightItems = useMemo(() => {
-    const items: Array<{
-      label: string;
-      value: string;
-      metricInfo: (typeof resultsMetricInfo)[keyof typeof resultsMetricInfo];
-      tone?: "info" | "warning" | "neutral";
-      calculated?: boolean;
-    }> = [];
-
-    if (lastThermalResult) {
-      const buildingDiagnostics = lastThermalResult.diagnostics?.building ?? null;
-      const totalHeatLossKW = buildingDiagnostics ? buildingDiagnostics.totalLossW / 1000 : null;
-      const requiredPowerKW = buildingDiagnostics
-        ? Math.max(0, buildingDiagnostics.totalLossW - buildingDiagnostics.totalInternalGainsW) / 1000
-        : null;
-
-      items.push({
-        label: "Энергия за период",
-        value: formatEnergy(lastThermalResult.summary.totalEnergyKWh, "кВт·ч"),
-        metricInfo: resultsMetricInfo.energy,
-        calculated: true,
-      });
-
-      if (totalHeatLossKW != null) {
-        items.push({
-          label: "Суммарные теплопотери",
-          value: `${formatNumber(totalHeatLossKW, { maximumFractionDigits: 2 })} кВт`,
-          metricInfo: resultsMetricInfo.buildingTotalHeatLossKW,
-          calculated: true,
-        });
-      }
-
-      if (requiredPowerKW != null) {
-        items.push({
-          label: "Требуемая мощность",
-          value: `${formatNumber(requiredPowerKW, { maximumFractionDigits: 2 })} кВт`,
-          metricInfo: resultsMetricInfo.requiredHeatingPowerKW,
-          calculated: true,
-        });
-      }
-
-      items.push(
-        {
-          label: "Пиковая нагрузка",
-          value: `${formatNumber(lastThermalResult.summary.peakLoadKW, { maximumFractionDigits: 2 })} кВт`,
-          metricInfo: resultsMetricInfo.peakLoad,
-          calculated: true,
-        },
-        {
-          label: "Дискомфорт",
-          value: `${formatNumber(lastThermalResult.summary.discomfortHours, { maximumFractionDigits: 1 })} ч`,
-          metricInfo: resultsMetricInfo.discomfort,
-          calculated: true,
-        }
-      );
-    }
-
-    if (monteCarloResult) {
-      items.push({
-        label: "P50 (Monte Carlo)",
-        value: formatEnergy(monteCarloResult.totalEnergy.p50, "кВт·ч"),
-        metricInfo: resultsMetricInfo.monteCarloP50,
-        tone: "info",
-        calculated: true,
-      });
-    }
-
-    return items;
-  }, [lastThermalResult, monteCarloResult]);
-
   if (!lastThermalResult && !monteCarloResult) {
-    return (
-      <section className="rounded-2xl border border-dashed border-[color:var(--border-base)] bg-[color:var(--surface-muted)] p-5">
-        <EmptyState
-          title="Нет данных в результатах"
-          message="Запустите базовый RC-расчёт — на этой вкладке появятся ключевые показатели. Детальные графики и Monte Carlo — на соседних вкладках."
-        />
-        <div className="mt-4 flex flex-wrap gap-2">
-          <button type="button" onClick={onOpenCalculation} className="ui-btn-primary px-4 py-2 text-sm">
-            Запустить расчёт
-          </button>
-          <button type="button" onClick={onOpenMonteCarlo} className="ui-btn-secondary px-4 py-2 text-sm">
-            Настроить Monte Carlo
-          </button>
-        </div>
-      </section>
-    );
+    return <OverviewEmptyState onOpenCalculation={onOpenCalculation} />;
   }
 
   return (
-    <div className="space-y-4">
-      <SummaryHighlightGrid items={highlightItems} />
+    <ResultsOverviewSummary lastThermalResult={lastThermalResult} monteCarloResult={monteCarloResult} />
+  );
+}
 
-      {!lastThermalResult ? (
-        <p className="text-xs text-[color:var(--text-soft)]">
-          Базовый RC-расчёт не выполнен — показаны только результаты Monte Carlo. Запустите тепловой расчёт для полной сводки.
-        </p>
-      ) : null}
-      {lastThermalResult && !monteCarloResult ? (
-        <p className="text-xs text-[color:var(--text-soft)]">
-          Вероятностный анализ не запускался. P10–P90, чувствительность и VaR — на вкладке «Вероятностный анализ».
-        </p>
-      ) : null}
+function OverviewEmptyState({ onOpenCalculation }: { onOpenCalculation: () => void }) {
+  return (
+    <div className="ui-results-overview">
+      <section className="ui-results-overview-empty" aria-labelledby="overview-empty-title">
+        <div className="ui-results-overview-empty__glow ui-results-overview-empty__glow--a" aria-hidden="true" />
+        <div className="ui-results-overview-empty__glow ui-results-overview-empty__glow--b" aria-hidden="true" />
+        <div className="ui-results-overview-empty__glow ui-results-overview-empty__glow--c" aria-hidden="true" />
+        <div className="ui-results-overview-empty__grid" aria-hidden="true" />
+
+        <div className="ui-results-overview-empty__layout">
+          <div className="ui-results-overview-empty__stage" aria-hidden="true">
+            <div className="ui-results-overview-empty__orbit" />
+            <div className="ui-results-overview-empty__orbit ui-results-overview-empty__orbit--inner" />
+
+            <article className="ui-results-overview-empty__tile ui-results-overview-empty__tile--chart">
+              <div className="ui-results-overview-empty__bars">
+                {[0.42, 0.68, 0.52, 0.86, 0.58].map((height, index) => (
+                  <span
+                    key={index}
+                    className="ui-results-overview-empty__bar"
+                    style={{ "--bar-h": height } as React.CSSProperties}
+                  />
+                ))}
+              </div>
+            </article>
+
+            <article className="ui-results-overview-empty__tile ui-results-overview-empty__tile--ring">
+              <div className="ui-results-overview-empty__donut" />
+            </article>
+
+            <article className="ui-results-overview-empty__tile ui-results-overview-empty__tile--wave">
+              <svg className="ui-results-overview-empty__wave" viewBox="0 0 120 48" fill="none" aria-hidden="true">
+                <path
+                  d="M4 32 C 22 10, 38 44, 56 24 S 92 8, 116 20"
+                  stroke="currentColor"
+                  strokeWidth="3"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </article>
+
+            <span className="ui-results-overview-empty__spark ui-results-overview-empty__spark--1" />
+            <span className="ui-results-overview-empty__spark ui-results-overview-empty__spark--2" />
+            <span className="ui-results-overview-empty__spark ui-results-overview-empty__spark--3" />
+          </div>
+
+          <div className="ui-results-overview-empty__panel">
+            <h3 id="overview-empty-title" className="ui-results-overview-empty__title">
+              Запустите расчёт
+            </h3>
+            <button type="button" onClick={onOpenCalculation} className="ui-btn-primary ui-results-overview-empty__cta">
+              <span className="ui-results-overview-empty__cta-shine" aria-hidden="true" />
+              Запустить
+            </button>
+          </div>
+        </div>
+      </section>
     </div>
   );
 }
@@ -557,15 +522,10 @@ function MapTab({
   graph,
   onOpenCalculation,
   onSelectRoom,
-  onSliderChange,
-  onTogglePlay,
-  playing,
   scenarioConfig,
   selectedRoomId,
   simulationOptions,
   thermalResult,
-  timeIndex,
-  timeLabel,
 }: {
   buildModel: BuildingModel;
   currentFrame: SimulationFrame | null;
@@ -573,15 +533,10 @@ function MapTab({
   graph: ThermalGraph | null;
   onOpenCalculation: () => void;
   onSelectRoom: (roomId: string | null) => void;
-  onSliderChange: (value: number) => void;
-  onTogglePlay: () => void;
-  playing: boolean;
   scenarioConfig: ScenarioConfig | null;
   selectedRoomId: string | null;
   simulationOptions: ThermalSimulationOptions;
   thermalResult: ThermalSimulationResult | null;
-  timeIndex: number;
-  timeLabel: string;
 }) {
   const [heatmapHover, setHeatmapHover] = useState<TemperatureHeatmapHover | null>(null);
   const modelForAnalysis = useMemo(
@@ -626,20 +581,6 @@ function MapTab({
   return (
     <div className="space-y-4">
       <section className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)] p-4">
-        <div className="mb-3 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <p className="text-sm font-semibold text-[color:var(--text-base)]">3D температурная карта</p>
-            <p className="text-sm text-[color:var(--text-muted)]">Сохраняется текущая 3D температурная карта по временным кадрам расчёта.</p>
-          </div>
-          <TimelineControls
-            frames={frames}
-            onSliderChange={onSliderChange}
-            onTogglePlay={onTogglePlay}
-            playing={playing}
-            timeIndex={timeIndex}
-            timeLabel={timeLabel}
-          />
-        </div>
         <SpaceViewer3D heatmap caption="Температурная визуализация по зонам" height={420} showLegend showFitControl />
       </section>
 
@@ -647,13 +588,7 @@ function MapTab({
 
       <section className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)] p-4">
         <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <p className="text-sm font-semibold text-[color:var(--text-base)]">2D-карта температур</p>
-            <p className="mt-1 text-sm text-[color:var(--text-muted)]">
-              Поле строится из зональных температур и локальных поправок (ограждения, притоки) — наглядная интерполяция,
-              не CFD.
-            </p>
-          </div>
+          <p className="text-sm font-semibold text-[color:var(--text-base)]">2D-карта температур</p>
           {fieldView ? (
             <div className="text-right text-xs text-[color:var(--text-soft)]">
               <div>min {formatNumber(fieldView.minTemperatureC, { maximumFractionDigits: 1 })} °C</div>
@@ -673,53 +608,6 @@ function MapTab({
           }
         />
       </section>
-    </div>
-  );
-}
-
-function TimelineControls({
-  frames,
-  onSliderChange,
-  onTogglePlay,
-  playing,
-  timeIndex,
-  timeLabel,
-}: {
-  frames: SimulationFrame[];
-  onSliderChange: (value: number) => void;
-  onTogglePlay: () => void;
-  playing: boolean;
-  timeIndex: number;
-  timeLabel: string;
-}) {
-  return (
-    <div className="w-full rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-overlay)] p-3 lg:max-w-md">
-      <div className="flex items-center justify-between text-sm font-medium text-[color:var(--text-muted)]">
-        <span>Момент времени</span>
-        <span className="tabular-nums text-[color:var(--text-base)]">{timeLabel}</span>
-      </div>
-      <input
-        type="range"
-        min={0}
-        max={Math.max(frames.length - 1, 0)}
-        value={timeIndex}
-        onChange={(event) => onSliderChange(Number(event.target.value))}
-        className="mt-3 w-full accent-[color:var(--accent-base)]"
-        disabled={!frames.length}
-      />
-      <div className="mt-3 flex items-center gap-2">
-        <button
-          type="button"
-          onClick={onTogglePlay}
-          disabled={!frames.length}
-          className={playing ? "ui-btn-secondary px-4 py-2 text-sm" : "ui-btn-primary px-4 py-2 text-sm"}
-        >
-          {playing ? "Пауза" : "Пуск"}
-        </button>
-        <span className="text-sm text-[color:var(--text-soft)]">
-          {frames.length ? `${frames.length} шагов` : "Нет временных кадров"}
-        </span>
-      </div>
     </div>
   );
 }
@@ -778,7 +666,6 @@ function GraphPanel({
   const dynamicMax = frameTemps.length ? Math.max(...frameTemps) : 30;
   const legendMin = Math.min(15, dynamicMin);
   const legendMax = Math.max(30, dynamicMax);
-  const scaleClamped = dynamicMin < 15 || dynamicMax > 30;
 
   // outdoor at center; space nodes on a circle starting from top (-π/2)
   const spaceNodes = nodes.filter((n) => n.type === "space");
@@ -802,23 +689,9 @@ function GraphPanel({
 
   return (
     <section className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)] p-4">
-      <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-1.5">
-            <h3 className="text-sm font-semibold text-[color:var(--text-base)]">Тепловой граф зон</h3>
-            <MetricInfoTooltip {...resultsMetricInfo.rcBalance} />
-          </div>
-          <p className="mt-1 text-sm text-[color:var(--text-muted)]">
-            Условная зональная сеть. Толщина линии — относительная теплопроводность, цвет узла — температура кадра.
-          </p>
-        </div>
-        <TemperatureScaleLegend
-          caption={
-            scaleClamped
-              ? `Шкала ${legendMin.toFixed(0)}…${legendMax.toFixed(0)} °C (кадр: ${dynamicMin.toFixed(1)}…${dynamicMax.toFixed(1)} °C).`
-              : `Шкала ${legendMin.toFixed(0)}…${legendMax.toFixed(0)} °C для узлов кадра.`
-          }
-        />
+      <div className="mb-3 flex items-center gap-1.5">
+        <h3 className="text-sm font-semibold text-[color:var(--text-base)]">Тепловой граф зон</h3>
+        <MetricInfoTooltip {...resultsMetricInfo.rcBalance} />
       </div>
       <div className="w-full overflow-x-auto">
         <svg width={W} height={H} className="max-w-full" style={{ display: "block" }}>
@@ -910,17 +783,6 @@ function GraphPanel({
       </div>
     </section>
   );
-}
-
-function formatFrameTime(timeHours: number) {
-  if (!Number.isFinite(timeHours)) {
-    return "—";
-  }
-  const totalMinutes = Math.round(timeHours * 60);
-  const days = Math.floor(totalMinutes / (24 * 60));
-  const hours = Math.floor((totalMinutes % (24 * 60)) / 60);
-  const minutes = totalMinutes % 60;
-  return days > 0 ? `день ${days + 1}, ${hours}:${String(minutes).padStart(2, "0")}` : `${hours}:${String(minutes).padStart(2, "0")}`;
 }
 
 export default ResultsPanel;

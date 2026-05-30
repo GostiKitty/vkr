@@ -1,4 +1,16 @@
-﻿import { useMemo, useState } from "react";
+﻿import { useMemo, useState, type ReactNode } from "react";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Label,
+  ReferenceLine,
+  ResponsiveContainer,
+  Tooltip as RechartsTooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import { extractLossSharePercent } from "../../core/thermal/thermalSimulationExport";
 import {
   buildBuildingLossSeries,
@@ -11,8 +23,6 @@ import { useTwinStore } from "../../entities/twin/twin.store";
 import { useWorkflowStore, type ScenarioRunSnapshot } from "../../entities/workflow/workflow.store";
 import {
   CollapsibleSection,
-  EngineeringCallout,
-  EngineeringSectionHeader,
   MetricInfoTooltip,
   SummaryHighlightGrid,
 } from "../../shared/ui";
@@ -31,7 +41,9 @@ import {
   THERMAL_CHART_NOT_SET,
 } from "./charts/thermalChartTheme";
 import { resultsMetricInfo, type MetricInfoDefinition } from "./resultsMetricInfo";
-import BuildingPerformanceResultsSection from "./BuildingPerformanceResultsSection";
+import BuildingPerformanceResultsSection, {
+  BuildingPerformanceValidationSection,
+} from "./BuildingPerformanceResultsSection";
 
 interface MetricsResultsTabProps {
   onRecalculate?: () => void;
@@ -41,6 +53,7 @@ interface MetricsResultsTabProps {
 type RoomView = "stacked" | "heatmap" | "scatter";
 
 const NOT_SET = THERMAL_CHART_NOT_SET;
+const SHOW_INFILTRATION_DIAGNOSTICS = false;
 
 const ROOM_VIEW_ITEMS: Array<{ id: RoomView; label: string }> = [
   { id: "stacked", label: "Потери по помещениям" },
@@ -49,81 +62,18 @@ const ROOM_VIEW_ITEMS: Array<{ id: RoomView; label: string }> = [
 ];
 
 export function MetricsResultsTab({ onRecalculate, onEditUncertainty }: MetricsResultsTabProps) {
-  const simulationSource = useTwinStore((state) => state.simulationDataSource);
   const selectedSpaceId = useTwinStore((state) => state.selectedSpaceId);
   const selectSpace = useTwinStore((state) => state.selectSpace);
   const scenarioConfig = useWorkflowStore((state) => state.scenarioConfig);
-  const uncertaintyConfig = useWorkflowStore((state) => state.uncertaintyConfig);
-  const monteCarloResult = useWorkflowStore((state) => state.monteCarloResult);
   const scenarioRunHistory = useWorkflowStore((state) => state.scenarioRunHistory);
   const [roomView, setRoomView] = useState<RoomView>("stacked");
   const { chartResult, resultState, chartPreview, activeOptions } = useThermalChartResult();
 
   const lossShare = useMemo(() => (chartResult ? extractLossSharePercent(chartResult) : null), [chartResult]);
-  const activeAssumptions = useMemo(
-    () =>
-      [
-        {
-          label: "ACH инфильтрации",
-          value: formatOptionalNumber(activeOptions.infiltrationACH, "1/ч", 2),
-          note: "G_inf = ρ·c_p·V·ACH/3600 в RC-модели.",
-        },
-        {
-          label: "ACH вентиляции",
-          value: formatOptionalNumber(activeOptions.ventilationACH, "1/ч", 2),
-          note: "Отдельный канал G_vent в RC при ACH > 0.",
-        },
-        {
-          label: "Уставка внутри помещения",
-          value: `день ${formatOptionalNumber(activeOptions.setpoints.day, "°C", 1)}; ночь ${formatOptionalNumber(
-            activeOptions.setpoints.night,
-            "°C",
-            1
-          )}`,
-          note: "RC-модель использует дневную и ночную уставки для идеального догрева.",
-        },
-        {
-          label: "Режим отопления",
-          value: "Идеальный догрев до уставки",
-          note: "Основная RC-модель использует идеальный догрев до уставки, а не модель радиатора, котла или гидравлики.",
-        },
-        {
-          label: "Monte Carlo",
-          value: formatMonteCarloRuns(uncertaintyConfig?.runs ?? monteCarloResult?.runs ?? null),
-          note: "Отдельный контур отчёта, не часть основного result.",
-        },
-      ] satisfies Array<{ label: string; value: string; note: string }>,
-    [activeOptions, monteCarloResult, uncertaintyConfig]
-  );
-
-  const roomTemperatureStats = useMemo(() => {
-    if (!chartResult) {
-      return new Map<string, { averageTemperatureC: number | null; minimumTemperatureC: number | null }>();
-    }
-    return new Map(
-      Object.values(chartResult.rooms).map((room) => {
-        const temperatures = room.timeline
-          .map((point) => point.temperatureC)
-          .filter((value): value is number => Number.isFinite(value));
-        return [
-          room.roomId,
-          {
-            averageTemperatureC: temperatures.length
-              ? temperatures.reduce((sum, value) => sum + value, 0) / temperatures.length
-              : null,
-            minimumTemperatureC: temperatures.length ? Math.min(...temperatures) : null,
-          },
-        ];
-      })
-    );
-  }, [chartResult]);
 
   if (resultState === "stale") {
     return (
       <div className="space-y-4">
-        <EngineeringCallout variant="attention" title="Результаты устарели">
-          <p>Модель изменилась после последнего запуска. Динамика помещения и остальные инженерные графики требуют пересчёта.</p>
-        </EngineeringCallout>
         <ThermalTimeSeriesChartBlock heatingDisplay="equipment" onRunCalculation={onRecalculate} />
       </div>
     );
@@ -131,13 +81,8 @@ export function MetricsResultsTab({ onRecalculate, onEditUncertainty }: MetricsR
 
   if (!chartResult) {
     return (
-      <div className="space-y-4">
-        <EngineeringCallout variant="info" title="Нет расчётных показателей">
-          <p>
-            Добавьте помещения в конструкторе и задайте сценарий, либо запустите базовый расчёт — тогда появятся графики,
-            KPI и диагностические сводки.
-          </p>
-        </EngineeringCallout>
+      <div className="space-y-4" data-testid="thermal-results-panel">
+        <ThermalTimeSeriesChartBlock heatingDisplay="equipment" onRunCalculation={onRecalculate} />
         {onRecalculate ? (
           <button type="button" onClick={onRecalculate} className="ui-btn-primary px-5 py-2 text-sm">
             Запустить расчёт
@@ -189,21 +134,6 @@ export function MetricsResultsTab({ onRecalculate, onEditUncertainty }: MetricsR
   const hTotal = derived?.totalHeatLossCoefficient_W_K.value ?? null;
   return (
     <div className="space-y-6" data-testid="thermal-results-panel">
-      {chartPreview ? (
-        <EngineeringCallout variant="info" title="Предпросмотр по текущей модели">
-          <p>
-            Графики и доли потерь пересчитаны по геометрии конструктора и активному сценарию. Запустите расчёт, чтобы
-            зафиксировать результат и синхронизировать отчёты.
-          </p>
-        </EngineeringCallout>
-      ) : simulationSource === "demo" ? (
-        <EngineeringCallout variant="attention" title="Демо-twin без RC-прогона">
-          <p>3D-двойник в демо-режиме; показатели ниже — по модели конструктора, если она задана.</p>
-        </EngineeringCallout>
-      ) : null}
-
-      <EngineeringSectionHeader kicker="Тепловой расчёт" title="Нестационарный RC-расчёт" />
-
       <div className="flex flex-wrap items-center gap-2 text-sm text-[color:var(--text-muted)]">
         <span className="inline-flex items-center gap-1.5 rounded-full border border-[color:var(--border-soft)] bg-[color:var(--surface-base)] px-3 py-1.5">
           RC-физика
@@ -216,17 +146,6 @@ export function MetricsResultsTab({ onRecalculate, onEditUncertainty }: MetricsR
         ) : null}
       </div>
 
-      {currentResult.modelWarnings && currentResult.modelWarnings.length > 0 ? (
-        <EngineeringCallout variant="attention" title="Предупреждения модели здания">
-          <p className="mb-2">Следующие геометрические или материальные допущения были применены автоматически. Проверьте их точность:</p>
-          <ul className="list-disc space-y-1 pl-5 text-sm">
-            {currentResult.modelWarnings.map((warning) => (
-              <li key={warning}>{warning}</li>
-            ))}
-          </ul>
-        </EngineeringCallout>
-      ) : null}
-
       <SummaryHighlightGrid
         items={[
           {
@@ -234,7 +153,7 @@ export function MetricsResultsTab({ onRecalculate, onEditUncertainty }: MetricsR
             value: `${formatNumber(currentResult.summary.peakLoadKW, { maximumFractionDigits: 2 })} кВт`,
           },
           {
-            label: "Энергия за период",
+            label: "Теплопотребление",
             value: formatEnergy(currentResult.summary.totalEnergyKWh, "кВт·ч"),
           },
           {
@@ -253,14 +172,14 @@ export function MetricsResultsTab({ onRecalculate, onEditUncertainty }: MetricsR
         <CollapsibleSection title="Дополнительные показатели и проверки">
         <section className="ui-panel-muted mt-3 space-y-4 rounded-2xl p-4">
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            <DerivedMetricTile label="H_tr" value={formatDerivedMetric(derived.transmissionHeatLossCoefficient_W_K.value, "Вт/К", 1)} info={resultsMetricInfo.heatLossCoefficientTransmission} />
-            <DerivedMetricTile label="H_ve" value={formatDerivedMetric(derived.ventilationHeatLossCoefficient_W_K.value, "Вт/К", 1)} info={resultsMetricInfo.heatLossCoefficientVentilation} />
-            <DerivedMetricTile label="H_total" value={formatDerivedMetric(derived.totalHeatLossCoefficient_W_K.value, "Вт/К", 1)} info={resultsMetricInfo.heatLossCoefficientTotal} />
-            <DerivedMetricTile label="τ здания" value={formatDerivedMetric(derived.buildingTauHours.value, "ч", 1)} info={resultsMetricInfo.thermalTimeConstant} />
-            <DerivedMetricTile label="q_A" value={formatDerivedMetric(derived.specificIndicators.qArea_W_m2.value, "Вт/м²", 1)} info={resultsMetricInfo.specificLoadArea} />
-            <DerivedMetricTile label="q_V" value={formatDerivedMetric(derived.specificIndicators.qVolume_W_m3.value, "Вт/м³", 2)} info={resultsMetricInfo.specificLoadVolume} />
-            <DerivedMetricTile label="q_VΔT" value={formatDerivedMetric(derived.specificIndicators.qVolumeDeltaT_W_m3K.value, "Вт/(м³·К)", 3)} info={resultsMetricInfo.specificLoadVolume} />
-            <DerivedMetricTile label="Рекуперация" value={formatDerivedMetric(derived.ventilationRecovery.savedByRecovery_W.value, "Вт", 1)} info={resultsMetricInfo.ventilationRecovery} />
+            <DerivedMetricTile label="H_tr" value={formatDerivedMetric(derivedMetricNumber(derived.transmissionHeatLossCoefficient_W_K), "Вт/К", 1)} info={resultsMetricInfo.heatLossCoefficientTransmission} />
+            <DerivedMetricTile label="H_ve" value={formatDerivedMetric(derivedMetricNumber(derived.ventilationHeatLossCoefficient_W_K), "Вт/К", 1)} info={resultsMetricInfo.heatLossCoefficientVentilation} />
+            <DerivedMetricTile label="H_total" value={formatDerivedMetric(derivedMetricNumber(derived.totalHeatLossCoefficient_W_K), "Вт/К", 1)} info={resultsMetricInfo.heatLossCoefficientTotal} />
+            <DerivedMetricTile label="τ здания" value={formatDerivedMetric(derivedMetricNumber(derived.buildingTauHours), "ч", 1)} info={resultsMetricInfo.thermalTimeConstant} />
+            <DerivedMetricTile label="q_A" value={formatDerivedMetric(derivedMetricNumber(derived.specificIndicators?.qArea_W_m2), "Вт/м²", 1)} info={resultsMetricInfo.specificLoadArea} />
+            <DerivedMetricTile label="q_V" value={formatDerivedMetric(derivedMetricNumber(derived.specificIndicators?.qVolume_W_m3), "Вт/м³", 2)} info={resultsMetricInfo.specificLoadVolume} />
+            <DerivedMetricTile label="q_VΔT" value={formatDerivedMetric(derivedMetricNumber(derived.specificIndicators?.qVolumeDeltaT_W_m3K), "Вт/(м³·К)", 3)} info={resultsMetricInfo.specificLoadVolume} />
+            <DerivedMetricTile label="Рекуперация" value={formatDerivedMetric(derivedMetricNumber(derived.ventilationRecovery?.savedByRecovery_W), "Вт", 1)} info={resultsMetricInfo.ventilationRecovery} />
           </div>
 
           <div className="grid gap-3 xl:grid-cols-[1.15fr,0.85fr]">
@@ -269,7 +188,7 @@ export function MetricsResultsTab({ onRecalculate, onEditUncertainty }: MetricsR
               titleAddon={<MetricInfoTooltip {...resultsMetricInfo.freeCooling} />}
             >
               <div className="grid gap-2 pt-3 sm:grid-cols-2 xl:grid-cols-4">
-                {derived.freeCooling.map((point) => (
+                {(derived.freeCooling ?? []).map((point) => (
                   <div key={point.hours} className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] px-3 py-2">
                     <p className="text-sm font-semibold text-[color:var(--text-muted)]">{point.hours} ч</p>
                     <p className="mt-1 text-base font-semibold text-[color:var(--text-base)]">
@@ -294,7 +213,7 @@ export function MetricsResultsTab({ onRecalculate, onEditUncertainty }: MetricsR
                     </tr>
                   </thead>
                   <tbody>
-                    {derived.zoneTauHours.slice(0, 6).map((zone) => (
+                    {(derived.zoneTauHours ?? []).slice(0, 6).map((zone) => (
                       <tr key={zone.zoneId} className="border-t border-[color:var(--border-soft)]">
                         <td className="px-3 py-2 font-medium text-[color:var(--text-base)]">{zone.zoneName}</td>
                         <td className="px-3 py-2">{formatDerivedMetric(zone.tauHours.value, "ч", 1)}</td>
@@ -313,13 +232,15 @@ export function MetricsResultsTab({ onRecalculate, onEditUncertainty }: MetricsR
       <ThermalTimeSeriesChartBlock heatingDisplay="equipment" onRunCalculation={onRecalculate} />
 
       <div className="grid gap-4 xl:grid-cols-[1.25fr,0.95fr]">
-        <section className="ui-panel-muted rounded-2xl p-4" data-testid="building-loss-chart">
-          <p className="mb-3 text-sm font-semibold text-[color:var(--text-base)]">Теплопотери по компонентам</p>
-          <BuildingLossChart rows={buildingLossRows} />
-        </section>
-        <section className="ui-panel-muted rounded-2xl p-4">
-          {lossShare ? <LossShareChart share={lossShare} /> : <ChartEmptyState text="Доли потерь не заданы." />}
-        </section>
+        <BuildingLossChart rows={buildingLossRows} />
+        {lossShare ? (
+          <LossShareChart share={lossShare} />
+        ) : (
+          <section className="ui-chart-shell">
+            <p className="text-sm font-semibold text-[color:var(--text-base)]">Структура теплопотерь</p>
+            <ChartEmptyState text="Доли потерь не заданы." />
+          </section>
+        )}
       </div>
 
       <BuildingPerformanceResultsSection diagnostics={currentResult.diagnostics?.buildingPerformance} />
@@ -428,52 +349,6 @@ export function MetricsResultsTab({ onRecalculate, onEditUncertainty }: MetricsR
               />
             ) : null}
 
-            <CollapsibleSection title="Сводка по помещениям">
-              <div className="overflow-x-auto pt-3">
-                <table className="w-full text-left text-sm text-[color:var(--text-muted)]">
-                  <thead>
-                    <tr className="text-xs uppercase tracking-wide text-[color:var(--text-soft)]">
-                      <th className="px-4 py-2 font-semibold">Помещение</th>
-                      <th className="px-4 py-2 font-semibold">Средняя температура</th>
-                      <th className="px-4 py-2 font-semibold">Минимальная температура</th>
-                      <th className="px-4 py-2 font-semibold">Мощность</th>
-                      <th className="px-4 py-2 font-semibold">Потери</th>
-                      <th className="px-4 py-2 font-semibold">Статус</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {zoneRows.map((zone) => (
-                      <tr
-                        key={zone.zoneId}
-                        className={`border-t border-[color:var(--border-soft)] ${selectedSpaceId === zone.zoneId ? "bg-[color:var(--accent-muted)]/25" : ""}`}
-                      >
-                        <td className="px-4 py-2">
-                          <button
-                            type="button"
-                            onClick={() => selectSpace(zone.zoneId)}
-                            className="font-semibold text-[color:var(--text-base)] underline decoration-dotted underline-offset-4"
-                          >
-                            {zone.zoneName}
-                          </button>
-                        </td>
-                        <td className="px-4 py-2">
-                          {formatOptionalNumber(roomTemperatureStats.get(zone.zoneId)?.averageTemperatureC, "°C", 1)}
-                        </td>
-                        <td className="px-4 py-2">
-                          {formatOptionalNumber(roomTemperatureStats.get(zone.zoneId)?.minimumTemperatureC, "°C", 1)}
-                        </td>
-                        <td className="px-4 py-2">{formatChartPower(zone.heatingPowerW)}</td>
-                        <td className="px-4 py-2">{formatChartPower(zone.lossTotalW)}</td>
-                        <td className="px-4 py-2 text-xs">
-                          <span className={statusBadgeClass(zone.status)}>{formatZoneStatusLabel(zone.status)}</span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </CollapsibleSection>
-
           </>
         ) : (
           <ChartEmptyState text="В текущем результате нет разложения по помещениям." />
@@ -513,10 +388,12 @@ export function MetricsResultsTab({ onRecalculate, onEditUncertainty }: MetricsR
                         style={{ textAnchor: "middle", fill: "var(--text-soft)", fontSize: 11 }}
                       />
                     </YAxis>
-                    <Tooltip
+                    <RechartsTooltip
                       formatter={(v: number) => [formatEnergy(v, "кВт·ч"), "Энергия"]}
-                      labelFormatter={(_name, payload) => payload?.[0]?.payload?.label ?? _name}
-                      contentStyle={tooltipStyle}
+                      labelFormatter={(_name: string, payload) =>
+                        (payload?.[0]?.payload as { label?: string } | undefined)?.label ?? _name
+                      }
+                      contentStyle={METRICS_CHART_TOOLTIP_STYLE}
                     />
                     <ReferenceLine
                       y={scenarioRunHistory[0].totalEnergyKWh}
@@ -608,26 +485,12 @@ export function MetricsResultsTab({ onRecalculate, onEditUncertainty }: MetricsR
         )}
       </section>
 
-      <section className="ui-panel-muted space-y-3 rounded-2xl p-4">
-        <p className="text-sm font-semibold text-[color:var(--text-base)]">Активные расчётные допущения</p>
-        <div className="overflow-x-auto rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)]">
-          <table className="w-full text-left text-sm">
-            <tbody>
-              {activeAssumptions.map((item) => (
-                <tr key={item.label} className="border-t border-[color:var(--border-soft)]">
-                  <td className="px-4 py-2 font-semibold">{item.label}</td>
-                  <td className="px-4 py-2">{item.value}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
       {/* Infiltration diagnostics — shown only when building.infiltration is available */}
-      {currentResult.diagnostics?.building.infiltration ? (
+      {SHOW_INFILTRATION_DIAGNOSTICS && currentResult.diagnostics?.building.infiltration ? (
         <InfiltrationDiagnosticsCard infiltration={currentResult.diagnostics.building.infiltration} />
       ) : null}
+
+      <BuildingPerformanceValidationSection diagnostics={currentResult.diagnostics?.buildingPerformance} />
 
       {onRecalculate ? (
         <button type="button" onClick={onRecalculate} className="ui-btn-secondary px-5 py-2 text-sm">
@@ -651,48 +514,117 @@ interface InfiltrationDiagCard {
   assumptions: string[];
 }
 
-function InfiltrationDiagnosticsCard({ infiltration }: { infiltration: InfiltrationDiagCard }) {
+type MetricsPanelAccent = "neutral" | "energy" | "air" | "info";
+
+type MetricsPanelItem = {
+  label: string;
+  value: ReactNode;
+  note?: string;
+  accent?: MetricsPanelAccent;
+  featured?: boolean;
+};
+
+function MetricsPanelCell({
+  label,
+  value,
+  note,
+  accent = "neutral",
+  featured = false,
+}: MetricsPanelItem) {
   return (
-    <section className="ui-panel-muted space-y-3 rounded-2xl p-4" data-testid="infiltration-diagnostics-card">
-      <p className="text-sm font-semibold text-[color:var(--text-base)]">Расчёт инфильтрации</p>
-      <div className="overflow-x-auto rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)]">
-        <table className="w-full text-left text-sm">
-          <tbody>
-            <tr className="border-t border-[color:var(--border-soft)]">
-              <td className="px-4 py-2 font-semibold">Режим</td>
-              <td className="px-4 py-2">{infiltration.mode}</td>
-            </tr>
-            <tr className="border-t border-[color:var(--border-soft)]">
-              <td className="px-4 py-2 font-semibold">ACH</td>
-              <td className="px-4 py-2">{formatOptionalNumber(infiltration.calculatedACH, "1/ч", 3)}</td>
-            </tr>
-            <tr className="border-t border-[color:var(--border-soft)]">
-              <td className="px-4 py-2 font-semibold">Расход воздуха</td>
-              <td className="px-4 py-2">{formatOptionalNumber(infiltration.airflowM3h, "м³/ч", 1)}</td>
-            </tr>
-            {Number.isFinite(infiltration.pressureTotalPa) && infiltration.pressureTotalPa > 0 ? (
-              <tr className="border-t border-[color:var(--border-soft)]">
-                <td className="px-4 py-2 font-semibold">Давление</td>
-                <td className="px-4 py-2">
-                  {formatOptionalNumber(infiltration.pressureTotalPa, "Па", 1)} (ветер {formatOptionalNumber(infiltration.pressureWindPa, "Па", 1)} + гравитация {formatOptionalNumber(infiltration.pressureStackPa, "Па", 1)})
-                </td>
-              </tr>
-            ) : null}
-            <tr className="border-t border-[color:var(--border-soft)]">
-              <td className="px-4 py-2 font-semibold">Потери тепла</td>
-              <td className="px-4 py-2">{formatOptionalNumber(infiltration.heatLossW / 1000, "кВт", 2)}</td>
-            </tr>
-          </tbody>
-        </table>
+    <article
+      className={`ui-metrics-panel__cell ui-metrics-panel__cell--${accent} ${
+        featured ? "ui-metrics-panel__cell--featured" : ""
+      }`}
+    >
+      <span className="ui-metrics-panel__accent" aria-hidden="true" />
+      <header className="ui-metrics-panel__cell-head">
+        <p className="ui-metrics-panel__label">{label}</p>
+        {note ? (
+          <MetricInfoTooltip title={label} formula={note}>
+            <button type="button" className="ui-metrics-panel__info" aria-label={`Справка: ${label}`}>
+              ?
+            </button>
+          </MetricInfoTooltip>
+        ) : null}
+      </header>
+      <div className="ui-metrics-panel__value">{value}</div>
+    </article>
+  );
+}
+
+function MetricsInsightPanel({
+  title,
+  testId,
+  items,
+  footer,
+}: {
+  title: string;
+  testId?: string;
+  items: MetricsPanelItem[];
+  footer?: ReactNode;
+}) {
+  return (
+    <section className="ui-metrics-panel" data-testid={testId}>
+      <header className="ui-metrics-panel__head">
+        <h3 className="ui-metrics-panel__title">{title}</h3>
+      </header>
+      <div className="ui-metrics-panel__grid">
+        {items.map((item) => (
+          <MetricsPanelCell key={item.label} {...item} />
+        ))}
       </div>
-      {infiltration.warnings.length > 0 ? (
-        <EngineeringCallout variant="attention" title="Предупреждения инфильтрации">
-          <ul className="list-disc space-y-1 pl-5 text-sm">
-            {infiltration.warnings.map((warning) => <li key={warning}>{warning}</li>)}
-          </ul>
-        </EngineeringCallout>
-      ) : null}
+      {footer ? <div className="ui-metrics-panel__footer">{footer}</div> : null}
     </section>
+  );
+}
+
+function InfiltrationDiagnosticsCard({ infiltration }: { infiltration: InfiltrationDiagCard }) {
+  const items: MetricsPanelItem[] = [
+    {
+      label: "Потери тепла",
+      value: formatOptionalNumber(infiltration.heatLossW / 1000, "кВт", 2),
+      accent: "air",
+      featured: true,
+    },
+    {
+      label: "ACH",
+      value: formatOptionalNumber(infiltration.calculatedACH, "1/ч", 3),
+      note: infiltration.achSource ? `Источник: ${infiltration.achSource}` : undefined,
+      accent: "energy",
+      featured: true,
+    },
+    {
+      label: "Расход воздуха",
+      value: formatOptionalNumber(infiltration.airflowM3h, "м³/ч", 1),
+      accent: "air",
+    },
+  ];
+
+  if (Number.isFinite(infiltration.pressureTotalPa) && infiltration.pressureTotalPa > 0) {
+    items.push({
+      label: "Давление",
+      value: (
+        <>
+          {formatOptionalNumber(infiltration.pressureTotalPa, "Па", 1)}
+          <span className="ui-metrics-panel__value-meta">
+            {" "}
+            · ветер {formatOptionalNumber(infiltration.pressureWindPa, "Па", 1)} + гравитация{" "}
+            {formatOptionalNumber(infiltration.pressureStackPa, "Па", 1)}
+          </span>
+        </>
+      ),
+      accent: "info",
+    });
+  }
+
+  return (
+    <MetricsInsightPanel
+      title="Расчёт инфильтрации"
+      testId="infiltration-diagnostics-card"
+      items={items}
+      footer={null}
+    />
   );
 }
 
@@ -785,6 +717,13 @@ function CompareParamsCell({ run }: { run: CompareTableRow }) {
   );
 }
 
+const METRICS_CHART_TOOLTIP_STYLE = {
+  background: "var(--surface-elevated)",
+  border: "1px solid var(--border-soft)",
+  borderRadius: 12,
+  fontSize: 12,
+};
+
 function ChartEmptyState({ text }: { text: string }) {
   return (
     <div className="flex h-40 items-center justify-center rounded-2xl border border-dashed border-[color:var(--border-soft)] px-4 text-center text-sm text-[color:var(--text-soft)]">
@@ -801,11 +740,8 @@ function formatOptionalNumber(value: number | null | undefined, unit?: string, d
   return unit ? `${formatted} ${unit}` : formatted;
 }
 
-function formatMonteCarloRuns(value: number | null | undefined): string {
-  if (!Number.isFinite(value)) {
-    return NOT_SET;
-  }
-  return `${formatNumber(value, { maximumFractionDigits: 0 })} прогонов`;
+function derivedMetricNumber(metric: { value: number | null } | null | undefined): number | null {
+  return metric?.value ?? null;
 }
 
 function formatDerivedMetric(value: number | null | undefined, unit: string, digits = 2): string {

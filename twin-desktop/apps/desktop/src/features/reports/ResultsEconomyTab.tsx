@@ -13,26 +13,18 @@ import {
   YAxis,
 } from "recharts";
 import { buildDefaultEconomicScenario, calculateDiscountedPayback_years, runEconomicAssessment } from "../../core/economics/analysis";
-import type { EconomicAssessmentResult, EconomicAssessmentSummary, EconomicDataQualityLevel, EconomicScenario, EconomicScenarioMode } from "../../core/economics/types";
+import { DEFAULT_CO2_EMISSION_FACTORS_KG_PER_KWH } from "../../core/economics/defaultCo2EmissionFactors";
+import type { EconomicAssessmentResult, EconomicAssessmentSummary, EconomicScenario, EconomicScenarioMode } from "../../core/economics/types";
 import type { Sp50ComplianceReport } from "../../core/thermal/sp50";
-import { Badge, EmptyState, FormulaTooltip, MetricInfoTooltip } from "../../shared/ui";
+import { Badge, FormulaTooltip, MetricInfoTooltip } from "../../shared/ui";
 import { formatArea, formatEnergy, formatNumber } from "../../shared/utils/format";
 import { resultsMetricInfo } from "./resultsMetricInfo";
 
 interface ResultsEconomyTabProps {
   report: Sp50ComplianceReport | null;
-  onOpenBuild?: () => void;
 }
 
 const KWH_PER_GCAL = 1163;
-
-/** Удельные выбросы CO₂ по умолчанию для каждого источника тепла, кг/кВт·ч */
-const DEFAULT_CO2_FACTORS: Record<string, number> = {
-  heat: 0.20,
-  gas: 0.22,
-  electricity: 0.35,
-  unknown: 0.22,
-};
 
 const SCENARIO_OPTIONS: Array<{ id: EconomicScenarioMode; label: string }> = [
   { id: "comprehensive", label: "Комплексная модернизация" },
@@ -41,22 +33,9 @@ const SCENARIO_OPTIONS: Array<{ id: EconomicScenarioMode; label: string }> = [
   { id: "minimum_budget", label: "Минимальный бюджет" },
 ];
 
-export function ResultsEconomyTab({ report, onOpenBuild }: ResultsEconomyTabProps) {
+export function ResultsEconomyTab({ report }: ResultsEconomyTabProps) {
   if (!report) {
-    return (
-      <div className="space-y-3">
-        <EmptyState
-          title="Экономическая оценка пока недоступна"
-          message="Для экономической оценки нужен нормативный или инженерный расчёт SP50. Откройте расчёт в /build или сформируйте исходные данные."
-          tone="warning"
-        />
-        {onOpenBuild ? (
-          <button type="button" onClick={onOpenBuild} className="ui-btn-secondary px-4 py-2 text-sm">
-            Открыть /build
-          </button>
-        ) : null}
-      </div>
-    );
+    return null;
   }
 
   return <EconomyAssessmentPanel report={report} />;
@@ -68,7 +47,9 @@ function EconomyAssessmentPanel({ report }: { report: Sp50ComplianceReport }) {
   const [heatTariff, setHeatTariff] = useState(baseScenario.heatTariffRubPerGcal);
   const [electricityTariff, setElectricityTariff] = useState(baseScenario.electricityTariffRubPerKwh);
   const [heatingSource, setHeatingSource] = useState(baseScenario.heatingEnergySource);
-  const [co2Factor, setCo2Factor] = useState(baseScenario.co2EmissionFactor_kgPerKWh ?? DEFAULT_CO2_FACTORS.heat);
+  const [co2Factor, setCo2Factor] = useState(
+    baseScenario.co2EmissionFactor_kgPerKWh ?? DEFAULT_CO2_EMISSION_FACTORS_KG_PER_KWH.heat
+  );
   const [gasTariff, setGasTariff] = useState(baseScenario.gasTariffRubPerM3 ?? 0);
   const [gasPenaltyPct, setGasPenaltyPct] = useState(baseScenario.gasUnderconsumptionPenaltyPercent ?? 0);
   const [heatMinFraction, setHeatMinFraction] = useState((baseScenario.heatContractMinimumPaymentFraction ?? 0) * 100);
@@ -83,7 +64,11 @@ function EconomyAssessmentPanel({ report }: { report: Sp50ComplianceReport }) {
     setHeatTariff(baseScenario.heatTariffRubPerGcal);
     setElectricityTariff(baseScenario.electricityTariffRubPerKwh);
     setHeatingSource(baseScenario.heatingEnergySource);
-    setCo2Factor(baseScenario.co2EmissionFactor_kgPerKWh ?? DEFAULT_CO2_FACTORS[baseScenario.heatingEnergySource] ?? 0.22);
+    setCo2Factor(
+      baseScenario.co2EmissionFactor_kgPerKWh ??
+        DEFAULT_CO2_EMISSION_FACTORS_KG_PER_KWH[baseScenario.heatingEnergySource] ??
+        0.22
+    );
     setGasTariff(baseScenario.gasTariffRubPerM3 ?? 0);
     setGasPenaltyPct(baseScenario.gasUnderconsumptionPenaltyPercent ?? 0);
     setHeatMinFraction((baseScenario.heatContractMinimumPaymentFraction ?? 0) * 100);
@@ -280,7 +265,7 @@ function EconomyAssessmentPanel({ report }: { report: Sp50ComplianceReport }) {
             onChange={(event) => {
               const src = event.target.value as EconomicScenario["heatingEnergySource"];
               setHeatingSource(src);
-              setCo2Factor(DEFAULT_CO2_FACTORS[src] ?? 0.22);
+              setCo2Factor(DEFAULT_CO2_EMISSION_FACTORS_KG_PER_KWH[src] ?? 0.22);
             }}
             className="mt-1 block w-full rounded-xl border border-[color:var(--border-soft)] bg-[color:var(--surface-elevated)] px-3 py-2 text-sm text-[color:var(--text-base)]"
           >
@@ -420,7 +405,6 @@ function MeasuresTable({ assessment }: { assessment: EconomicAssessmentResult })
                   <div className="flex flex-wrap items-center gap-1.5 font-medium text-[color:var(--text-base)]">
                     <span>{entry.measureName}</span>
                     {entry.isRecommended ? <Badge tone="success">Рекомендуется</Badge> : null}
-                    <span className={qualityBadgeClass(entry.dataQualityLevel)}>{qualityLabel(entry.dataQualityLevel)}</span>
                   </div>
                   {entry.status !== "calculated" && (
                     <div className="mt-0.5 text-xs text-[color:var(--text-muted)]">Недостаточно данных</div>
@@ -554,35 +538,11 @@ function formatPayback(value: number | null | undefined): string {
   return `${formatNumber(value, { maximumFractionDigits: 1 })} лет`;
 }
 
-function qualityLabel(value: EconomicDataQualityLevel): string {
-  switch (value) {
-    case "calculated":
-      return "расчёт";
-    case "estimated":
-      return "оценка";
-    case "default":
-      return "справочно";
-    default:
-      return value;
-  }
-}
-
 function priorityBadgeClass(level: string): string {
   if (level === "очень высокий") return "inline-block rounded-full bg-[color:var(--success-bg)] px-2 py-0.5 text-xs font-semibold text-[color:var(--success-fg)]";
   if (level === "высокий") return "inline-block rounded-full bg-[color:var(--accent-soft)] px-2 py-0.5 text-xs font-semibold text-[color:var(--accent-base)]";
   if (level === "средний") return "inline-block rounded-full bg-[color:var(--warning-bg)] px-2 py-0.5 text-xs font-semibold text-[color:var(--warning-fg)]";
   return "inline-block rounded-full bg-[color:var(--surface-overlay)] px-2 py-0.5 text-xs font-semibold text-[color:var(--text-soft)]";
-}
-
-function qualityBadgeClass(value: EconomicDataQualityLevel): string {
-  switch (value) {
-    case "calculated":
-      return "rounded-full border border-[color:var(--success-border)] bg-[color:var(--success-bg)] px-2 py-0.5 text-[10px] font-semibold text-[color:var(--success-fg)]";
-    case "estimated":
-      return "rounded-full border border-[color:var(--warning-border)] bg-[color:var(--warning-bg)] px-2 py-0.5 text-[10px] font-semibold text-[color:var(--warning-fg)]";
-    default:
-      return "rounded-full border border-[color:var(--border-soft)] bg-[color:var(--surface-overlay)] px-2 py-0.5 text-[10px] font-semibold text-[color:var(--text-soft)]";
-  }
 }
 
 const tooltipStyle = {
@@ -626,9 +586,8 @@ function EnergyClassSection({ summary }: { summary: EconomicAssessmentSummary })
     <section className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)] px-4 py-3">
       <div className="mb-3 flex items-center gap-1.5">
         <p className="text-sm font-semibold text-[color:var(--text-base)]">Энергоэффективность по SP50</p>
-        <FormulaTooltip
+        <MetricInfoTooltip
           title="Класс энергоэффективности SP50"
-          meaning="По SP50.13330.2022 здания классифицируются от А++ (наиболее эффективные) до G. Класс определяется по отклонению удельного расхода тепла от нормативного значения. А++ < −60 %, А+ < −45 %, А < −30 %, В < −10 %, С < +5 %, D < +25 %, E < +50 %, F < +75 %, G ≥ +75 %."
           formula="Δ = (q_факт − q_норм) / q_норм × 100 %"
         />
       </div>
@@ -792,7 +751,6 @@ function StagedRecommendationsSection({ measureResults }: { measureResults: Econ
             label="Этап 1 — Быстрые меры"
             badge="до 5 лет"
             badgeTone="success"
-            description="Реализуются первыми, экономия финансирует следующие этапы."
             items={quick}
           />
         )}
@@ -801,7 +759,6 @@ function StagedRecommendationsSection({ measureResults }: { measureResults: Econ
             label="Этап 2 — Плановая модернизация"
             badge="5–15 лет"
             badgeTone="warning"
-            description="Выполняются в плановый период технического обслуживания здания."
             items={medium}
           />
         )}
@@ -810,7 +767,6 @@ function StagedRecommendationsSection({ measureResults }: { measureResults: Econ
             label="Этап 3 — Стратегические меры"
             badge="> 15 лет или обоснование по комфорту"
             badgeTone="neutral"
-            description="Капитальные мероприятия с длительным сроком эффекта или ценностью для комфорта и безопасности."
             items={strategic}
           />
         )}
@@ -823,13 +779,11 @@ function StageTier({
   label,
   badge,
   badgeTone,
-  description,
   items,
 }: {
   label: string;
   badge: string;
   badgeTone: "success" | "warning" | "neutral";
-  description: string;
   items: EconomicAssessmentResult["measureResults"];
 }) {
   const badgeClass =
@@ -841,11 +795,10 @@ function StageTier({
 
   return (
     <div className="rounded-xl border border-[color:var(--border-soft)] p-3">
-      <div className="mb-1 flex flex-wrap items-center gap-2">
+      <div className="mb-2 flex flex-wrap items-center gap-2">
         <p className="text-sm font-semibold text-[color:var(--text-base)]">{label}</p>
         <span className={badgeClass}>{badge}</span>
       </div>
-      <p className="mb-2 text-xs text-[color:var(--text-muted)]">{description}</p>
       <div className="flex flex-wrap gap-2">
         {items.map((entry) => (
           <div

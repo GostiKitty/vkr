@@ -29,10 +29,17 @@ export function buildResultsClimateInput(
   };
 }
 
+export function hasResultsBuildingGeometry(model: BuildingModel): boolean {
+  return model.rooms.length > 0;
+}
+
 export function buildResultsSp50Report(
   model: BuildingModel,
   scenarioConfig: ScenarioConfig | null
 ): Sp50ComplianceReport | null {
+  if (!hasResultsBuildingGeometry(model)) {
+    return null;
+  }
   const climateInput = buildResultsClimateInput(model.thermalProtection?.climate, scenarioConfig);
   try {
     return runSP50Compliance(model, climateInput, {

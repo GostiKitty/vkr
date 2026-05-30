@@ -15,6 +15,7 @@
   "include": [
     "tests/**/*.ts",
     "src/core/ai/**/*.ts",
+    "src/core/economics/**/*.ts",
     "src/core/networks/**/*.ts",
     "src/core/thermal/**/*.ts",
     "src/core/graph/**/*.ts",
@@ -22,6 +23,8 @@
     "src/entities/geometry/**/*.ts",
     "src/entities/material/**/*.ts",
     "src/entities/networks/**/*.ts",
+    "src/entities/workflow/**/*.ts",
+    "src/shared/**/*.ts",
     "src/features/build/view3d/equipmentMeshes.ts",
     "src/types/**/*.d.ts"
   ],

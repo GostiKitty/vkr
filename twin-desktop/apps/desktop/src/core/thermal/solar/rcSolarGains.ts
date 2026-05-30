@@ -18,17 +18,25 @@ export interface RcSolarSimulationConfig {
   latitudeDeg?: number;
   /** День года [1..365] для положения солнца на протяжении суток. */
   dayOfYear?: number;
-  /** Солнечная облучённость вертикальной поверхности при прямом солнце, Вт/м². */
+  /** Прямая облучённость вертикальной поверхности при полном солнце, Вт/м². */
   irradianceW_m2?: number;
+  /**
+   * Диффузная облучённость горизонтальной поверхности, Вт/м².
+   * На вертикальный фасад попадает половина (коэффициент видимости неба 0,5).
+   * Учитывает притоки при пасмурном небе и в северных помещениях.
+   * По умолчанию 60 Вт/м² — типичное значение для зимнего дня в центральной России.
+   */
+  diffuseHorizIrradianceW_m2?: number;
 }
 
-export const DEFAULT_RC_SOLAR_CONFIG: Required<Pick<RcSolarSimulationConfig, "latitudeDeg" | "dayOfYear" | "irradianceW_m2">> & {
+export const DEFAULT_RC_SOLAR_CONFIG: Required<Pick<RcSolarSimulationConfig, "latitudeDeg" | "dayOfYear" | "irradianceW_m2" | "diffuseHorizIrradianceW_m2">> & {
   enabled: boolean;
 } = {
   enabled: true,
   latitudeDeg: 55.75,
   dayOfYear: 15,
   irradianceW_m2: 220,
+  diffuseHorizIrradianceW_m2: 60,
 };
 
 interface RcSolarGlazedSurface {
@@ -175,16 +183,26 @@ export function buildRcZoneSolarModel(
 }
 
 function resolveRcSolarConfig(config: RcSolarSimulationConfig): Required<
-  Pick<RcSolarSimulationConfig, "latitudeDeg" | "dayOfYear" | "irradianceW_m2">
+  Pick<RcSolarSimulationConfig, "latitudeDeg" | "dayOfYear" | "irradianceW_m2" | "diffuseHorizIrradianceW_m2">
 > {
   return {
     latitudeDeg: config.latitudeDeg ?? DEFAULT_RC_SOLAR_CONFIG.latitudeDeg,
     dayOfYear: config.dayOfYear ?? DEFAULT_RC_SOLAR_CONFIG.dayOfYear,
     irradianceW_m2: finitePositive(config.irradianceW_m2, DEFAULT_RC_SOLAR_CONFIG.irradianceW_m2),
+    diffuseHorizIrradianceW_m2: finitePositive(
+      config.diffuseHorizIrradianceW_m2,
+      DEFAULT_RC_SOLAR_CONFIG.diffuseHorizIrradianceW_m2
+    ),
   };
 }
 
-/** Мгновенный солнечный приток в зону, Вт (прямое + диффузное упрощение через access и g·A). */
+/**
+ * Мгновенный солнечный приток в зону, Вт.
+ * Учитываются два канала:
+ *  - Прямая (бимовая) составляющая: зависит от положения солнца и ориентации фасада.
+ *  - Диффузная составляющая от небосвода: изотропная модель, коэффициент видимости
+ *    вертикального фасада = 0,5 ((1+cos90°)/2).
+ */
 export function computeZoneSolarGainW(
   surfaces: RcSolarGlazedSurface[] | undefined,
   timeSeconds: number,
@@ -202,15 +220,24 @@ export function computeZoneSolarGainW(
     hourDecimal,
   });
 
+  // Диффузная облучённость вертикального фасада: I_diff_horiz × 0,5
+  const diffuseVerticalW_m2 = resolved.diffuseHorizIrradianceW_m2 * 0.5;
+
   let gainW = 0;
   for (const surface of surfaces) {
+    // Прямая составляющая
     const access = computeFacadeSolarAccessFactor(solarPosition, surface.facadeAzimuthDeg);
-    if (access <= 0) {
-      continue;
+    if (access > 0) {
+      const effectiveShading = combineArchitecturalAndSolarShading(surface.baseShading, access);
+      const transmission = Math.max(0, 1 - effectiveShading);
+      gainW += surface.glazedAreaM2 * resolved.irradianceW_m2 * surface.gValue * access * transmission;
     }
-    const effectiveShading = combineArchitecturalAndSolarShading(surface.baseShading, access);
-    const transmission = Math.max(0, 1 - effectiveShading);
-    gainW += surface.glazedAreaM2 * resolved.irradianceW_m2 * surface.gValue * access * transmission;
+
+    // Диффузная составляющая от небосвода — только при солнце над горизонтом.
+    // Ночью диффузная составляющая равна нулю.
+    if (solarPosition.isAboveHorizon) {
+      gainW += surface.glazedAreaM2 * diffuseVerticalW_m2 * surface.gValue * (1 - surface.baseShading);
+    }
   }
 
   return Math.max(0, gainW);

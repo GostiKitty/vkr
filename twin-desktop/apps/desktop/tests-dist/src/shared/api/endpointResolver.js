@@ -1,6 +1,7 @@
 import { buildUrl } from "./client";
-export const importCandidates = ["/import", "/api/import", "/ifc/import"];
+export const importCandidates = ["/import/ifc", "/import", "/api/import", "/ifc/import"];
 export const twinCandidates = [
+    { type: "projectPath", template: "/twin/{id}" },
     { type: "query", path: "/twin" },
     { type: "query", path: "/api/twin" },
     { type: "projectPath", template: "/projects/{id}/twin" },

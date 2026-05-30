@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { navigate } from "./router";
 import { routes } from "./routes";
 import { useWorkspaceStore } from "../entities/workspace/workspace.store";
+import { TherNestLogo } from "../shared/ui/TherNestLogo";
 
 interface TopBarProps {
   currentPath: string;
@@ -36,11 +37,11 @@ export function TopBar({ currentPath }: TopBarProps) {
             className="group flex shrink-0 items-center gap-2 rounded-full px-2 py-1 text-left transition hover:bg-[color:var(--surface-muted)]"
             title="На главную"
           >
-            <span className="flex h-9 w-9 items-center justify-center rounded-2xl bg-[color:var(--accent-base)] text-sm font-extrabold text-white shadow-[var(--shadow-control)]">
-              T
+            <span className="flex h-9 w-9 items-center justify-center rounded-2xl bg-[color:var(--accent-base)] text-[color:var(--accent-contrast)] shadow-[var(--accent-glow)]">
+              <TherNestLogo size={22} aria-hidden />
             </span>
             <span className="hidden font-extrabold tracking-tight text-[color:var(--text-base)] sm:inline">
-              TherNest
+              Гнездышко
             </span>
           </button>
 

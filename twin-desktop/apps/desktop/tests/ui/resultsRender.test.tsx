@@ -19,7 +19,7 @@ function resetStores() {
 test("ResultsPanel renders its shell even without simulation data", () => {
   resetStores();
   const markup = renderToStaticMarkup(<ResultsPanel projectId={null} />);
-  if (!markup.includes("ui-tabs-track")) {
+  if (!markup.includes("ui-results-tabbar")) {
     throw new Error("ResultsPanel should render tab navigation.");
   }
   if (!markup.includes("ui-panel")) {

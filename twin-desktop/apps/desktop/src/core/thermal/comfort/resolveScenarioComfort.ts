@@ -1,6 +1,9 @@
 import type { BuildingModel } from "../../../entities/geometry/types";
 import { computeWallProperties } from "../../../entities/material/types";
 import type { ScenarioConfig } from "../../../entities/workflow/workflow.store";
+import { defaultCo2EmissionFactorKgPerKWh } from "../../economics/defaultCo2EmissionFactors";
+import { resolveHeatingEnergySource } from "../../economics/scenarioEnergyTariff";
+import { resolveScenarioEcologyEmissionFactor } from "../../economics/resolveScenarioEcologyEmission";
 import type { BuildBuildingPerformanceDiagnosticsOptions } from "../derived/types";
 import { internalSurfaceTemperatureC } from "../formulas";
 import type { ThermalSimulationResult } from "../solver";
@@ -116,10 +119,32 @@ export function estimateBuildingMeanMrtC(
 
 export function buildPerformanceOptionsFromScenario(
   scenarioConfig: ScenarioConfig | null | undefined,
-  scenario: ScenarioConfig
+  scenario: ScenarioConfig,
+  model?: BuildingModel | null
 ): BuildBuildingPerformanceDiagnosticsOptions {
+  const resolvedEmission = resolveScenarioEcologyEmissionFactor(scenarioConfig);
+  let emissionFactorKgPerKWh = resolvedEmission.value;
+  let energySourceLabel = scenarioConfig?.ecology?.energySource ?? scenario.ecology?.energySource ?? null;
+
+  if (emissionFactorKgPerKWh == null && model) {
+    const heatingSource = resolveHeatingEnergySource(scenario, model);
+    if (heatingSource !== "unknown") {
+      emissionFactorKgPerKWh = defaultCo2EmissionFactorKgPerKWh(heatingSource);
+      if (!energySourceLabel) {
+        energySourceLabel =
+          heatingSource === "electricity"
+            ? "electricity"
+            : heatingSource === "gas"
+              ? "natural_gas"
+              : "централизованное теплоснабжение";
+      }
+    }
+  }
+
   return {
     comfortMinC: resolveComfortMinC(scenarioConfig, scenario).value,
     comfortMaxC: resolveComfortMaxC(scenarioConfig, scenario).value,
+    emissionFactorKgPerKWh,
+    energySourceLabel,
   };
 }

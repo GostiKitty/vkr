@@ -1,16 +1,19 @@
 import { create } from "zustand";
 const STORAGE_KEY = "twinstudio.engine.base";
-const ENV_DEFAULT = import.meta.env?.VITE_ENGINE_BASE?.trim() || "http://127.0.0.1:8010";
+/** Совпадает с примером в Settings и портом dev:engine. */
+export const DEFAULT_ENGINE_BASE_URL = "http://127.0.0.1:8010";
+const ENV_DEFAULT = (import.meta.env?.VITE_ENGINE_BASE ?? DEFAULT_ENGINE_BASE_URL).trim();
 const sanitize = (value) => value.trim().replace(/\/+$/, "");
 const readInitial = () => {
+    const envValue = sanitize(ENV_DEFAULT);
     if (typeof window === "undefined") {
-        return sanitize(ENV_DEFAULT);
+        return envValue;
     }
     const stored = window.localStorage.getItem(STORAGE_KEY);
-    if (stored) {
+    if (stored !== null) {
         return sanitize(stored);
     }
-    return sanitize(ENV_DEFAULT);
+    return envValue;
 };
 const persist = (value) => {
     if (typeof window === "undefined") {

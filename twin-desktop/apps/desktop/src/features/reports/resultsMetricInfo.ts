@@ -11,7 +11,7 @@ export interface MetricInfoDefinition {
 
 export const resultsMetricInfo = {
   energy: {
-    title: "Энергия отопления",
+    title: "Теплопотребление",
     meaning: "Интеграл суммарной мощности отопления по всем помещениям за расчётный период.",
     formula: "E = Σ_t Σ_z Q_heat,z(t) · Δt / 3 600 000",
     inputs: ["Q_heat,z(t)", "Δt", "временные ряды зон RC-модели"],
@@ -72,6 +72,23 @@ export const resultsMetricInfo = {
     inputs: ["H_tr", "H_inf", "H_ve"],
     calculatedIn: "src/core/thermal/derived/metrics.ts → totalHeatLossCoefficient_W_K",
     linkedFormulaIds: ["heat_loss_coefficient_total", "consistency_h_total_components_sum", "derived_h_total"],
+  },
+  buildingLossBreakdown: {
+    title: "Теплопотери по компонентам",
+    meaning:
+      "Разложение мощности теплопотерь здания по каналам в пиковом срезе RC-модели: ограждения, окна, двери, инфильтрация и вентиляция.",
+    formula: "Q_{loss} = Q_{непр} + Q_{окн} + Q_{дв} + Q_{инф} + Q_{вент}",
+    inputs: ["diagnostics.building в момент max Σ Q_{heat,z}"],
+    calculatedIn: "src/core/thermal/thermalResultsChartPayload.ts → buildBuildingLossSeries(...)",
+    linkedFormulaIds: ["heat_loss_coefficient_total", "thermal_peak_load"],
+  },
+  lossShareBreakdown: {
+    title: "Структура теплопотерь",
+    meaning: "Доли каждого канала потерь от суммарной мощности теплопотерь в том же пиковом срезе RC-модели.",
+    formula: "share_i = 100 · Q_i / Σ Q_{loss}",
+    inputs: ["diagnostics.building", "extractLossSharePercent(...)"],
+    calculatedIn: "src/core/thermal/thermalSimulationExport.ts → extractLossSharePercent(...)",
+    linkedFormulaIds: ["heat_loss_coefficient_total"],
   },
   buildingTotalHeatLossKW: {
     title: "Суммарные теплопотери",
@@ -165,8 +182,8 @@ export const resultsMetricInfo = {
     calculatedIn: "src/core/uncertainty/thermalMonteCarlo.ts → totalEnergy.p10",
   },
   monteCarloP50: {
-    title: "Медиана Monte Carlo (P50)",
-    meaning: "Медианное значение по всем сценариям вероятностного расчёта.",
+    title: "Теплопотребление P50",
+    meaning: "Медианное теплопотребление по всем сценариям Monte Carlo за тот же расчётный период.",
     formula: "P50 = quantile(totalEnergyKWh, 0.50)",
     inputs: "scenarioSeries.totalEnergyKWh",
     calculatedIn: "src/core/uncertainty/thermalMonteCarlo.ts → totalEnergy.p50",
@@ -243,10 +260,10 @@ export const resultsMetricInfo = {
     notes: "CVaR ≥ VaR: показывает, насколько тяжёлым может быть результат, если порог VaR всё-таки превышен.",
   },
   exceedanceProbability: {
-    title: "Вероятность превышения порога",
-    meaning: "Доля сценариев, в которых показатель превысил заданный инженерный порог.",
-    formula: "P_exceed = count(Y > Y_lim) / N",
-    inputs: ["scenarioSeries", "Y_lim", "число сценариев N"],
+    title: "Риск превышения пика",
+    meaning: "Вероятность того, что пиковая мощность отопления в сценарии Monte Carlo превысит базовый результат на 20%.",
+    formula: "P = count(Q_i > 1.2 · Q_base) / N",
+    inputs: ["scenarioSeries.peakLoadKW", "baseResult.summary.peakLoadKW"],
     calculatedIn: "Results → Вероятностный анализ → probabilityOf(...)",
     linkedFormulaIds: ["monte_carlo_exceedance_heating", "uncertainty_risk_probability"],
   },

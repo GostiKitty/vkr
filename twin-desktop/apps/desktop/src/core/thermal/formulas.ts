@@ -105,6 +105,12 @@ export function airflowFromACH(ach: number, volumeM3: number): number {
   return (ach * volumeM3) / 3600;
 }
 
+export function achFromAirflowM3s(airflowM3s: number, volumeM3: number): number {
+  assertNonNegative(airflowM3s, "Объемный расход воздуха");
+  assertPositive(volumeM3, "Отапливаемый объём");
+  return (airflowM3s * 3600) / volumeM3;
+}
+
 export function ventilationLoss(flowM3s: number, rho: number, cp: number, deltaT: number): number {
   assertNonNegative(flowM3s, "Объемный расход воздуха");
   assertPositive(rho, "Плотность воздуха");

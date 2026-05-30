@@ -2,6 +2,8 @@ import { useEffect, useMemo } from "react";
 import { useTwinStore } from "../../entities/twin/twin.store";
 import { fetchTwin } from "./twin.api";
 import { buildSpaceInstances, buildThermalGraph, simulateThermalGraph } from "./twin.engine";
+import { useEngineSettingsStore } from "../../entities/settings/engine.store";
+const RECONNECT_DELAY_MS = 5000;
 export function useTwin(projectId, projectKind) {
     const twin = useTwinStore((state) => state.twin);
     const selectedSpaceId = useTwinStore((state) => state.selectedSpaceId);
@@ -15,29 +17,73 @@ export function useTwin(projectId, projectKind) {
     const setSpaceInstances = useTwinStore((state) => state.setSpaceInstances);
     const setThermalGraph = useTwinStore((state) => state.setThermalGraph);
     const setSimulationFrames = useTwinStore((state) => state.setSimulationFrames);
+    const setSimulationResult = useTwinStore((state) => state.setSimulationResult);
+    const clearSimulation = useTwinStore((state) => state.clearSimulation);
+    const engineBase = useEngineSettingsStore((state) => state.baseUrl.trim());
     useEffect(() => {
         const normalizedProjectId = typeof projectId === "string" ? projectId.trim() : "";
         if (!normalizedProjectId) {
-            reset();
+            // Preserve a completed local computation even when no project ID is persisted.
+            if (useTwinStore.getState().simulationDataSource !== "computed") {
+                reset();
+            }
             return;
         }
         if (projectKind === "local" || normalizedProjectId.startsWith("local:")) {
+            const simulationDataSource = useTwinStore.getState().simulationDataSource;
+            const twinSource = typeof twin?.meta?.source === "string" ? twin.meta.source : null;
+            // For local build-mode projects we only check that the twin came from a build-mode
+            // computation. The project-ID cross-check is intentionally omitted: a local RC result
+            // always belongs to the current project and should not be discarded on re-render.
+            const keepComputedTwin = simulationDataSource === "computed" &&
+                twinSource === "build-mode";
+            if (!keepComputedTwin) {
+                setTwin(null);
+            }
             setLoading(false);
             setError(null);
+            return;
+        }
+        if (!engineBase) {
+            setLoading(false);
+            setError("Движок не настроен. Укажите URL в разделе «Настройки».");
             return;
         }
         const safeProjectId = normalizedProjectId;
         const controller = new AbortController();
         let isMounted = true;
-        async function load() {
-            setLoading(true);
-            setError(null);
-            try {
-                const data = await fetchTwin(safeProjectId, controller.signal);
-                if (!isMounted) {
-                    return;
+        let retryTimeoutId = 0;
+        const handleConnectionLoss = (message) => {
+            if (!isMounted) {
+                return;
+            }
+            setLoading(false);
+            setError(`${message} Повторяю подключение…`);
+            retryTimeoutId = window.setTimeout(() => {
+                if (!controller.signal.aborted) {
+                    void load(true);
                 }
-                setTwin(data);
+            }, RECONNECT_DELAY_MS);
+        };
+        const handleReconnect = (data) => {
+            if (!isMounted) {
+                return;
+            }
+            clearSimulation();
+            setTwin(data);
+            setError(null);
+            setLoading(false);
+        };
+        async function load(isRetry = false) {
+            if (!isRetry || !twin) {
+                setLoading(true);
+            }
+            if (!isRetry) {
+                setError(null);
+            }
+            try {
+                const data = await fetchTwin(safeProjectId, controller.signal, true);
+                handleReconnect(data);
             }
             catch (err) {
                 if (!isMounted) {
@@ -46,36 +92,42 @@ export function useTwin(projectId, projectKind) {
                 if (err instanceof DOMException && err.name === "AbortError") {
                     return;
                 }
-                const message = err instanceof Error ? err.message : "�� ������� ��������� ��������";
-                setError(message);
-                setTwin(null);
-            }
-            finally {
-                if (isMounted) {
-                    setLoading(false);
-                }
+                const message = err instanceof Error ? err.message : "Не удалось загрузить двойника";
+                handleConnectionLoss(message);
             }
         }
-        load();
+        void load();
         return () => {
             isMounted = false;
+            window.clearTimeout(retryTimeoutId);
             controller.abort();
         };
-    }, [projectId, projectKind, reset, setError, setLoading, setTwin]);
+    }, [clearSimulation, engineBase, projectId, projectKind, reset, setError, setLoading, setTwin, twin]);
     useEffect(() => {
+        const { simulationDataSource } = useTwinStore.getState();
         if (!twin) {
-            setSpaceInstances([]);
-            setThermalGraph(null);
-            setSimulationFrames([]);
+            if (simulationDataSource !== "computed") {
+                setSpaceInstances([]);
+                setThermalGraph(null);
+                setSimulationFrames([]);
+            }
+            return;
+        }
+        if (simulationDataSource === "computed") {
             return;
         }
         const spaces = twin.spaces ?? [];
         const instances = buildSpaceInstances(spaces);
-        setSpaceInstances(instances);
         const graph = buildThermalGraph(spaces, instances);
-        setThermalGraph(graph);
-        setSimulationFrames(simulateThermalGraph(graph));
-    }, [setSpaceInstances, setThermalGraph, setSimulationFrames, twin]);
+        const frames = simulateThermalGraph(graph);
+        setSpaceInstances(instances);
+        setSimulationResult({
+            frames,
+            graph,
+            result: null,
+            source: "demo",
+        });
+    }, [setSimulationFrames, setSimulationResult, setSpaceInstances, setThermalGraph, twin]);
     const spaces = useMemo(() => twin?.spaces ?? [], [twin]);
     const selectedSpace = useMemo(() => {
         if (!selectedSpaceId) {

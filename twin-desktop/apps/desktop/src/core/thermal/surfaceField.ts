@@ -13,6 +13,7 @@ import {
 } from "./wallFacadeThermal";
 import {
   buildGeometryRenderModel,
+  buildResolvedGeometryRenderModel,
   type GeometryRenderModel,
   type OpeningCutDescriptor,
   type RoomVolumeDescriptor,
@@ -279,7 +280,10 @@ export function buildSurfaceFieldResult(input: BuildSurfaceFieldInput): SurfaceF
   const patchSizeM = clamp(input.patchSizeM ?? DEFAULT_PATCH_SIZE_M, MIN_PATCH_SIZE_M, MAX_PATCH_SIZE_M);
   const overlayOffsetM = Math.max(0.002, input.overlayOffsetM ?? DEFAULT_OVERLAY_OFFSET_M);
   const indoorRelativeHumidity = clamp(input.indoorRelativeHumidity ?? DEFAULT_INDOOR_RH, 0.15, 0.85);
-  const renderGeometry = input.renderGeometry ?? input.thermalField?.renderGeometry ?? buildGeometryRenderModel(input.model);
+  const renderGeometry =
+    input.renderGeometry ??
+    input.thermalField?.renderGeometry ??
+    buildResolvedGeometryRenderModel(input.model, input.activeLevelId ?? null);
   const roomAirTemperatures = buildRoomAirTemperatureMap(input, renderGeometry);
   const physics =
     input.physics ??

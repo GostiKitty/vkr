@@ -1,6 +1,6 @@
 import { apiFetch } from "../../shared/api/client";
 import { resolveTwinConfig } from "../../shared/api/endpointResolver";
-export async function fetchTwin(projectId, signal) {
+export async function fetchTwin(projectId, signal, silent = false) {
     if (!projectId) {
         throw new Error("Project ID is required to fetch twin data");
     }
@@ -12,6 +12,7 @@ export async function fetchTwin(projectId, signal) {
     return apiFetch(path, {
         method: "GET",
         signal,
+        silent,
     });
 }
 export const twinApi = { fetchTwin };

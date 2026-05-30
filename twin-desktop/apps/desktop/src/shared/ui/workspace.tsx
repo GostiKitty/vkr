@@ -136,6 +136,23 @@ export function ActionBar({
   return <div className={joinClasses("ui-action-bar", className)}>{children}</div>;
 }
 
+export function WorkspaceInlineNotice({
+  message,
+  actions,
+  className,
+}: {
+  message: string;
+  actions?: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={joinClasses("ui-workspace-inline-notice", className)}>
+      <p className="min-w-0 text-sm text-[color:var(--text-muted)]">{message}</p>
+      {actions ? <div className="flex shrink-0 flex-wrap gap-2">{actions}</div> : null}
+    </div>
+  );
+}
+
 export function EmptyWorkspaceState({
   title,
   message,

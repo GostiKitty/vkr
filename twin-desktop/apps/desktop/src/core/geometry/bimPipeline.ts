@@ -161,6 +161,43 @@ function buildPolygonSignatureForVolumeDedupe(points: Vec2[]): string {
   return points.map((point) => `${point.x.toFixed(3)}:${point.y.toFixed(3)}`).join("|");
 }
 
+function polygonPlanDiagonal(points: Vec2[]): number {
+  if (points.length < 2) {
+    return 1;
+  }
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  points.forEach((point) => {
+    minX = Math.min(minX, point.x);
+    minY = Math.min(minY, point.y);
+    maxX = Math.max(maxX, point.x);
+    maxY = Math.max(maxY, point.y);
+  });
+  return Math.hypot(maxX - minX, maxY - minY);
+}
+
+/** Согласовано с `polygonsRoughlyAlign` в canonical 3D — не привязываем автоконтур к далёкой комнате. */
+function autoVolumeMatchesManualRoom(volume: RoomVolumeDescriptor, room: Room): boolean {
+  const volumeArea = Math.abs(polygonArea(volume.polygon));
+  const roomArea = Math.abs(polygonArea(room.polygon));
+  if (volumeArea <= 1e-6 || roomArea <= 1e-6) {
+    return false;
+  }
+  const areaRatio = Math.max(volumeArea, roomArea) / Math.min(volumeArea, roomArea);
+  if (areaRatio > 1.7) {
+    return false;
+  }
+  const volumeCenter = polygonCentroid(volume.polygon);
+  const roomCenter = polygonCentroid(room.polygon);
+  const maxCentroidDistance = Math.max(0.8, polygonPlanDiagonal(room.polygon) * 0.42);
+  if (Math.hypot(volumeCenter.x - roomCenter.x, volumeCenter.y - roomCenter.y) > maxCentroidDistance) {
+    return false;
+  }
+  return true;
+}
+
 /**
  * Сводит дубликаты объёмов с одинаковым контуром к одному `roomId` из модели (как в `buildCanonical3DModel`).
  * Без этого `ThermalFieldModel` и 3D-геометрия расходятся по ключам, и температурное поле «пропадает».
@@ -194,7 +231,12 @@ export function dedupeRoomVolumesForModel(
     const center = polygonCentroid(fallback.polygon);
     const area = Math.abs(polygonArea(fallback.polygon));
     const matchedRoom = modelRooms
-      .filter((room) => room.levelId === fallback.levelId && !usedRoomIds.has(room.id))
+      .filter(
+        (room) =>
+          room.levelId === fallback.levelId &&
+          !usedRoomIds.has(room.id) &&
+          autoVolumeMatchesManualRoom(fallback, room)
+      )
       .map((room) => {
         const roomCenter = polygonCentroid(room.polygon);
         const roomArea = Math.abs(polygonArea(room.polygon));
@@ -213,6 +255,59 @@ export function dedupeRoomVolumesForModel(
 
     return fallback;
   });
+}
+
+/**
+ * Сводит объёмы по контуру, подмешивает полигоны из `model.rooms` и убирает коллизии `roomId`.
+ * Используйте вместо «сырого» `buildGeometryRenderModel` + `dedupeRoomVolumesForModel` в тепловом поле и 3D.
+ */
+export function finalizeRoomVolumesForModel(
+  roomVolumes: RoomVolumeDescriptor[],
+  modelRooms: Room[],
+  activeLevelId: string | null
+): RoomVolumeDescriptor[] {
+  let resolved = dedupeRoomVolumesForModel(roomVolumes, modelRooms, activeLevelId);
+
+  modelRooms
+    .filter((room) => !activeLevelId || room.levelId === activeLevelId)
+    .forEach((room) => {
+      const normalized = validateRoomPolygon(room.polygon).normalized ?? room.polygon;
+      if (normalized.length < 3) {
+        return;
+      }
+      const modelArea = Math.abs(polygonArea(normalized));
+      const existingIndex = resolved.findIndex((volume) => volume.roomId === room.id);
+      if (existingIndex === -1) {
+        resolved.push(extrudeRoomVolume(room, normalized, 0, "room"));
+        return;
+      }
+      const existing = resolved[existingIndex]!;
+      if (Math.abs(existing.areaM2) < modelArea * 0.85) {
+        resolved[existingIndex] = extrudeRoomVolume(room, normalized, existing.insetDistanceM, "room");
+      }
+    });
+
+  const groupedByRoomId = new Map<string, RoomVolumeDescriptor[]>();
+  resolved.forEach((volume) => {
+    const list = groupedByRoomId.get(volume.roomId) ?? [];
+    list.push(volume);
+    groupedByRoomId.set(volume.roomId, list);
+  });
+
+  return [...groupedByRoomId.values()].map((variants) =>
+    variants.sort((left, right) => right.areaM2 - left.areaM2)[0]!
+  );
+}
+
+export function buildResolvedGeometryRenderModel(
+  model: BuildingModel,
+  activeLevelId: string | null = null
+): GeometryRenderModel {
+  const base = buildGeometryRenderModel(model);
+  return {
+    ...base,
+    roomVolumes: finalizeRoomVolumesForModel(base.roomVolumes, model.rooms, activeLevelId),
+  };
 }
 
 export function cutOpeningInWall(

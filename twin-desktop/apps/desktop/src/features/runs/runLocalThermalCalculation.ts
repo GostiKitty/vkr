@@ -7,18 +7,26 @@ import { useBuildStore } from "../build/build.store";
 import { applyScenarioToBuilding } from "../build/thermal/applyScenarioToBuilding";
 import { buildThermalOptionsFromWorkflow } from "../build/thermal/workflowThermalOptions";
 
+export const MISSING_BUILD_GEOMETRY_MESSAGE =
+  "Добавьте помещения и стены в режиме конструирования, чтобы запустить расчёт.";
+
 export function runLocalThermalCalculation(): ThermalSimulationResult {
   const { model: buildModel, projectKey, modelRevision } = useBuildStore.getState();
   const { projectId } = useProjectStore.getState();
   const workflowState = useWorkflowStore.getState();
-  const simulationOptions = buildThermalOptionsFromWorkflow(workflowState.scenarioConfig);
 
   if (!buildModel.rooms.length) {
-    throw new Error("Добавьте помещения и стены в режиме конструирования, чтобы запустить расчёт.");
+    throw new Error(MISSING_BUILD_GEOMETRY_MESSAGE);
   }
 
   const adjacency = buildAdjacencyGraph(buildModel);
   const modelForSim = applyScenarioToBuilding(buildModel, workflowState.scenarioConfig);
+  const simulationOptions = buildThermalOptionsFromWorkflow(
+    workflowState.scenarioConfig,
+    undefined,
+    modelForSim,
+    { dayOfYear: useBuildStore.getState().solarTime?.dayOfYear }
+  );
   const simulation = runThermalSimulation(modelForSim, simulationOptions, adjacency);
 
   syncBuildSimulationToStudio(modelForSim, simulation, adjacency, {
@@ -43,7 +51,10 @@ export function runLocalThermalCalculation(): ThermalSimulationResult {
     peakLoadKW: simulation.summary.peakLoadKW,
     totalEnergyKWh: simulation.summary.totalEnergyKWh,
     discomfortHours: simulation.summary.discomfortHours,
-    infiltrationACH: simulationOptions.infiltrationACH ?? null,
+    infiltrationACH:
+      simulation.diagnostics?.building.infiltration?.calculatedACH ??
+      simulationOptions.infiltrationACH ??
+      null,
     ventilationACH: simulationOptions.ventilationACH ?? null,
     setpointDayC: simulationOptions.setpoints?.day ?? null,
     climateCityId: cityId,

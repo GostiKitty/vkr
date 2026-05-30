@@ -15,6 +15,12 @@ import {
   summarizeModelEngineering,
   type EngineeringInputSource,
 } from "../engineering/resolveScenarioEngineering";
+import { isOccupancyControlledByPreset } from "../occupancyPresets";
+import {
+  resolveDaySetpointScalar,
+  resolveNightSetpointScalar,
+  setpointScalarToOrigin,
+} from "../resolveScenarioSetpoints";
 import { resolveScenarioConfig } from "../../../entities/workflow/workflow.store";
 import { getSp131CityClimate } from "../../../norms/sp131_2025/climate";
 import { getMaterialThermalProperties } from "../../../norms/sp50_2024/materialThermalProperties";
@@ -54,8 +60,15 @@ import {
   ventilationRecoveryLoss,
 } from "../formulas";
 import { resolveBuildingInfiltration } from "../infiltration";
+import {
+  buildResolvedEnvelopeLeakageConfig,
+  resolveScenarioEnvelopeLeakageInputs,
+} from "../ventilation/resolveScenarioEnvelopeLeakage";
+import { resolveScenarioVentilationInputs, buildResolvedPressureBasedConfig } from "../ventilation/resolveScenarioVentilation";
 import type { ThermalSimulationResult } from "../solver";
 import { resolveScenarioEnergyTariff } from "../../economics/scenarioEnergyTariff";
+import { resolveScenarioEcologyEmissionFactor } from "../../economics/resolveScenarioEcologyEmission";
+import { resolveScenarioEconomy } from "../../economics/resolveScenarioEconomy";
 import { aggregateEnvelopeBridgeConductances } from "../../../demo/deriveExteriorWallThermalBridges";
 import { syncAndEnrichThermalProtection } from "../../../features/build/envelope/syncAndEnrichThermalProtection";
 import { ensureModelClimate, resolvePreferredClimateCityId } from "../climate/ensureModelClimate";
@@ -1333,13 +1346,6 @@ function buildClimateSection(
       climate.source,
       climate.warnings
     ),
-    requirement(
-      "climate.base-scenario",
-      "Базовый температурный график сценария",
-      scenarioConfig?.climate != null,
-      scenarioConfig?.climate ? "scenario" : "fallback",
-      scenarioConfig?.climate ? [] : ["Используются значения сценария по умолчанию."]
-    ),
   ];
 
   const computedFields: SourceDataField[] = [
@@ -1347,9 +1353,6 @@ function buildClimateSection(
     field("climate.design-outdoor", "Расчётная наружная температура", climate.designOutdoorC, "°C", climate.designOutdoorC != null ? climate.source : "missing", climate.warnings),
     field("climate.heating-average", "Средняя температура отопительного периода", climate.heatingAverageC, "°C", climate.heatingAverageC != null ? climate.source : "missing", climate.warnings),
     field("climate.heating-duration", "Длительность отопительного периода", climate.heatingDurationDays, "сут", climate.heatingDurationDays != null ? climate.source : "missing", climate.warnings),
-    field("climate.baseC", "Базовая температура сценария", scenario.climate.baseC, "°C", scenarioConfig?.climate?.baseC != null ? "scenario" : "fallback"),
-    field("climate.amplitude", "Амплитуда наружной температуры", scenario.climate.amplitudeC, "°C", scenarioConfig?.climate?.amplitudeC != null ? "scenario" : "fallback"),
-    field("climate.offset", "Фаза / смещение графика", scenario.climate.seasonalOffsetC, "°C", scenarioConfig?.climate?.seasonalOffsetC != null ? "scenario" : "fallback"),
     field("climate.gsop", "GSOP", gsopValue, "°C·сут", gsopValue != null ? "calculated" : "missing", gsopValue == null ? climate.warnings : []),
     field("climate.deltaT", "ΔT = T_in - T_out", designDeltaT, "К", designDeltaT != null ? "calculated" : "missing"),
     field("climate.source", "Источник климатических данных", climate.source === "missing" ? null : sourceLabel(climate.source), null, climate.source, climate.warnings),
@@ -1371,24 +1374,94 @@ function buildClimateSection(
 function buildOperationSection(
   scenarioConfig: ScenarioConfig | null | undefined,
   scenario: ScenarioConfig,
+  model: BuildingModel,
   thermalResult: ThermalSimulationResult | null | undefined
 ): SourceDataSectionReport {
   const performance = thermalResult?.diagnostics?.buildingPerformance ?? null;
+  const daySetpoint = resolveDaySetpointScalar(scenarioConfig, scenario, model);
+  const nightSetpoint = resolveNightSetpointScalar(scenarioConfig, scenario, model);
   const requirements: SourceDataRequirement[] = [
     requirement("operation.setpoints", "Дневная и ночная уставка", true, scenarioConfig?.setpoints ? "scenario" : "fallback", scenarioConfig?.setpoints ? [] : ["Используются значения уставок по умолчанию."]),
     requirement("operation.gains", "Внутренние теплопоступления", true, scenarioConfig?.internalGains ? "scenario" : "fallback"),
-    requirement("operation.occupancy", "Занятость", true, scenarioConfig?.occupancy ? "scenario" : "fallback"),
+    requirement(
+      "operation.occupancy",
+      "Занятость",
+      true,
+      isOccupancyControlledByPreset(scenarioConfig) ? "sp50" : scenarioConfig?.occupancy ? "scenario" : "fallback"
+    ),
     requirement("operation.duration", "Длительность расчёта", true, scenarioConfig?.operation?.duration ? "user" : "fallback"),
     requirement("operation.timestep", "Шаг расчёта", true, scenarioConfig?.operation?.timestepMinutes != null ? "user" : "fallback"),
+    requirement(
+      "operation.outdoor-profile",
+      "График наружной температуры сценария",
+      scenarioConfig?.climate != null,
+      scenarioConfig?.climate ? "scenario" : "fallback",
+      scenarioConfig?.climate ? [] : ["Используются значения сценария по умолчанию."]
+    ),
   ];
   const computedFields: SourceDataField[] = [
-    field("operation.day-setpoint", "Дневная уставка", scenario.setpoints.day, "°C", scenarioConfig?.setpoints?.day != null ? "scenario" : "fallback"),
-    field("operation.night-setpoint", "Ночная уставка", scenario.setpoints.night, "°C", scenarioConfig?.setpoints?.night != null ? "scenario" : "fallback"),
+    field("operation.outdoor-baseC", "Базовая температура сценария", scenario.climate.baseC, "°C", scenarioConfig?.climate?.baseC != null ? "scenario" : "fallback"),
+    field("operation.outdoor-amplitude", "Амплитуда наружной температуры", scenario.climate.amplitudeC, "°C", scenarioConfig?.climate?.amplitudeC != null ? "scenario" : "fallback"),
+    field("operation.outdoor-offset", "Смещение графика", scenario.climate.seasonalOffsetC, "°C", scenarioConfig?.climate?.seasonalOffsetC != null ? "scenario" : "fallback"),
+    field(
+      "operation.day-setpoint",
+      "Дневная уставка",
+      daySetpoint.value,
+      "°C",
+      setpointScalarToOrigin(daySetpoint.source)
+    ),
+    field(
+      "operation.night-setpoint",
+      "Ночная уставка",
+      nightSetpoint.value,
+      "°C",
+      setpointScalarToOrigin(nightSetpoint.source)
+    ),
     field("operation.day-hours", "Дневной режим", `${scenario.setpoints.dayStartHour}:00–${scenario.setpoints.nightStartHour}:00`, null, "calculated"),
-    field("operation.internal-gains-day", "Внутренние теплопоступления днём", scenario.internalGains.dayGain_W_m2, "Вт/м²", scenarioConfig?.internalGains?.dayGain_W_m2 != null ? "scenario" : "fallback"),
-    field("operation.internal-gains-night", "Внутренние теплопоступления ночью", scenario.internalGains.nightGain_W_m2, "Вт/м²", scenarioConfig?.internalGains?.nightGain_W_m2 != null ? "scenario" : "fallback"),
-    field("operation.occupancy-day", "Занятость днём", scenario.occupancy.dayFraction, null, scenarioConfig?.occupancy?.dayFraction != null ? "scenario" : "fallback"),
-    field("operation.occupancy-night", "Занятость ночью", scenario.occupancy.nightFraction, null, scenarioConfig?.occupancy?.nightFraction != null ? "scenario" : "fallback"),
+    field(
+      "operation.internal-gains-day",
+      "Внутренние теплопоступления днём",
+      scenario.internalGains.dayGain_W_m2,
+      "Вт/м²",
+      isOccupancyControlledByPreset(scenarioConfig)
+        ? "sp50"
+        : scenarioConfig?.internalGains?.dayGain_W_m2 != null
+          ? "scenario"
+          : "fallback"
+    ),
+    field(
+      "operation.internal-gains-night",
+      "Внутренние теплопоступления ночью",
+      scenario.internalGains.nightGain_W_m2,
+      "Вт/м²",
+      isOccupancyControlledByPreset(scenarioConfig)
+        ? "sp50"
+        : scenarioConfig?.internalGains?.nightGain_W_m2 != null
+          ? "scenario"
+          : "fallback"
+    ),
+    field(
+      "operation.occupancy-day",
+      "Занятость днём",
+      scenario.occupancy.dayFraction,
+      null,
+      isOccupancyControlledByPreset(scenarioConfig)
+        ? "sp50"
+        : scenarioConfig?.occupancy?.dayFraction != null
+          ? "scenario"
+          : "fallback"
+    ),
+    field(
+      "operation.occupancy-night",
+      "Занятость ночью",
+      scenario.occupancy.nightFraction,
+      null,
+      isOccupancyControlledByPreset(scenarioConfig)
+        ? "sp50"
+        : scenarioConfig?.occupancy?.nightFraction != null
+          ? "scenario"
+          : "fallback"
+    ),
     field("operation.duration", "Длительность расчёта", scenario.operation?.duration ?? "24h", null, scenarioConfig?.operation?.duration ? "user" : "fallback"),
     field("operation.timestep", "Шаг расчёта", scenario.operation?.timestepMinutes ?? 10, "мин", scenarioConfig?.operation?.timestepMinutes != null ? "user" : "fallback"),
     field("operation.peak-load", "peakLoadKW", thermalResult?.summary.peakLoadKW ?? null, "кВт", thermalResult ? "result" : "missing"),
@@ -1422,36 +1495,68 @@ function buildOperationSection(
   };
 }
 
+function formatInfiltrationModeRu(mode: string | null | undefined): string {
+  switch (mode) {
+    case "manualAch":
+      return "Ручной ввод";
+    case "envelopeLeakage":
+      return "По воздухопроницаемости ограждений";
+    case "pressureBased":
+      return "По перепаду давления";
+    default:
+      return mode ?? "нет данных";
+  }
+}
+
+function formatAchSourceRu(source: string | null | undefined): string {
+  switch (source) {
+    case "manual":
+      return "Задано вручную";
+    case "calculated":
+      return "Расчёт по модели";
+    case "fallback":
+      return "Резервное значение";
+    default:
+      return source ?? "нет данных";
+  }
+}
+
 function buildAirExchangeSection(
   model: BuildingModel,
   scenarioConfig: ScenarioConfig | null | undefined,
   scenario: ScenarioConfig,
-  designDeltaT: number | null
+  designDeltaT: number | null,
+  dayOfYear?: number | null
 ): SourceDataSectionReport {
   const indoorTemperatureC = scenario.setpoints.day;
   const outdoorTemperatureC =
     designDeltaT != null ? indoorTemperatureC - designDeltaT : scenario.climate.baseC + scenario.climate.seasonalOffsetC;
+  const resolvedVentilation = resolveScenarioVentilationInputs(scenarioConfig, scenario, model, { dayOfYear });
+  const resolvedLeakage = resolveScenarioEnvelopeLeakageInputs(scenarioConfig, scenario, model);
+  const envelopeLeakageForCalc = buildResolvedEnvelopeLeakageConfig(resolvedLeakage);
+  const pressureBasedForCalc = buildResolvedPressureBasedConfig(resolvedVentilation);
+  const mechanicalVentilationEnabled = resolvedVentilation.mechanicalVentilationEnabled.value;
+  const ventilationAch = mechanicalVentilationEnabled ? resolvedVentilation.ventilationACH.value : 0;
+  const heatRecoveryFactor = resolvedVentilation.heatRecoveryFactor.value;
   const infiltrationResult = resolveBuildingInfiltration(
     model,
     {
       infiltrationMode: scenario.ventilation.infiltrationMode,
       infiltrationACH: scenario.ventilation.infiltrationACH,
-      envelopeLeakage: scenario.ventilation.envelopeLeakage,
-      pressureBased: scenario.ventilation.pressureBased,
+      envelopeLeakage: envelopeLeakageForCalc,
+      pressureBased: pressureBasedForCalc,
     },
     {
       indoorTemperatureC,
       outdoorTemperatureC,
-      mechanicalVentilationACH: scenario.ventilation.mechanicalVentilationEnabled ? scenario.ventilation.ventilationACH : 0,
-      mechanicalVentilationEnabled: scenario.ventilation.mechanicalVentilationEnabled,
+      mechanicalVentilationACH: ventilationAch,
+      mechanicalVentilationEnabled,
     }
   );
   const totalVolumeM3 = infiltrationResult.geometry.heatedVolumeM3;
   const infiltrationFlowM3s = totalVolumeM3 > 0 ? infiltrationResult.airflowM3s : null;
   const ventilationFlowM3s =
-    totalVolumeM3 > 0 && scenario.ventilation.mechanicalVentilationEnabled
-      ? airflowFromACH(scenario.ventilation.ventilationACH, totalVolumeM3)
-      : 0;
+    totalVolumeM3 > 0 && mechanicalVentilationEnabled ? airflowFromACH(ventilationAch, totalVolumeM3) : 0;
   const infiltrationLossW = infiltrationFlowM3s != null ? infiltrationResult.heatLossW : null;
   const ventilationLossBeforeW =
     ventilationFlowM3s != null && designDeltaT != null
@@ -1464,7 +1569,7 @@ function buildAirExchangeSection(
           AIR_DENSITY_KG_M3,
           AIR_HEAT_CAPACITY_J_KG_K,
           designDeltaT,
-          scenario.ventilation.heatRecoveryFactor
+          heatRecoveryFactor
         )
       : null;
   const H_inf =
@@ -1481,14 +1586,14 @@ function buildAirExchangeSection(
           ventilationFlowM3s,
           AIR_DENSITY_KG_M3,
           AIR_HEAT_CAPACITY_J_KG_K,
-          scenario.ventilation.heatRecoveryFactor
+          heatRecoveryFactor
         )
       : null;
   const H_total =
     H_inf != null && H_vent_after != null ? heatLossCoefficientTotal(H_inf, H_vent_after) : null;
   const warnings = [
     ...infiltrationResult.warnings,
-    ...(scenario.ventilation.heatRecoveryFactor > 0
+    ...(heatRecoveryFactor > 0
       ? ["Рекуперация применяется только к механической вентиляции. Derived-показатели не меняют RC-solver автоматически."]
       : []),
   ];
@@ -1513,24 +1618,205 @@ function buildAirExchangeSection(
     requirements,
     warnings,
     computedFields: [
+      field(
+        "air.heat-recovery",
+        "КПД рекуперации",
+        heatRecoveryFactor,
+        null,
+        resolvedVentilation.heatRecoveryFactor.source === "user"
+          ? "scenario"
+          : resolvedVentilation.heatRecoveryFactor.source === "fallback"
+            ? "fallback"
+            : "calculated"
+      ),
+      field(
+        "air.g-envelope",
+        "Воздухопроницаемость ограждений G_air",
+        resolvedLeakage.envelopeAirPermeabilityM3sM2At10Pa.value,
+        "м³/(с·м²)",
+        resolvedLeakage.envelopeAirPermeabilityM3sM2At10Pa.source === "user"
+          ? "scenario"
+          : resolvedLeakage.envelopeAirPermeabilityM3sM2At10Pa.source === "fallback"
+            ? "fallback"
+            : "calculated"
+      ),
+      field(
+        "air.g-window",
+        "Воздухопроницаемость окон G_air",
+        resolvedLeakage.windowAirPermeabilityM3sMAt10Pa.value,
+        "м³/(с·м)",
+        resolvedLeakage.windowAirPermeabilityM3sMAt10Pa.source === "user"
+          ? "scenario"
+          : resolvedLeakage.windowAirPermeabilityM3sMAt10Pa.source === "fallback"
+            ? "fallback"
+            : "calculated"
+      ),
+      field(
+        "air.g-door",
+        "Воздухопроницаемость дверей G_air",
+        resolvedLeakage.doorAirPermeabilityM3sMAt10Pa.value,
+        "м³/(с·м)",
+        resolvedLeakage.doorAirPermeabilityM3sMAt10Pa.source === "user"
+          ? "scenario"
+          : resolvedLeakage.doorAirPermeabilityM3sMAt10Pa.source === "fallback"
+            ? "fallback"
+            : "calculated"
+      ),
+      field(
+        "air.pressure-exponent",
+        "Показатель степени n",
+        resolvedLeakage.pressureExponent.value,
+        null,
+        resolvedLeakage.pressureExponent.explicit ? "scenario" : "calculated"
+      ),
+      field(
+        "air.wind-speed",
+        "Скорость ветра",
+        resolvedVentilation.windSpeedMps.value,
+        "м/с",
+        resolvedVentilation.windSpeedMps.source === "user"
+          ? "scenario"
+          : resolvedVentilation.windSpeedMps.source === "fallback"
+            ? "fallback"
+            : "calculated"
+      ),
+      field(
+        "air.wind-cp",
+        "Коэффициент давления Cp",
+        resolvedVentilation.windPressureCoefficient.value,
+        null,
+        resolvedVentilation.windPressureCoefficient.source === "user"
+          ? "scenario"
+          : resolvedVentilation.windPressureCoefficient.source === "fallback"
+            ? "fallback"
+            : resolvedVentilation.windPressureCoefficient.source === "model"
+              ? "sp50"
+              : "calculated"
+      ),
+      field(
+        "air.mechanical-pressure",
+        "ΔP мех. вентиляции",
+        resolvedVentilation.mechanicalPressurePa.value,
+        "Па",
+        resolvedVentilation.mechanicalPressurePa.source === "user" ? "scenario" : "calculated"
+      ),
       field("air.total-volume", "Отапливаемый объём", totalVolumeM3 || null, "м³", totalVolumeM3 > 0 ? "calculated" : "missing"),
-      field("air.infiltration-mode", "Режим инфильтрации", scenario.ventilation.infiltrationMode ?? "manualAch", "", scenarioConfig?.ventilation?.infiltrationMode != null ? "scenario" : "fallback"),
-      field("air.infiltration-source", "Источник ACH", infiltrationResult.diagnostics.achSource, "", infiltrationFieldSource),
-      field("air.infiltration-ach", "Infiltration ACH", infiltrationResult.calculatedACH, "1/ч", infiltrationFieldSource, infiltrationResult.assumptions),
-      field("air.ventilation-ach", "Ventilation ACH", scenario.ventilation.mechanicalVentilationEnabled ? scenario.ventilation.ventilationACH : 0, "1/ч", scenarioConfig?.ventilation?.ventilationACH != null ? "scenario" : "fallback"),
-      field("air.infiltration-flow", "L_inf = ACH · V / 3600", infiltrationFlowM3s != null ? infiltrationFlowM3s * 3600 : null, "м³/ч", infiltrationFlowM3s != null ? "calculated" : "missing"),
-      field("air.ventilation-flow", "L_vent = ACH · V / 3600", ventilationFlowM3s != null ? ventilationFlowM3s * 3600 : null, "м³/ч", ventilationFlowM3s != null ? "calculated" : "missing"),
-      field("air.pressure-wind", "ΔP_wind", infiltrationResult.pressureWindPa, "Па", "calculated"),
-      field("air.pressure-stack", "ΔP_stack", infiltrationResult.pressureStackPa, "Па", "calculated"),
-      field("air.pressure-total", "ΔP_total", infiltrationResult.pressureTotalPa, "Па", "calculated"),
-      field("air.q-inf", "Q_inf", infiltrationLossW, "Вт", infiltrationLossW != null ? "calculated" : "missing"),
-      field("air.q-vent-before", "Q_vent до рекуперации", ventilationLossBeforeW, "Вт", ventilationLossBeforeW != null ? "calculated" : "missing"),
-      field("air.q-vent-after", "Q_vent после рекуперации", recovery?.afterRecoveryW ?? null, "Вт", recovery ? "calculated" : "missing", warnings),
-      field("air.saved-by-recovery", "savedByRecovery", recovery?.savedW ?? null, "Вт", recovery ? "calculated" : "missing", warnings),
-      field("air.h-inf", "H_inf", H_inf, "Вт/К", H_inf != null ? "calculated" : "missing"),
-      field("air.h-vent-before", "H_ve до рекуперации", H_vent_before, "Вт/К", H_vent_before != null ? "calculated" : "missing"),
-      field("air.h-vent", "H_ve", H_vent_after, "Вт/К", H_vent_after != null ? "calculated" : "missing", warnings),
-      field("air.h-total", "H_total", H_total, "Вт/К", H_total != null ? "calculated" : "missing", warnings),
+      field(
+        "air.envelope-opaque-area",
+        "Площадь непрозрачного ограждения",
+        infiltrationResult.geometry.envelopeOpaqueAreaM2 > 0 ? infiltrationResult.geometry.envelopeOpaqueAreaM2 : null,
+        "м²",
+        infiltrationResult.geometry.envelopeOpaqueAreaM2 > 0 ? "calculated" : "missing"
+      ),
+      field(
+        "air.window-perimeter",
+        "Периметр окон",
+        infiltrationResult.geometry.windowPerimeterM > 0 ? infiltrationResult.geometry.windowPerimeterM : null,
+        "м",
+        infiltrationResult.geometry.windowPerimeterM > 0 ? "calculated" : "missing"
+      ),
+      field(
+        "air.door-perimeter",
+        "Периметр дверей",
+        infiltrationResult.geometry.doorPerimeterM > 0 ? infiltrationResult.geometry.doorPerimeterM : null,
+        "м",
+        infiltrationResult.geometry.doorPerimeterM > 0 ? "calculated" : "missing"
+      ),
+      field(
+        "air.stack-height",
+        "Высота для теплового напора",
+        resolvedVentilation.stackHeightM.value,
+        "м",
+        resolvedVentilation.stackHeightM.source === "user"
+          ? "scenario"
+          : resolvedVentilation.stackHeightM.source === "fallback"
+            ? "fallback"
+            : "calculated"
+      ),
+      field(
+        "air.infiltration-mode",
+        "Режим инфильтрации",
+        formatInfiltrationModeRu(scenario.ventilation.infiltrationMode ?? "manualAch"),
+        null,
+        scenarioConfig?.ventilation?.infiltrationMode != null ? "scenario" : "fallback"
+      ),
+      field(
+        "air.infiltration-source",
+        "Источник кратности инфильтрации",
+        formatAchSourceRu(infiltrationResult.diagnostics.achSource),
+        null,
+        infiltrationFieldSource
+      ),
+      field(
+        "air.infiltration-ach",
+        "Кратность инфильтрации",
+        infiltrationResult.calculatedACH,
+        "1/ч",
+        infiltrationFieldSource,
+        infiltrationResult.assumptions
+      ),
+      field(
+        "air.ventilation-ach",
+        "Кратность механической вентиляции",
+        ventilationAch,
+        "1/ч",
+        resolvedVentilation.ventilationACH.source === "user"
+          ? "scenario"
+          : resolvedVentilation.ventilationACH.source === "fallback"
+            ? "fallback"
+            : "calculated"
+      ),
+      field(
+        "air.infiltration-flow",
+        "Расход инфильтрации",
+        infiltrationFlowM3s != null ? infiltrationFlowM3s * 3600 : null,
+        "м³/ч",
+        infiltrationFlowM3s != null ? "calculated" : "missing"
+      ),
+      field(
+        "air.ventilation-flow",
+        "Расход механической вентиляции",
+        ventilationFlowM3s != null ? ventilationFlowM3s * 3600 : null,
+        "м³/ч",
+        ventilationFlowM3s != null ? "calculated" : "missing"
+      ),
+      field("air.pressure-wind", "Ветровой перепад давления", infiltrationResult.pressureWindPa, "Па", "calculated"),
+      field("air.pressure-stack", "Перепад давления от теплового напора", infiltrationResult.pressureStackPa, "Па", "calculated"),
+      field("air.pressure-total", "Суммарный перепад давления", infiltrationResult.pressureTotalPa, "Па", "calculated"),
+      field("air.q-inf", "Теплопотери на инфильтрацию", infiltrationLossW, "Вт", infiltrationLossW != null ? "calculated" : "missing"),
+      field(
+        "air.q-vent-before",
+        "Теплопотери вентиляции до рекуперации",
+        ventilationLossBeforeW,
+        "Вт",
+        ventilationLossBeforeW != null ? "calculated" : "missing"
+      ),
+      field(
+        "air.q-vent-after",
+        "Теплопотери вентиляции после рекуперации",
+        recovery?.afterRecoveryW ?? null,
+        "Вт",
+        recovery ? "calculated" : "missing",
+        warnings
+      ),
+      field(
+        "air.saved-by-recovery",
+        "Экономия за счёт рекуперации",
+        recovery?.savedW ?? null,
+        "Вт",
+        recovery ? "calculated" : "missing",
+        warnings
+      ),
+      field("air.h-inf", "Коэффициент теплопотерь инфильтрации", H_inf, "Вт/К", H_inf != null ? "calculated" : "missing"),
+      field(
+        "air.h-vent-before",
+        "Коэффициент теплопотерь вентиляции до рекуперации",
+        H_vent_before,
+        "Вт/К",
+        H_vent_before != null ? "calculated" : "missing"
+      ),
+      field("air.h-vent", "Коэффициент теплопотерь вентиляции", H_vent_after, "Вт/К", H_vent_after != null ? "calculated" : "missing", warnings),
+      field("air.h-total", "Суммарный коэффициент теплопотерь воздухообмена", H_total, "Вт/К", H_total != null ? "calculated" : "missing", warnings),
     ],
   };
 }
@@ -1691,16 +1977,28 @@ function buildEngineeringSection(
 ): SourceDataSectionReport {
   const modelSummary = summarizeModelEngineering(model);
   const totalPipeLengthM = modelSummary.totalPipeLengthM;
+  const pipeSegmentCount = model.pipes.length + (model.engineeringSystems?.pipes.length ?? 0);
   const diameters = Array.from(
     new Set(
-      model.pipes
-        .map((pipe) => pipe.diameter_mm)
+      [
+        ...model.pipes.map((pipe) => pipe.diameter_mm),
+        ...(model.engineeringSystems?.pipes.map((pipe) => pipe.diameter) ?? []),
+      ]
         .filter((value): value is number => typeof value === "number" && Number.isFinite(value) && value > 0)
         .sort((left, right) => left - right)
     )
   );
-  const insulatedPipeCount = model.pipes.filter((pipe) => (pipe.insulationThickness_mm ?? 0) > 0).length;
-  const requiredPowerW = thermalResult?.summary.peakLoadKW != null ? thermalResult.summary.peakLoadKW * 1000 : null;
+  const insulatedPipeCount =
+    model.pipes.filter((pipe) => (pipe.insulationThickness_mm ?? 0) > 0).length +
+    (model.engineeringSystems?.pipes.filter((pipe) => (pipe.insulation ?? 0) > 0).length ?? 0);
+  const peakLoadFromSimulationKw = thermalResult?.summary.peakLoadKW;
+  const requiredPowerFromSimulationW =
+    peakLoadFromSimulationKw != null && Number.isFinite(peakLoadFromSimulationKw) && peakLoadFromSimulationKw > 0
+      ? peakLoadFromSimulationKw * 1000
+      : null;
+  const requiredPowerFromModelW = modelSummary.installedPowerW > 0 ? modelSummary.installedPowerW : null;
+  const requiredPowerW = requiredPowerFromSimulationW ?? requiredPowerFromModelW;
+  const requiredPowerUsesModelDesign = requiredPowerFromSimulationW == null && requiredPowerFromModelW != null;
   const provisionalDeltaT =
     scenario.engineeringSystems?.supplyTemperatureC != null &&
     scenario.engineeringSystems?.returnTemperatureC != null
@@ -1726,14 +2024,27 @@ function buildEngineeringSection(
     fluidHeatCapacityJkgK: fluid.cp,
     maxPowerW: resolved.installedCapacityW.value,
   });
+  const hydronicDeltaT =
+    hydronic.deltaT != null && hydronic.deltaT > 0
+      ? hydronic.deltaT
+      : resolved.supplyTemperatureC.value - resolved.returnTemperatureC.value > 0
+        ? resolved.supplyTemperatureC.value - resolved.returnTemperatureC.value
+        : null;
   const requiredMassFlowKgS =
-    requiredPowerW != null && hydronic.deltaT != null && hydronic.deltaT > 0
-      ? calculateRequiredHydronicMassFlow(requiredPowerW, hydronic.deltaT, fluid.cp)
+    requiredPowerW != null && hydronicDeltaT != null
+      ? calculateRequiredHydronicMassFlow(requiredPowerW, hydronicDeltaT, fluid.cp)
       : null;
   const requiredVolumeFlowM3H =
-    requiredPowerW != null && hydronic.deltaT != null && hydronic.deltaT > 0
-      ? calculateRequiredHydronicVolumeFlowM3H(requiredPowerW, hydronic.deltaT, fluid.density, fluid.cp)
+    requiredPowerW != null && hydronicDeltaT != null
+      ? calculateRequiredHydronicVolumeFlowM3H(requiredPowerW, hydronicDeltaT, fluid.density, fluid.cp)
       : null;
+  const requiredFlowOrigin: SourceDataOrigin = requiredMassFlowKgS != null
+    ? requiredPowerUsesModelDesign
+      ? "model"
+      : "calculated"
+    : "missing";
+  const peakUnmetLoadKW = thermalResult ? (thermalResult.summary.peakUnmetLoadKW ?? 0) : null;
+  const unmetEnergyKWh = thermalResult ? (thermalResult.summary.unmetEnergyKWh ?? 0) : null;
   const installedCapacityW = resolved.installedCapacityW.value;
   const capacityLimited = scenario.engineeringSystems?.heatingMode === "capacityLimited";
 
@@ -1774,6 +2085,16 @@ function buildEngineeringSection(
   const warnings = [
     ...(scenario.engineeringSystems?.heatingMode === "ideal"
       ? ["Режим ideal остаётся режимом solver по умолчанию: требуемая мощность не ограничивается."] : []),
+    ...(requiredPowerUsesModelDesign
+      ? [
+          "Требуемый расход теплоносителя рассчитан по установленной мощности оборудования модели: выполните теплорасчёт для пика по зданию.",
+        ]
+      : []),
+    ...(!thermalResult
+      ? ["Непокрытая нагрузка и энергия доступны после выполнения теплорасчёта (режим capacityLimited)."]
+      : scenario.engineeringSystems?.heatingMode === "ideal"
+        ? ["В режиме ideal непокрытая нагрузка обычно равна нулю — ограничение мощности не применяется."]
+        : []),
     ...autoFillNotes,
     ...fluid.warnings,
     ...hydronic.warnings,
@@ -1803,10 +2124,16 @@ function buildEngineeringSection(
       field("engineering.delta-t", "ΔT теплоносителя", hydronic.deltaT, "К", hydronic.deltaT != null ? "calculated" : "missing", hydronic.warnings),
       field("engineering.mass-flow", "Заданный массовый расход", hydronic.massFlowKgS, "кг/с", hydronic.massFlowKgS != null ? engineeringInputOrigin(resolved.massFlowKgS.source) : "missing", hydronic.warnings),
       field("engineering.hydronic-capacity", "Q_hyd", hydronic.availablePowerW, "Вт", hydronic.availablePowerW != null ? "calculated" : "missing", ["Гидравлическая мощность рассчитана справочно и не ограничивает RC-solver без отдельного режима.", ...hydronic.warnings]),
-      field("engineering.required-mass-flow", "Требуемый расход теплоносителя", requiredMassFlowKgS, "кг/с", requiredMassFlowKgS != null ? "calculated" : "missing"),
-      field("engineering.required-volume-flow", "Требуемый объёмный расход", requiredVolumeFlowM3H, "м³/ч", requiredVolumeFlowM3H != null ? "calculated" : "missing"),
+      field("engineering.required-mass-flow", "Требуемый расход теплоносителя", requiredMassFlowKgS, "кг/с", requiredFlowOrigin),
+      field("engineering.required-volume-flow", "Требуемый объёмный расход", requiredVolumeFlowM3H, "м³/ч", requiredFlowOrigin),
       field("engineering.installed-capacity", "Установленная мощность", installedCapacityW || null, "Вт", engineeringInputOrigin(resolved.installedCapacityW.source)),
-      field("engineering.pipe-count", "Количество трубных участков", model.pipes.length || null, null, model.pipes.length ? "model" : "missing"),
+      field(
+        "engineering.pipe-count",
+        "Количество трубных участков",
+        pipeSegmentCount || null,
+        null,
+        pipeSegmentCount > 0 ? "model" : "missing"
+      ),
       field("engineering.pipe-total-length", "Суммарная длина труб", totalPipeLengthM || null, "м", totalPipeLengthM > 0 ? "model" : "missing"),
       field(
         "engineering.pipe-diameter",
@@ -1818,12 +2145,12 @@ function buildEngineeringSection(
       field(
         "engineering.pipe-insulation",
         "Теплоизоляция труб",
-        model.pipes.length ? `${insulatedPipeCount}/${model.pipes.length}` : null,
+        pipeSegmentCount > 0 ? `${insulatedPipeCount}/${pipeSegmentCount}` : null,
         null,
-        model.pipes.length ? "model" : "missing"
+        pipeSegmentCount > 0 ? "model" : "missing"
       ),
-      field("engineering.peak-unmet-load", "peakUnmetLoadKW", thermalResult?.summary.peakUnmetLoadKW ?? null, "кВт", thermalResult ? "result" : "missing"),
-      field("engineering.unmet-energy", "unmetEnergyKWh", thermalResult?.summary.unmetEnergyKWh ?? null, "кВт·ч", thermalResult ? "result" : "missing"),
+      field("engineering.peak-unmet-load", "peakUnmetLoadKW", peakUnmetLoadKW, "кВт", thermalResult ? "result" : "missing"),
+      field("engineering.unmet-energy", "unmetEnergyKWh", unmetEnergyKWh, "кВт·ч", thermalResult ? "result" : "missing"),
     ],
   };
 }
@@ -1834,14 +2161,21 @@ function buildEcologySection(
   scenario: ScenarioConfig,
   thermalResult: ThermalSimulationResult | null | undefined
 ): SourceDataSectionReport {
-  const emissionFactor = scenario.ecology?.emissionFactorKgPerKWh ?? null;
+  const resolvedEmissionFactor = resolveScenarioEcologyEmissionFactor(scenarioConfig ?? scenario);
+  const emissionFactor = resolvedEmissionFactor.value;
+  const emissionFactorOrigin: SourceDataOrigin =
+    resolvedEmissionFactor.source === "user"
+      ? "user"
+      : resolvedEmissionFactor.source === "norm"
+        ? "calculated"
+        : "missing";
   const energyKWh = thermalResult?.summary.totalEnergyKWh ?? null;
   const co2Kg =
     emissionFactor != null && energyKWh != null ? emissionFactor * energyKWh : null;
   const isDemoProject = isCanonicalDemoProjectModel(model);
   const requirements: SourceDataRequirement[] = [
     requirement("ecology.energy-source", "Источник энергии", Boolean(scenarioConfig?.ecology?.energySource), scenarioConfig?.ecology?.energySource ? "user" : "missing"),
-    requirement("ecology.ef", "Emission factor", emissionFactor != null, emissionFactor != null ? "user" : "missing"),
+    requirement("ecology.ef", "Emission factor", emissionFactor != null, emissionFactorOrigin === "missing" ? "missing" : emissionFactorOrigin),
   ];
   return {
     id: "ecology",
@@ -1854,12 +2188,14 @@ function buildEcologySection(
             "Emission factor не задан, CO₂ не рассчитывается.",
             ...(isDemoProject ? ["Для demo-проекта источник энергии показан, но EF оставлен как «нет данных» до подтверждения проверяемым источником."] : []),
           ]
-        : isDemoProject
-          ? ["EF для demo-проекта должен быть явно подтвержден источником или помечен как типовое значение."]
-          : [],
+        : resolvedEmissionFactor.source === "norm" && resolvedEmissionFactor.normNote
+          ? [`Типовой EF по источнику энергии: ${resolvedEmissionFactor.normNote}.`]
+          : isDemoProject
+            ? ["EF для demo-проекта должен быть явно подтвержден источником или помечен как типовое значение."]
+            : [],
     computedFields: [
       field("ecology.energy-source", "Источник энергии", scenario.ecology?.energySource ?? null, null, scenarioConfig?.ecology?.energySource ? "user" : "missing"),
-      field("ecology.ef", "Emission factor", emissionFactor, "кг CO₂/кВт·ч", emissionFactor != null ? "user" : "missing"),
+      field("ecology.ef", "Emission factor", emissionFactor, "кг CO₂/кВт·ч", emissionFactorOrigin),
       field("ecology.energy", "Энергия расчётного периода", energyKWh, "кВт·ч", energyKWh != null ? "result" : "missing"),
       field("ecology.co2-kg", "CO₂", co2Kg, "кг", co2Kg != null ? "calculated" : "missing", emissionFactor == null ? ["Без emission factor выбросы не вычисляются."] : []),
       field("ecology.co2-tonnes", "CO₂", co2Kg != null ? co2Kg / 1000 : null, "т", co2Kg != null ? "calculated" : "missing", emissionFactor == null ? ["Без emission factor выбросы не вычисляются."] : []),
@@ -1878,13 +2214,39 @@ function buildEconomySection(
   const annualizedEnergyKWh =
     periodEnergyKWh != null && periodDays > 0 ? (periodEnergyKWh / periodDays) * 365 : null;
   const resolvedTariff = resolveScenarioEnergyTariff(scenario, model);
+  const resolvedEconomy = resolveScenarioEconomy(scenarioConfig, model);
   const tariff = resolvedTariff.tariffRubPerKWh;
   const annualCostRub =
     annualizedEnergyKWh != null ? tariff * annualizedEnergyKWh : null;
+  const economyOrigin = (field: typeof resolvedEconomy.discountRatePercent): SourceDataOrigin => {
+    if (field.explicit) {
+      return "scenario";
+    }
+    switch (field.source) {
+      case "norm":
+        return scenario.climateCityId ? "sp131" : "fallback";
+      case "estimated":
+        return "calculated";
+      default:
+        return "missing";
+    }
+  };
   const requirements: SourceDataRequirement[] = [
     requirement("economy.tariff", "Тариф", true, scenario.climateCityId ? "sp131" : "fallback"),
-    requirement("economy.capex", "CAPEX мероприятий", (scenario.economy?.capexRub ?? null) != null, (scenario.economy?.capexRub ?? null) != null ? "user" : "missing", [], false),
-    requirement("economy.discount", "Ставка дисконтирования", true, scenarioConfig?.economy?.discountRatePercent != null ? "user" : "fallback"),
+    requirement(
+      "economy.capex",
+      "CAPEX мероприятий",
+      resolvedEconomy.capexRub.value != null,
+      economyOrigin(resolvedEconomy.capexRub),
+      [],
+      false
+    ),
+    requirement(
+      "economy.discount",
+      "Ставка дисконтирования",
+      resolvedEconomy.discountRatePercent.value != null,
+      economyOrigin(resolvedEconomy.discountRatePercent)
+    ),
   ];
   const warnings: string[] = [];
   const tariffUnit =
@@ -1910,11 +2272,56 @@ function buildEconomySection(
         tariffUnit,
         scenario.climateCityId ? "sp131" : "fallback"
       ),
-      field("economy.capex", "CAPEX", scenario.economy?.capexRub ?? null, "руб", scenarioConfig?.economy?.capexRub != null ? "user" : "missing"),
-      field("economy.analysis-period", "Период анализа", scenario.economy?.analysisPeriodYears ?? null, "лет", scenarioConfig?.economy?.analysisPeriodYears != null ? "user" : "fallback"),
-      field("economy.discount", "Ставка дисконтирования", scenario.economy?.discountRatePercent ?? null, "%", scenarioConfig?.economy?.discountRatePercent != null ? "user" : "fallback"),
-      field("economy.tariff-growth", "Рост тарифа", scenario.economy?.annualTariffGrowthPercent ?? null, "%", scenarioConfig?.economy?.annualTariffGrowthPercent != null ? "user" : "fallback"),
-      field("economy.maintenance", "Стоимость обслуживания", scenario.economy?.annualMaintenanceCostRub ?? null, "руб/год", scenarioConfig?.economy?.annualMaintenanceCostRub != null ? "user" : "missing"),
+      field("economy.capex", "CAPEX", resolvedEconomy.capexRub.value, "руб", economyOrigin(resolvedEconomy.capexRub)),
+      field(
+        "economy.analysis-period",
+        "Период анализа",
+        resolvedEconomy.analysisPeriodYears.value,
+        "лет",
+        economyOrigin(resolvedEconomy.analysisPeriodYears)
+      ),
+      field(
+        "economy.discount",
+        "Ставка дисконтирования",
+        resolvedEconomy.discountRatePercent.value,
+        "%",
+        economyOrigin(resolvedEconomy.discountRatePercent)
+      ),
+      field(
+        "economy.tariff-growth",
+        "Рост тарифа",
+        resolvedEconomy.annualTariffGrowthPercent.value,
+        "%",
+        economyOrigin(resolvedEconomy.annualTariffGrowthPercent)
+      ),
+      field(
+        "economy.maintenance",
+        "Стоимость обслуживания",
+        resolvedEconomy.annualMaintenanceCostRub.value,
+        "руб/год",
+        economyOrigin(resolvedEconomy.annualMaintenanceCostRub)
+      ),
+      field(
+        "economy.insulation-cost",
+        "Стоимость утепления",
+        resolvedEconomy.insulationCostRub.value,
+        "руб",
+        economyOrigin(resolvedEconomy.insulationCostRub)
+      ),
+      field(
+        "economy.windows-cost",
+        "Стоимость окон",
+        resolvedEconomy.windowsCostRub.value,
+        "руб",
+        economyOrigin(resolvedEconomy.windowsCostRub)
+      ),
+      field(
+        "economy.equipment-cost",
+        "Стоимость оборудования",
+        resolvedEconomy.equipmentCostRub.value,
+        "руб",
+        economyOrigin(resolvedEconomy.equipmentCostRub)
+      ),
       field("economy.annualized-energy", "Annualized energy", annualizedEnergyKWh, "кВт·ч/год", annualizedEnergyKWh != null ? "calculated" : "missing"),
       field("economy.annual-cost", "Annual cost", annualCostRub, "руб/год", annualCostRub != null ? "calculated" : "missing"),
     ],
@@ -2105,8 +2512,14 @@ export function buildSourceDataWorkspaceReport(
     input.thermalResult,
     input.solarTime
   );
-  const operation = buildOperationSection(input.scenarioConfig, scenario, input.thermalResult);
-  const airExchange = buildAirExchangeSection(model, input.scenarioConfig, scenario, climate.designDeltaT);
+  const operation = buildOperationSection(input.scenarioConfig, scenario, model, input.thermalResult);
+  const airExchange = buildAirExchangeSection(
+    model,
+    input.scenarioConfig,
+    scenario,
+    climate.designDeltaT,
+    input.solarTime?.dayOfYear
+  );
   const humidity = buildHumiditySection(input.scenarioConfig, scenario, model, input.thermalResult, climate.section);
   const engineeringNetworks = buildEngineeringSection(model, input.scenarioConfig, scenario, input.thermalResult);
   const ecology = buildEcologySection(model, input.scenarioConfig, scenario, input.thermalResult);

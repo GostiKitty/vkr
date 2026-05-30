@@ -42,7 +42,15 @@ export interface CityEnergyProfile {
    * Москва = 1.00; значения < 1 — регионы с более низкой стоимостью рабочей силы и материалов.
    */
   constructionCostFactor: number;
+  /**
+   * Ожидаемый среднегодовой рост тарифа на тепло/электроэнергию для населения, %.
+   * Ориентир: индексация ЖКХ (Распоряжение Правительства №3287-р: 2025 — 11,9 %, 2026 — 5,4 %, 2027 — 4,8 %).
+   */
+  annualTariffGrowthPercent?: number;
 }
+
+/** Средний рост тарифов ЖКХ по РФ на горизонте 2025–2027 (см. №3287-р), %/год */
+export const DEFAULT_ANNUAL_TARIFF_GROWTH_PERCENT = 8;
 
 /** Теплотворная способность природного газа (низшая), кВт·ч/м³ */
 export const GAS_LCV_KWH_PER_M3 = 9.3;
@@ -70,6 +78,7 @@ export const CITY_ENERGY_PROFILES: CityEnergyProfile[] = [
     gasMinimumOfftakePercent: 70,
     heatContractMinimumPaymentFraction: 0.10,
     constructionCostFactor: 1.00,
+    annualTariffGrowthPercent: 10,
   },
   {
     cityId: "spb",
@@ -81,6 +90,7 @@ export const CITY_ENERGY_PROFILES: CityEnergyProfile[] = [
     gasMinimumOfftakePercent: 70,
     heatContractMinimumPaymentFraction: 0.12,
     constructionCostFactor: 0.95,
+    annualTariffGrowthPercent: 10,
   },
   {
     cityId: "voronezh",
@@ -92,6 +102,7 @@ export const CITY_ENERGY_PROFILES: CityEnergyProfile[] = [
     gasMinimumOfftakePercent: 70,
     heatContractMinimumPaymentFraction: 0.15,
     constructionCostFactor: 0.76,
+    annualTariffGrowthPercent: 9,
   },
   {
     cityId: "nizhny_novgorod",
@@ -103,6 +114,7 @@ export const CITY_ENERGY_PROFILES: CityEnergyProfile[] = [
     gasMinimumOfftakePercent: 70,
     heatContractMinimumPaymentFraction: 0.15,
     constructionCostFactor: 0.82,
+    annualTariffGrowthPercent: 9,
   },
   {
     cityId: "kazan",
@@ -114,6 +126,7 @@ export const CITY_ENERGY_PROFILES: CityEnergyProfile[] = [
     gasMinimumOfftakePercent: 70,
     heatContractMinimumPaymentFraction: 0.15,
     constructionCostFactor: 0.80,
+    annualTariffGrowthPercent: 9,
   },
   {
     cityId: "samara",
@@ -125,6 +138,7 @@ export const CITY_ENERGY_PROFILES: CityEnergyProfile[] = [
     gasMinimumOfftakePercent: 70,
     heatContractMinimumPaymentFraction: 0.15,
     constructionCostFactor: 0.79,
+    annualTariffGrowthPercent: 9,
   },
   {
     cityId: "ufa",
@@ -136,6 +150,7 @@ export const CITY_ENERGY_PROFILES: CityEnergyProfile[] = [
     gasMinimumOfftakePercent: 65,
     heatContractMinimumPaymentFraction: 0.18,
     constructionCostFactor: 0.78,
+    annualTariffGrowthPercent: 8,
   },
   {
     cityId: "saratov",
@@ -147,6 +162,7 @@ export const CITY_ENERGY_PROFILES: CityEnergyProfile[] = [
     gasMinimumOfftakePercent: 70,
     heatContractMinimumPaymentFraction: 0.15,
     constructionCostFactor: 0.76,
+    annualTariffGrowthPercent: 9,
   },
   {
     cityId: "volgograd",
@@ -158,6 +174,7 @@ export const CITY_ENERGY_PROFILES: CityEnergyProfile[] = [
     gasMinimumOfftakePercent: 70,
     heatContractMinimumPaymentFraction: 0.15,
     constructionCostFactor: 0.77,
+    annualTariffGrowthPercent: 9,
   },
   {
     cityId: "rostov",
@@ -169,6 +186,7 @@ export const CITY_ENERGY_PROFILES: CityEnergyProfile[] = [
     gasMinimumOfftakePercent: 70,
     heatContractMinimumPaymentFraction: 0.12,
     constructionCostFactor: 0.82,
+    annualTariffGrowthPercent: 10,
   },
   {
     cityId: "krasnodar",
@@ -180,6 +198,7 @@ export const CITY_ENERGY_PROFILES: CityEnergyProfile[] = [
     gasMinimumOfftakePercent: 70,
     heatContractMinimumPaymentFraction: 0.12,
     constructionCostFactor: 0.87,
+    annualTariffGrowthPercent: 10,
   },
   // ─── Урал ────────────────────────────────────────────────────────────────
   {
@@ -192,6 +211,7 @@ export const CITY_ENERGY_PROFILES: CityEnergyProfile[] = [
     gasMinimumOfftakePercent: 70,
     heatContractMinimumPaymentFraction: 0.15,
     constructionCostFactor: 0.85,
+    annualTariffGrowthPercent: 9,
   },
   {
     cityId: "chelyabinsk",
@@ -203,6 +223,7 @@ export const CITY_ENERGY_PROFILES: CityEnergyProfile[] = [
     gasMinimumOfftakePercent: 70,
     heatContractMinimumPaymentFraction: 0.15,
     constructionCostFactor: 0.80,
+    annualTariffGrowthPercent: 9,
   },
   {
     cityId: "perm",
@@ -214,6 +235,7 @@ export const CITY_ENERGY_PROFILES: CityEnergyProfile[] = [
     gasMinimumOfftakePercent: 70,
     heatContractMinimumPaymentFraction: 0.15,
     constructionCostFactor: 0.80,
+    annualTariffGrowthPercent: 9,
   },
   // ─── Западная Сибирь ─────────────────────────────────────────────────────
   {
@@ -226,6 +248,7 @@ export const CITY_ENERGY_PROFILES: CityEnergyProfile[] = [
     gasMinimumOfftakePercent: 65,
     heatContractMinimumPaymentFraction: 0.10,
     constructionCostFactor: 0.92,
+    annualTariffGrowthPercent: 7,
   },
   {
     cityId: "omsk",
@@ -237,6 +260,7 @@ export const CITY_ENERGY_PROFILES: CityEnergyProfile[] = [
     gasMinimumOfftakePercent: 70,
     heatContractMinimumPaymentFraction: 0.15,
     constructionCostFactor: 0.80,
+    annualTariffGrowthPercent: 8,
   },
   {
     cityId: "novosibirsk",
@@ -248,6 +272,7 @@ export const CITY_ENERGY_PROFILES: CityEnergyProfile[] = [
     gasMinimumOfftakePercent: 70,
     heatContractMinimumPaymentFraction: 0.15,
     constructionCostFactor: 0.83,
+    annualTariffGrowthPercent: 8,
   },
   {
     cityId: "tomsk",
@@ -259,6 +284,7 @@ export const CITY_ENERGY_PROFILES: CityEnergyProfile[] = [
     gasMinimumOfftakePercent: 70,
     heatContractMinimumPaymentFraction: 0.15,
     constructionCostFactor: 0.82,
+    annualTariffGrowthPercent: 8,
   },
   // ─── Восточная Сибирь и ДВ ───────────────────────────────────────────────
   {
@@ -271,6 +297,7 @@ export const CITY_ENERGY_PROFILES: CityEnergyProfile[] = [
     gasMinimumOfftakePercent: 0,
     heatContractMinimumPaymentFraction: 0.10,
     constructionCostFactor: 0.88,
+    annualTariffGrowthPercent: 7,
   },
   {
     cityId: "irkutsk",
@@ -282,6 +309,7 @@ export const CITY_ENERGY_PROFILES: CityEnergyProfile[] = [
     gasMinimumOfftakePercent: 0,
     heatContractMinimumPaymentFraction: 0.10,
     constructionCostFactor: 0.85,
+    annualTariffGrowthPercent: 7,
   },
   {
     cityId: "khabarovsk",
@@ -293,6 +321,7 @@ export const CITY_ENERGY_PROFILES: CityEnergyProfile[] = [
     gasMinimumOfftakePercent: 0,
     heatContractMinimumPaymentFraction: 0.12,
     constructionCostFactor: 0.90,
+    annualTariffGrowthPercent: 9,
   },
 ];
 

@@ -19,31 +19,32 @@ export function createDefaultScenarioConfig() {
             setpointRampMinutes: 60,
         },
         internalGains: {
-            dayGain_W_m2: 6,
-            nightGain_W_m2: 1,
+            dayGain_W_m2: 17,
+            nightGain_W_m2: 3.7,
         },
+        occupancyPresetId: "residential",
         occupancy: {
             dayFraction: 1,
-            nightFraction: 0.2,
+            nightFraction: 0.25,
         },
         ventilation: {
-            infiltrationMode: "manualAch",
+            infiltrationMode: "envelopeLeakage",
             infiltrationACH: 0.5,
             ventilationACH: 0.18,
-            heatRecoveryFactor: 0,
+            heatRecoveryFactor: null,
             mechanicalVentilationEnabled: true,
             envelopeLeakage: {
-                envelopeAirPermeabilityM3sM2At10Pa: 0.00005,
-                windowAirPermeabilityM3sMAt10Pa: 0.0008,
-                doorAirPermeabilityM3sMAt10Pa: 0.0012,
-                pressureExponent: 0.67,
-                referencePressurePa: 10,
+                envelopeAirPermeabilityM3sM2At10Pa: null,
+                windowAirPermeabilityM3sMAt10Pa: null,
+                doorAirPermeabilityM3sMAt10Pa: null,
+                pressureExponent: null,
+                referencePressurePa: null,
             },
             pressureBased: {
-                windSpeedMps: 4,
-                windPressureCoefficient: 0.6,
-                stackHeightM: 6,
-                mechanicalPressurePa: 0,
+                windSpeedMps: null,
+                windPressureCoefficient: null,
+                stackHeightM: null,
+                mechanicalPressurePa: null,
             },
         },
         climateCityId: "moscow",
@@ -90,9 +91,9 @@ export function createDefaultScenarioConfig() {
         economy: {
             tariffRubPerKWh: null,
             capexRub: null,
-            analysisPeriodYears: 15,
-            discountRatePercent: 10,
-            annualTariffGrowthPercent: 5,
+            analysisPeriodYears: null,
+            discountRatePercent: null,
+            annualTariffGrowthPercent: null,
             annualMaintenanceCostRub: null,
             insulationCostRub: null,
             windowsCostRub: null,
@@ -111,7 +112,7 @@ export function createDefaultScenarioConfig() {
 }
 export function resolveScenarioConfig(config) {
     const defaults = createDefaultScenarioConfig();
-    return {
+    const resolved = {
         ...defaults,
         ...config,
         climate: {
@@ -184,6 +185,13 @@ export function resolveScenarioConfig(config) {
             measuredSeries: [...(config?.validation?.measuredSeries ?? defaults.validation?.measuredSeries ?? [])],
         },
     };
+    if (config?.ventilation?.infiltrationMode == null) {
+        resolved.ventilation = {
+            ...resolved.ventilation,
+            infiltrationMode: defaults.ventilation.infiltrationMode,
+        };
+    }
+    return resolved;
 }
 const initialState = {
     currentStep: "geometry",

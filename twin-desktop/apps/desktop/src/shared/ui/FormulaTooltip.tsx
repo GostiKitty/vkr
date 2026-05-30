@@ -24,16 +24,12 @@ export function FormulaTooltip({
   title,
   meaning,
   formula,
-  inputs,
   notes,
   linkedFormulaIds,
   className,
   children,
 }: FormulaTooltipProps) {
-  const details = [
-    ...normalizeItems(inputs).map((item) => `Входные данные: ${item}`),
-    ...normalizeItems(notes),
-  ];
+  const details = [...normalizeItems(notes)];
 
   return (
     <Tooltip
@@ -61,12 +57,23 @@ export function FormulaTooltip({
 export function MetricInfoTooltip({
   title,
   formula,
+  description,
+  meaning,
   linkedFormulaIds,
   className,
   children,
-}: Pick<FormulaTooltipProps, "title" | "formula" | "linkedFormulaIds" | "className" | "children">) {
+}: Pick<FormulaTooltipProps, "title" | "formula" | "linkedFormulaIds" | "className" | "children"> & {
+  description?: string;
+  meaning?: string;
+}) {
   return (
-    <Tooltip title={title} formulaLatex={formula} linkedFormulaIds={linkedFormulaIds ?? []} className={className}>
+    <Tooltip
+      title={title}
+      description={description ?? meaning}
+      formulaLatex={formula}
+      linkedFormulaIds={linkedFormulaIds ?? []}
+      className={className}
+    >
       {children ?? (
         <button
           type="button"

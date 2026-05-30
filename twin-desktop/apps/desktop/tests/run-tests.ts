@@ -1,6 +1,7 @@
 import { runTests } from "./testHarness.js";
 
 import "./geometry/bimPipeline.test.js";
+import "./geometry/dedupeRoomVolumes.test.js";
 import "./demo/demoVKRScenario.test.js";
 import "./demo/videoDemoHouse.test.js";
 import "./build/demoVideoProject.test.js";
@@ -10,6 +11,8 @@ import "./build/spReportPdf.test.js";
 import "./build/thermalSimulationPanelHelpers.test.js";
 import "./economics/economicAnalysis.test.js";
 import "./economics/scenarioEnergyTariff.test.js";
+import "./economics/resolveScenarioEcologyEmission.test.js";
+import "./economics/resolveScenarioEconomy.test.js";
 import "./networks/engineering2dSymbols.test.js";
 import "./networks/networkPresentation.test.js";
 import "./view3d/equipmentMeshes.test.js";
@@ -36,8 +39,10 @@ import "./thermal/formulaHelpers.test.js";
 import "./thermal/surfaceField.test.js";
 import "./thermal/wallFacadeAndDiagnostics.test.js";
 import "./thermal/buildingPerformanceMetrics.test.js";
+import "./thermal/occupancyPresets.test.js";
 import "./thermal/resolveScenarioComfort.test.js";
 import "./thermal/resolveScenarioVentilation.test.js";
+import "./thermal/resolveSeasonalWindSpeed.test.js";
 import "./thermal/resolveScenarioEngineering.test.js";
 import "./thermal/thermalResultsChartPayload.test.js";
 import "./thermal/transient1D.test.js";

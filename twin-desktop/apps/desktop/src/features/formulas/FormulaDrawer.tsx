@@ -4,7 +4,7 @@ import { useFormulaDrawerStore } from "../../entities/formulas/formulaDrawer.sto
 import { getFormulasByIds } from "../../entities/formulas/registry";
 
 export function FormulaDrawer() {
-  const { isOpen, pinned, formulaIds, activeFormulaId, close, togglePin, focus } = useFormulaDrawerStore();
+  const { isOpen, formulaIds, activeFormulaId, close } = useFormulaDrawerStore();
   const formulas = useMemo(() => getFormulasByIds(formulaIds), [formulaIds]);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -18,35 +18,19 @@ export function FormulaDrawer() {
     }
   }, [isOpen, activeFormulaId]);
 
-  if (!isOpen && !pinned) {
+  if (!isOpen) {
     return null;
   }
 
   return (
     <aside className="ui-drawer-panel fixed inset-y-0 right-0 z-40 w-full max-w-md border-l border-[color:var(--border-soft)] bg-[color:var(--surface-elevated)]/96 shadow-[var(--shadow-overlay)] backdrop-blur-xl">
       <div className="flex items-center justify-between border-b border-[color:var(--border-soft)] px-5 py-3">
-        <div>
-          <p className="ui-kicker">Формулы</p>
-          <p className="text-base font-semibold text-[color:var(--text-base)]">Прозрачность расчёта</p>
-        </div>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={togglePin}
-            className={`rounded-full px-3 py-1 text-xs font-semibold transition ${
-              pinned
-                ? "border border-[color:var(--success-border)] bg-[color:var(--success-bg)] text-[color:var(--success-fg)]"
-                : "ui-btn-secondary"
-            }`}
-          >
-            {pinned ? "Закреплено" : "Закрепить"}
-          </button>
-          <button type="button" onClick={close} className="ui-btn-secondary rounded-full px-3 py-1 text-xs font-semibold">
-            Закрыть
-          </button>
-        </div>
+        <h2 className="text-base font-semibold text-[color:var(--text-base)]">Формулы</h2>
+        <button type="button" onClick={close} className="ui-btn-secondary rounded-full px-3 py-1 text-xs font-semibold">
+          Закрыть
+        </button>
       </div>
-      <div ref={containerRef} className="h-[calc(100%-60px)] space-y-4 overflow-y-auto px-5 py-4">
+      <div ref={containerRef} className="h-[calc(100%-52px)] space-y-4 overflow-y-auto px-5 py-4">
         {formulas.length === 0 ? (
           <p className="text-sm text-[color:var(--text-muted)]">
             Выберите действие с подсказкой «Формулы», чтобы открыть связанную методику.
@@ -62,16 +46,7 @@ export function FormulaDrawer() {
                   : "border-[color:var(--border-soft)]"
               }`}
             >
-              <div className="flex items-center justify-between gap-3">
-                <h3 className="text-base font-semibold text-[color:var(--text-base)]">{formula.title}</h3>
-                <button
-                  type="button"
-                  onClick={() => focus(formula.id)}
-                  className="text-xs font-semibold text-[color:var(--accent-base)] underline decoration-[color:var(--accent-muted)] underline-offset-2 transition hover:text-[color:var(--text-base)]"
-                >
-                  В фокус
-                </button>
-              </div>
+              <h3 className="text-base font-semibold text-[color:var(--text-base)]">{formula.title}</h3>
 
               <div className="overflow-x-auto rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] px-3 py-2">
                 <BlockMath math={formula.latex} />

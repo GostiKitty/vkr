@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { InfiltrationMode } from "../../core/thermal/infiltration";
+import type { OccupancyPresetSelection } from "../../core/thermal/occupancyPresets";
 import type { ThermalMonteCarloResult } from "../../core/uncertainty/thermalMonteCarlo";
 import type { ModelBinding } from "../../shared/utils/modelSync";
 
@@ -129,6 +130,8 @@ export interface ScenarioConfig {
     dayGain_W_m2: number;
     nightGain_W_m2: number;
   };
+  /** Типовой профиль занятости из СП 50 или «custom» при ручной правке. */
+  occupancyPresetId?: OccupancyPresetSelection | null;
   occupancy: {
     dayFraction: number;
     nightFraction: number;
@@ -137,7 +140,7 @@ export interface ScenarioConfig {
     infiltrationMode?: InfiltrationMode;
     infiltrationACH: number;
     ventilationACH: number;
-    heatRecoveryFactor: number;
+    heatRecoveryFactor: number | null;
     mechanicalVentilationEnabled: boolean;
     envelopeLeakage?: ScenarioEnvelopeLeakageConfig;
     pressureBased?: ScenarioPressureBasedInfiltrationConfig;
@@ -175,31 +178,32 @@ export function createDefaultScenarioConfig(): ScenarioConfig {
       setpointRampMinutes: 60,
     },
     internalGains: {
-      dayGain_W_m2: 6,
-      nightGain_W_m2: 1,
+      dayGain_W_m2: 17,
+      nightGain_W_m2: 3.7,
     },
+    occupancyPresetId: "residential",
     occupancy: {
       dayFraction: 1,
-      nightFraction: 0.2,
+      nightFraction: 0.25,
     },
     ventilation: {
-      infiltrationMode: "manualAch",
+      infiltrationMode: "envelopeLeakage",
       infiltrationACH: 0.5,
       ventilationACH: 0.18,
-      heatRecoveryFactor: 0,
+      heatRecoveryFactor: null,
       mechanicalVentilationEnabled: true,
       envelopeLeakage: {
-        envelopeAirPermeabilityM3sM2At10Pa: 0.00005,
-        windowAirPermeabilityM3sMAt10Pa: 0.0008,
-        doorAirPermeabilityM3sMAt10Pa: 0.0012,
-        pressureExponent: 0.67,
-        referencePressurePa: 10,
+        envelopeAirPermeabilityM3sM2At10Pa: null,
+        windowAirPermeabilityM3sMAt10Pa: null,
+        doorAirPermeabilityM3sMAt10Pa: null,
+        pressureExponent: null,
+        referencePressurePa: null,
       },
       pressureBased: {
-        windSpeedMps: 4,
-        windPressureCoefficient: 0.6,
-        stackHeightM: 6,
-        mechanicalPressurePa: 0,
+        windSpeedMps: null,
+        windPressureCoefficient: null,
+        stackHeightM: null,
+        mechanicalPressurePa: null,
       },
     },
     climateCityId: "moscow",
@@ -246,9 +250,9 @@ export function createDefaultScenarioConfig(): ScenarioConfig {
     economy: {
       tariffRubPerKWh: null,
       capexRub: null,
-      analysisPeriodYears: 15,
-      discountRatePercent: 10,
-      annualTariffGrowthPercent: 5,
+      analysisPeriodYears: null,
+      discountRatePercent: null,
+      annualTariffGrowthPercent: null,
       annualMaintenanceCostRub: null,
       insulationCostRub: null,
       windowsCostRub: null,
@@ -268,7 +272,7 @@ export function createDefaultScenarioConfig(): ScenarioConfig {
 
 export function resolveScenarioConfig(config: ScenarioConfig | null | undefined): ScenarioConfig {
   const defaults = createDefaultScenarioConfig();
-  return {
+  const resolved: ScenarioConfig = {
     ...defaults,
     ...config,
     climate: {
@@ -341,6 +345,13 @@ export function resolveScenarioConfig(config: ScenarioConfig | null | undefined)
       measuredSeries: [...(config?.validation?.measuredSeries ?? defaults.validation?.measuredSeries ?? [])],
     },
   };
+  if (config?.ventilation?.infiltrationMode == null) {
+    resolved.ventilation = {
+      ...resolved.ventilation,
+      infiltrationMode: defaults.ventilation.infiltrationMode,
+    };
+  }
+  return resolved;
 }
 
 export type ScenarioRunSnapshot = {

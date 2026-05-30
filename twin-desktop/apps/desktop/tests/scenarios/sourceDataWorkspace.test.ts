@@ -140,6 +140,7 @@ test("CO2 remains unavailable without emission factor", () => {
   const scenario = cloneValue(demo.scenarioConfig);
   scenario.ecology = {
     ...(scenario.ecology ?? {}),
+    energySource: null,
     emissionFactorKgPerKWh: null,
   };
   const report = buildSourceDataWorkspaceReport({

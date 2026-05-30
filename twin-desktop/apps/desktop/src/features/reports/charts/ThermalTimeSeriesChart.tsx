@@ -1,19 +1,25 @@
 import { useMemo, useState } from "react";
 import {
+  Area,
   CartesianGrid,
+  ComposedChart,
   Line,
-  LineChart,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
+import type { TooltipProps } from "recharts";
+import type { NameType, ValueType } from "recharts/types/component/DefaultTooltipContent";
 import type { ThermalSimulationResult } from "../../../core/thermal/solver";
 import type { ResultSyncState } from "../../../shared/utils/modelSync";
+import type { ThermalMonteCarloResult, PercentileTimePoint } from "../../../core/uncertainty/thermalMonteCarlo";
 import { EmptyState, MetricInfoTooltip } from "../../../shared/ui";
 import { formatEnergy, formatNumber } from "../../../shared/utils/format";
 import { resultsMetricInfo } from "../resultsMetricInfo";
-import { CHART_AXIS_TICK, CHART_MARGIN, CHART_TOOLTIP_STYLE } from "./thermalChartTheme";
+import { CHART_AXIS_TICK, CHART_MARGIN } from "./thermalChartTheme";
+import { ThermalChartTooltip } from "./ThermalChartTooltip";
 
 type ChartMode = "temperature" | "heating";
 
@@ -36,6 +42,8 @@ interface ThermalTimeSeriesChartProps {
   heatingDisplay?: ThermalTimeSeriesHeatingDisplay;
   /** Установленная мощность отопления для режима equipment, кВт. */
   installedCapacityKW?: number | null;
+  /** Результат вероятностного анализа Монте-Карло для отображения полосы неопределённости. */
+  monteCarloResult?: ThermalMonteCarloResult | null;
 }
 
 interface ChartPoint {
@@ -48,6 +56,10 @@ interface ChartPoint {
   heatingPowerKW: number | null;
   /** Значение для линии на графике (может отличаться при сглаживании). */
   heatingPowerDisplayKW: number | null;
+  /** Нижняя граница полосы неопределённости (P10), кВт. */
+  heatingBandBase: number | null;
+  /** Ширина полосы неопределённости (P90 − P10), кВт. */
+  heatingBandWidth: number | null;
 }
 
 const UNDERLAY_GRID_COLOR = "rgba(148, 163, 184, 0.16)";
@@ -76,10 +88,61 @@ function isFiniteNumber(value: number | null | undefined): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
+function resolveHeatingBandAtTime(
+  percentilesByTime: PercentileTimePoint[] | undefined,
+  timeHours: number
+): { heatingBandBase: number | null; heatingBandWidth: number | null } {
+  if (!percentilesByTime?.length || !Number.isFinite(timeHours)) {
+    return { heatingBandBase: null, heatingBandWidth: null };
+  }
+
+  const first = percentilesByTime[0];
+  const last = percentilesByTime[percentilesByTime.length - 1];
+  if (timeHours <= first.timeHours) {
+    return bandFromPercentilePoint(first);
+  }
+  if (timeHours >= last.timeHours) {
+    return bandFromPercentilePoint(last);
+  }
+
+  let left = 0;
+  let right = percentilesByTime.length - 1;
+  while (left + 1 < right) {
+    const mid = Math.floor((left + right) / 2);
+    if (percentilesByTime[mid].timeHours <= timeHours) {
+      left = mid;
+    } else {
+      right = mid;
+    }
+  }
+
+  const start = percentilesByTime[left];
+  const end = percentilesByTime[right];
+  const spanHours = end.timeHours - start.timeHours;
+  const fraction = spanHours > 0 ? (timeHours - start.timeHours) / spanHours : 0;
+  const p10 = lerpNullable(start.p10, end.p10, fraction);
+  const p90 = lerpNullable(start.p90, end.p90, fraction);
+  if (!isFiniteNumber(p10) || !isFiniteNumber(p90)) {
+    return { heatingBandBase: null, heatingBandWidth: null };
+  }
+  return { heatingBandBase: p10, heatingBandWidth: Math.max(0, p90 - p10) };
+}
+
+function bandFromPercentilePoint(point: PercentileTimePoint): {
+  heatingBandBase: number | null;
+  heatingBandWidth: number | null;
+} {
+  if (!Number.isFinite(point.p10) || !Number.isFinite(point.p90)) {
+    return { heatingBandBase: null, heatingBandWidth: null };
+  }
+  return { heatingBandBase: point.p10, heatingBandWidth: Math.max(0, point.p90 - point.p10) };
+}
+
 /** Builds chart points from a room's own timeline (self-contained, no cross-index lookup). */
 function buildChartPoints(
   result: ThermalSimulationResult,
-  roomId: string
+  roomId: string,
+  monteCarloResult?: ThermalMonteCarloResult | null
 ): ChartPoint[] {
   const roomData = result.rooms[roomId];
   if (!roomData) {
@@ -89,6 +152,8 @@ function buildChartPoints(
   if (!roomTimeline.length) {
     return [];
   }
+
+  const percentilesByTime = monteCarloResult?.percentilesByTime;
 
   return roomTimeline.map((pt, index) => {
     // Primary source: room timeline (now includes setpointC from solver)
@@ -104,12 +169,17 @@ function buildChartPoints(
     }
 
     const heatingPowerKW = heatingPowerW !== null ? heatingPowerW / 1000 : null;
+    const timeHours = toFiniteNumber(pt.timeHours) ?? index * (result.timeline[1]?.timeHours ?? 1);
+    const { heatingBandBase, heatingBandWidth } = resolveHeatingBandAtTime(percentilesByTime, timeHours);
+
     return {
-      timeHours: toFiniteNumber(pt.timeHours) ?? index * (result.timeline[1]?.timeHours ?? 1),
+      timeHours,
       airTemperatureC,
       setpointC,
       heatingPowerKW,
       heatingPowerDisplayKW: heatingPowerKW,
+      heatingBandBase,
+      heatingBandWidth,
     };
   });
 }
@@ -186,6 +256,63 @@ function enrichPlottedPoints(
   return applyEquipmentLikeDisplay(points, installedCapacityKW);
 }
 
+/** RC timeline stores temperature at step start; for display use end-of-step (next point's start). */
+function alignTemperatureToEndOfStep(points: ChartPoint[]): ChartPoint[] {
+  if (points.length < 2) {
+    return points;
+  }
+  return points.map((pt, index) => {
+    const next = points[index + 1];
+    if (!next || !isFiniteNumber(next.airTemperatureC)) {
+      return pt;
+    }
+    return { ...pt, airTemperatureC: next.airTemperatureC };
+  });
+}
+
+function lerpNullable(a: number | null, b: number | null, fraction: number): number | null {
+  if (!isFiniteNumber(a) || !isFiniteNumber(b)) {
+    return fraction < 0.5 ? a : b;
+  }
+  return a + fraction * (b - a);
+}
+
+/** Finer samples for chart only — smooths ramps without changing the RC solve. */
+function densifyChartPoints(points: ChartPoint[], maxStepHours = 2 / 60): ChartPoint[] {
+  if (points.length < 2) {
+    return points;
+  }
+  const dense: ChartPoint[] = [points[0]];
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const start = points[index];
+    const end = points[index + 1];
+    const deltaHours = end.timeHours - start.timeHours;
+    if (!Number.isFinite(deltaHours) || deltaHours <= 0) {
+      dense.push(end);
+      continue;
+    }
+    const segments = Math.max(1, Math.ceil(deltaHours / maxStepHours));
+    for (let segment = 1; segment < segments; segment += 1) {
+      const fraction = segment / segments;
+      dense.push({
+        timeHours: start.timeHours + fraction * deltaHours,
+        airTemperatureC: lerpNullable(start.airTemperatureC, end.airTemperatureC, fraction),
+        setpointC: lerpNullable(start.setpointC, end.setpointC, fraction),
+        heatingPowerKW: lerpNullable(start.heatingPowerKW, end.heatingPowerKW, fraction),
+        heatingPowerDisplayKW: lerpNullable(start.heatingPowerDisplayKW, end.heatingPowerDisplayKW, fraction),
+        heatingBandBase: lerpNullable(start.heatingBandBase, end.heatingBandBase, fraction),
+        heatingBandWidth: lerpNullable(start.heatingBandWidth, end.heatingBandWidth, fraction),
+      });
+    }
+    dense.push(end);
+  }
+  return dense;
+}
+
+function prepareChartSeries(points: ChartPoint[]): ChartPoint[] {
+  return densifyChartPoints(alignTemperatureToEndOfStep(points));
+}
+
 /** Emits a dev-mode diagnostic log for the chart to help debug data issues. */
 function devLogChartDiagnostics(
   roomId: string | null,
@@ -249,6 +376,7 @@ export function ThermalTimeSeriesChart({
   onRunCalculation,
   heatingDisplay = "raw",
   installedCapacityKW = null,
+  monteCarloResult = null,
 }: ThermalTimeSeriesChartProps) {
   const [mode, setMode] = useState<ChartMode>("temperature");
 
@@ -261,8 +389,23 @@ export function ThermalTimeSeriesChart({
     if (!result || !roomId) {
       return [];
     }
-    return enrichPlottedPoints(buildChartPoints(result, roomId), heatingDisplay, installedCapacityKW);
-  }, [result, roomId, heatingDisplay, installedCapacityKW]);
+    const raw = buildChartPoints(result, roomId, monteCarloResult);
+    const enriched = enrichPlottedPoints(raw, heatingDisplay, installedCapacityKW);
+    return prepareChartSeries(enriched);
+  }, [result, roomId, heatingDisplay, installedCapacityKW, monteCarloResult]);
+
+  const minimumTempP10C = useMemo<number | null>(() => {
+    if (!monteCarloResult?.roomRiskSummary || !roomId) return null;
+    const summary = monteCarloResult.roomRiskSummary.find((s) => s.roomId === roomId);
+    return summary != null && Number.isFinite(summary.minimumTemperatureP10C)
+      ? summary.minimumTemperatureP10C
+      : null;
+  }, [monteCarloResult, roomId]);
+
+  const hasUncertaintyBand = useMemo(
+    () => data.some((pt) => pt.heatingBandBase != null && pt.heatingBandWidth != null),
+    [data]
+  );
 
   const heatingIsEquipment = heatingDisplay === "equipment";
 
@@ -319,8 +462,12 @@ export function ThermalTimeSeriesChart({
   }, [data]);
 
   const heatingDomain = useMemo(() => {
-    const values = data.map((pt) => pt.heatingPowerDisplayKW).filter(isFiniteNumber);
-    const max = values.length ? Math.max(...values) : 1;
+    const displayValues = data.map((pt) => pt.heatingPowerDisplayKW).filter(isFiniteNumber);
+    const p90Values = data
+      .map((pt) => (pt.heatingBandBase != null && pt.heatingBandWidth != null ? pt.heatingBandBase + pt.heatingBandWidth : null))
+      .filter(isFiniteNumber);
+    const allValues = [...displayValues, ...p90Values];
+    const max = allValues.length ? Math.max(...allValues) : 1;
     return [0, Math.max(0.5, Math.ceil(max * 10) / 10)] as [number, number];
   }, [data]);
 
@@ -365,14 +512,7 @@ export function ThermalTimeSeriesChart({
   }
 
   if (!result) {
-    return (
-      <ChartState
-        title="Нет расчётных данных"
-        message="Запустите расчёт, чтобы увидеть динамику температуры и мощности."
-        buttonLabel="Запустить расчёт"
-        onClick={onRunCalculation}
-      />
-    );
+    return null;
   }
 
   if (!roomOptions.length) {
@@ -469,7 +609,7 @@ export function ThermalTimeSeriesChart({
       <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
         <MetricPill label="Средняя температура" value={formatTemperatureValue(stats?.averageTemperatureC ?? null)} />
         <MetricPill label="Пиковая мощность" value={formatPowerValue(stats?.peakHeatingKW ?? null)} />
-        <MetricPill label="Энергия за период" value={formatEnergy(stats?.energyKWh ?? null, "кВт·ч")} />
+        <MetricPill label="Теплопотребление" value={formatEnergy(stats?.energyKWh ?? null, "кВт·ч")} />
         <MetricPill
           label="Время работы отопления"
           value={stats == null ? "—" : `${formatNumber(stats.heatingRuntimeHours, { maximumFractionDigits: 1 })} ч`}
@@ -498,20 +638,26 @@ export function ThermalTimeSeriesChart({
           <>
             <LegendSwatch color={TEMPERATURE_LINE_COLOR} label="Температура воздуха, °C" />
             <LegendSwatch color={SETPOINT_LINE_COLOR} dashed label="Уставка, °C" />
+            {minimumTempP10C != null ? (
+              <LegendSwatch color="#ef4444" dashed label="Минимум P10 (МК)" />
+            ) : null}
           </>
         ) : (
-          <LegendSwatch
-            color={HEATING_LINE_COLOR}
-            label={
-              heatingIsEquipment ? "Нагрузка (огранич. источник), кВт" : "Тепловая нагрузка, кВт"
-            }
-          />
+          <>
+            <LegendSwatch
+              color={HEATING_LINE_COLOR}
+              label={heatingIsEquipment ? "Нагрузка (огранич. источник), кВт" : "Тепловая нагрузка, кВт"}
+            />
+            {hasUncertaintyBand ? (
+              <LegendSwatch color={HEATING_LINE_COLOR} band label="Диапазон P10–P90 (МК)" />
+            ) : null}
+          </>
         )}
       </div>
 
       <div className="ui-chart-shell__body mt-3 h-[min(320px,42vh)] w-full min-w-0">
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={plottedData} margin={CHART_MARGIN} accessibilityLayer>
+          <ComposedChart data={plottedData} margin={CHART_MARGIN} accessibilityLayer>
             <CartesianGrid stroke={UNDERLAY_GRID_COLOR} strokeDasharray="3 3" vertical={false} />
             <XAxis
               dataKey="timeHours"
@@ -550,31 +696,43 @@ export function ThermalTimeSeriesChart({
               />
             )}
             <Tooltip
-              contentStyle={CHART_TOOLTIP_STYLE}
-              labelFormatter={(label) => `Время: ${formatTooltipTime(Number(label))}`}
-              formatter={(value: number, name: string) => {
-                // In heating mode hide temperature entries; in temperature mode hide heating entry
-                if (mode === "heating" && (name === "Температура воздуха, °C" || name === "Уставка, °C")) {
-                  return null as unknown as [string, string];
-                }
-                if (
-                  mode === "temperature" &&
-                  (name === "Тепловая нагрузка, кВт" || name === "Нагрузка (огранич. источник), кВт")
-                ) {
-                  return null as unknown as [string, string];
-                }
-                if (name === "Температура воздуха, °C" || name === "Уставка, °C") {
-                  return [`${formatNumber(value, { maximumFractionDigits: 1 })} °C`, name];
-                }
-                const heatingLabel = heatingIsEquipment ? "источник" : "нагрузка";
-                return [`${formatNumber(value, { maximumFractionDigits: 2 })} кВт (${heatingLabel})`, name];
-              }}
+              content={
+                <ThermalTimeSeriesTooltipContent
+                  mode={mode}
+                  heatingIsEquipment={heatingIsEquipment}
+                  hasUncertaintyBand={hasUncertaintyBand}
+                />
+              }
             />
             {/*
-              IMPORTANT: Recharts 2 does NOT traverse React Fragments when resolving Line children.
-              All <Line> components must be direct children of <LineChart> (no Fragment wrapper).
-              Use the `hide` prop to show/hide per mode instead.
+              IMPORTANT: Recharts 2 does NOT traverse React Fragments when resolving series children.
+              All series (Line/Area/ReferenceLine) must be direct children of ComposedChart.
+              Use the `hide` prop to show/hide per mode instead of conditional rendering.
             */}
+
+            {/* Uncertainty band (heating mode): transparent P10 base + P10→P90 fill, stacked */}
+            <Area
+              type="monotone"
+              dataKey="heatingBandBase"
+              name="__band_base"
+              stackId="mc-band"
+              fill="transparent"
+              stroke="none"
+              legendType="none"
+              hide={mode !== "heating" || !hasUncertaintyBand}
+            />
+            <Area
+              type="monotone"
+              dataKey="heatingBandWidth"
+              name="__band_width"
+              stackId="mc-band"
+              fill={HEATING_LINE_COLOR}
+              fillOpacity={0.18}
+              stroke="none"
+              legendType="none"
+              hide={mode !== "heating" || !hasUncertaintyBand}
+            />
+
             <Line
               type="monotone"
               dataKey="airTemperatureC"
@@ -587,7 +745,7 @@ export function ThermalTimeSeriesChart({
               hide={mode !== "temperature"}
             />
             <Line
-              type="stepAfter"
+              type="monotone"
               dataKey="setpointC"
               name="Уставка, °C"
               stroke={SETPOINT_LINE_COLOR}
@@ -609,20 +767,31 @@ export function ThermalTimeSeriesChart({
               connectNulls
               hide={mode !== "heating"}
             />
-          </LineChart>
+
+            {/* P10 minimum temperature reference line (temperature mode, MC only) */}
+            {mode === "temperature" && minimumTempP10C != null ? (
+              <ReferenceLine
+                y={minimumTempP10C}
+                stroke="#ef4444"
+                strokeDasharray="4 3"
+                strokeWidth={1.5}
+                label={{
+                  value: `P10 мин. ${formatNumber(minimumTempP10C, { maximumFractionDigits: 1 })}°C`,
+                  position: "insideBottomLeft",
+                  fontSize: 10,
+                  fill: "#ef4444",
+                }}
+              />
+            ) : null}
+          </ComposedChart>
         </ResponsiveContainer>
       </div>
 
-      <div className="mt-3 flex flex-col gap-1 text-sm text-[color:var(--text-muted)]">
-        {mode === "heating" ? (
-          <p className="text-xs text-[color:var(--text-soft)]">
-            {heatingIsEquipment
-              ? "Оранжевая кривая — потребность с учётом установленной мощности и инерции источника (~2 ч), как у реального котла. KPI «Пиковая мощность» — по сырому RC без этой обработки."
-              : "Тепловая нагрузка по шагам RC без сглаживания. Данные пересчитываются по текущей модели и сценарию."}
-          </p>
-        ) : null}
-        {peakExplanation ? <p>{peakExplanation}</p> : null}
-      </div>
+      {peakExplanation ? (
+        <div className="mt-3 text-sm text-[color:var(--text-muted)]">
+          <p>{peakExplanation}</p>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -705,18 +874,35 @@ function MetricPill({ label, value }: { label: string; value: string }) {
   );
 }
 
-function LegendSwatch({ color, label, dashed = false }: { color: string; label: string; dashed?: boolean }) {
+function LegendSwatch({
+  color,
+  label,
+  dashed = false,
+  band = false,
+}: {
+  color: string;
+  label: string;
+  dashed?: boolean;
+  band?: boolean;
+}) {
   return (
     <span className="inline-flex items-center gap-2">
-      <span
-        className="h-[2px] w-6"
-        style={{
-          backgroundImage: dashed
-            ? `repeating-linear-gradient(to right, ${color}, ${color} 6px, transparent 6px, transparent 10px)`
-            : "none",
-          backgroundColor: dashed ? "transparent" : color,
-        }}
-      />
+      {band ? (
+        <span
+          className="h-3 w-6 rounded-sm opacity-50"
+          style={{ backgroundColor: color }}
+        />
+      ) : (
+        <span
+          className="h-[2px] w-6"
+          style={{
+            backgroundImage: dashed
+              ? `repeating-linear-gradient(to right, ${color}, ${color} 6px, transparent 6px, transparent 10px)`
+              : "none",
+            backgroundColor: dashed ? "transparent" : color,
+          }}
+        />
+      )}
       <span>{label}</span>
     </span>
   );
@@ -795,6 +981,71 @@ function formatTimeAxisTick(value: number, maxTime: number): string {
   const day = Math.floor(value / 24) + 1;
   const hour = Math.round(value % 24);
   return `Д${day} ${hour}`;
+}
+
+const INTERNAL_TOOLTIP_SERIES = new Set(["__band_base", "__band_width"]);
+
+const HEATING_SERIES_NAMES = new Set(["Тепловая нагрузка, кВт", "Нагрузка (огранич. источник), кВт"]);
+
+function ThermalTimeSeriesTooltipContent({
+  active,
+  payload,
+  label,
+  mode,
+  heatingIsEquipment,
+  hasUncertaintyBand,
+}: TooltipProps<ValueType, NameType> & {
+  mode: ChartMode;
+  heatingIsEquipment: boolean;
+  hasUncertaintyBand: boolean;
+}) {
+  if (!active || !payload?.length) {
+    return null;
+  }
+
+  const point = payload[0]?.payload as ChartPoint | undefined;
+  const rows: Array<{ label: string; value: string }> = [];
+
+  if (mode === "heating" && hasUncertaintyBand && point) {
+    const p10 = point.heatingBandBase;
+    const p90 =
+      p10 != null && point.heatingBandWidth != null ? p10 + point.heatingBandWidth : null;
+    if (p10 != null && p90 != null) {
+      rows.push({
+        label: "Диапазон P10–P90, кВт",
+        value: `${formatNumber(p10, { maximumFractionDigits: 2 })} – ${formatNumber(p90, { maximumFractionDigits: 2 })}`,
+      });
+    }
+  }
+
+  payload.forEach((entry) => {
+    const name = String(entry.name ?? "");
+    if (INTERNAL_TOOLTIP_SERIES.has(name)) {
+      return;
+    }
+    if (mode === "heating" && (name === "Температура воздуха, °C" || name === "Уставка, °C")) {
+      return;
+    }
+    if (mode === "temperature" && HEATING_SERIES_NAMES.has(name)) {
+      return;
+    }
+
+    const numeric = toFiniteNumber(entry.value);
+    if (name === "Температура воздуха, °C" || name === "Уставка, °C") {
+      rows.push({ label: name, value: formatTemperatureValue(numeric) });
+      return;
+    }
+    if (HEATING_SERIES_NAMES.has(name)) {
+      const kind = heatingIsEquipment ? "источник" : "нагрузка";
+      rows.push({
+        label: name,
+        value: numeric != null ? `${formatNumber(numeric, { maximumFractionDigits: 2 })} кВт (${kind})` : "—",
+      });
+    }
+  });
+
+  const title = label != null ? `Время: ${formatTooltipTime(Number(label))}` : undefined;
+  return <ThermalChartTooltip active={active} payload={payload} title={title} rows={rows} />;
 }
 
 function formatTooltipTime(value: number): string {

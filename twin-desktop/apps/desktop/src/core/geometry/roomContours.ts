@@ -53,7 +53,7 @@ function rotateTokens(tokens: string[], startIndex: number): string[] {
   return tokens.slice(startIndex).concat(tokens.slice(0, startIndex));
 }
 
-function signature(polygon: Vec2[]): string {
+export function buildRoomPolygonSignature(polygon: Vec2[]): string {
   const tokens = polygon.map(pointToken);
   if (!tokens.length) {
     return "";
@@ -68,6 +68,21 @@ function signature(polygon: Vec2[]): string {
   }
   candidates.sort();
   return candidates[0] ?? "";
+}
+
+/** Детерминированный id автоконтура — один и тот же контур всегда получает один roomId. */
+export function buildStableAutoRoomId(levelId: string, polygon: Vec2[]): string {
+  const sig = buildRoomPolygonSignature(polygon);
+  let hash = 2166136261;
+  for (let index = 0; index < sig.length; index += 1) {
+    hash ^= sig.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `auto-room-${levelId}-${(hash >>> 0).toString(36)}`;
+}
+
+function signature(polygon: Vec2[]): string {
+  return buildRoomPolygonSignature(polygon);
 }
 
 export function detectRoomsFromWalls(
@@ -158,7 +173,7 @@ export function detectRoomsFromWalls(
         return;
       }
 
-      const roomId = createId("auto-room");
+      const roomId = buildStableAutoRoomId(level.id, normalized);
       loops.push({
         id: loopId,
         levelId: level.id,

@@ -1,15 +1,9 @@
 import { getSp131CityClimate } from "../../norms/sp131_2025/climate";
 import { getCityEnergyProfile, gasM3TariffToKwh } from "./cityEnergyProfile";
+import { DEFAULT_CO2_EMISSION_FACTORS_KG_PER_KWH } from "./defaultCo2EmissionFactors";
 import { economicDefaults } from "./types";
 const HOURS_PER_DAY = 24;
 const KWH_PER_GCAL = 1163;
-/** Удельные выбросы CO₂ по источнику тепла, кг/кВт·ч тепловой энергии */
-const DEFAULT_CO2_FACTORS = {
-    gas: 0.22, // газовый котёл: ГОСТ Р 56277; природный газ 55.9 г/МДж / η=0.92
-    heat: 0.20, // ЦТ от ТЭЦ на газе (учитывает когенерационный КПД)
-    electricity: 0.35, // средний по ОЭС России (Приказ Минэнерго №1069-2021)
-    unknown: 0.22,
-};
 const ZONE_LABELS = {
     walls: "Наружные стены",
     windows: "Окна и светопрозрачные конструкции",
@@ -220,7 +214,7 @@ export function buildDefaultEconomicScenario(report) {
         gasMinimumOfftakePercent: profile?.gasMinimumOfftakePercent ?? 70,
         heatContractMinimumPaymentFraction: profile?.heatContractMinimumPaymentFraction ?? 0,
         regionalCostFactor: profile?.constructionCostFactor ?? economicDefaults.regionalCostFactor,
-        co2EmissionFactor_kgPerKWh: DEFAULT_CO2_FACTORS.heat,
+        co2EmissionFactor_kgPerKWh: DEFAULT_CO2_EMISSION_FACTORS_KG_PER_KWH.heat,
         analysisPeriod_years: 15,
         discountRate: 0.1,
         annualTariffGrowthPercent: 5,
@@ -1041,7 +1035,9 @@ function calculateContractPenalty(annualSaving_RUB, savedEnergy_kWh_year, baseEn
     return 0;
 }
 function calculateCO2Saving(savedEnergy_kWh_year, scenario) {
-    const factor = scenario.co2EmissionFactor_kgPerKWh ?? DEFAULT_CO2_FACTORS[scenario.heatingEnergySource] ?? null;
+    const factor = scenario.co2EmissionFactor_kgPerKWh ??
+        DEFAULT_CO2_EMISSION_FACTORS_KG_PER_KWH[scenario.heatingEnergySource] ??
+        null;
     if (!factor || !Number.isFinite(savedEnergy_kWh_year) || savedEnergy_kWh_year <= 0)
         return null;
     return Math.max(0, (savedEnergy_kWh_year * factor) / 1000); // кг → тонны

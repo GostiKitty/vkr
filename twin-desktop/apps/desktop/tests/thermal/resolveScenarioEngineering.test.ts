@@ -68,3 +68,56 @@ test("engineering: pipe length and diameter from model", () => {
   assert.equal(resolved.pipeLengthM?.source, "model");
   assert.equal(resolved.pipeDiameterMm?.value, 25);
 });
+
+test("engineering: 2D engineering systems and pipe flow enrich scenario inputs", () => {
+  const scenario = createDefaultScenarioConfig();
+  const model = createEmptyBuildingModel();
+  model.engineeringSystems = {
+    equipment: [
+      {
+        id: "hm-1",
+        type: "heatMeter",
+        name: "Узел учёта",
+        x: 0,
+        y: 0,
+        width: 1,
+        height: 1,
+        rotation: 0,
+        ports: [],
+        parameters: {
+          flowRateM3H: 12,
+          supplyTemperatureC: 80,
+          returnTemperatureC: 60,
+          heatPowerKW: 250,
+        },
+        metadata: {},
+      },
+    ],
+    pipes: [
+      {
+        id: "ep-1",
+        fromEquipmentId: "hm-1",
+        fromPortId: "inlet",
+        toEquipmentId: "hm-1",
+        toPortId: "outlet",
+        points: [
+          { x: 0, y: 0 },
+          { x: 0, y: 8 },
+        ],
+        medium: "supply",
+        diameter: 32,
+        insulation: 10,
+        temperature: 78,
+        flowRate: 6,
+      },
+    ],
+  };
+  const resolved = resolveScenarioEngineeringInputs(null, scenario, model, null, null);
+  assert.equal(resolved.supplyTemperatureC.value, 80);
+  assert.equal(resolved.returnTemperatureC.value, 60);
+  assert.equal(resolved.installedCapacityW.value, 250_000);
+  assert.ok(resolved.massFlowKgS.value > 0);
+  assert.equal(resolved.pipeDiameterMm?.value, 32);
+  assert.equal(resolved.pipeLengthM?.value, 8);
+  assert.equal(resolved.pipeInsulated.value, true);
+});

@@ -3,6 +3,7 @@ import { runThermalMonteCarlo, THERMAL_MONTE_CARLO_MAX_RUNS } from "../../core/u
 import { useWorkflowStore } from "../../entities/workflow/workflow.store";
 import { createModelBinding } from "../../shared/utils/modelSync";
 import { useBuildStore } from "../build/build.store";
+import { applyScenarioToBuilding } from "../build/thermal/applyScenarioToBuilding";
 import { buildThermalOptionsFromWorkflow } from "../build/thermal/workflowThermalOptions";
 
 const DEFAULT_MONTE_CARLO_RUNS = 200;
@@ -27,11 +28,15 @@ export function runThermalMonteCarloAnalysis() {
   }
 
   const nextRuns = clampMonteCarloRuns(workflowState.uncertaintyConfig?.runs ?? DEFAULT_MONTE_CARLO_RUNS);
-  const evaluationMode = workflowState.uncertaintyConfig?.evaluationMode ?? DEFAULT_MONTE_CARLO_MODE;
+  const evaluationMode = "full-physics" as const;
   const adjacency = buildAdjacencyGraph(buildModel);
   const result = runThermalMonteCarlo({
     model: buildModel,
-    baseOptions: buildThermalOptionsFromWorkflow(workflowState.scenarioConfig),
+    baseOptions: buildThermalOptionsFromWorkflow(
+      workflowState.scenarioConfig,
+      undefined,
+      applyScenarioToBuilding(buildModel, workflowState.scenarioConfig)
+    ),
     runs: nextRuns,
     adjacency,
   });

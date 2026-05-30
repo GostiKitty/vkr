@@ -87,7 +87,7 @@ export function describeImportError(err) {
             }
         }
         const status = Number.isFinite(err.status) ? err.status : "неизвестно";
-        return `Сервер вернул статус ${status}. Проверьте журналы в «Консоли».`;
+        return `Сервер вернул статус ${status}. Проверьте журнал в «Консоли».`;
     }
     if (err instanceof Error) {
         return err.message;

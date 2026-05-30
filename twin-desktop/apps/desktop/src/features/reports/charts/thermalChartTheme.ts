@@ -1,6 +1,8 @@
 import type { LossCategoryKey } from "../../../core/thermal/thermalResultsChartPayload";
 import { formatNumber } from "../../../shared/utils/format";
 
+export { formatSurfaceTemperatureFactorStatus } from "../../../shared/utils/engineeringStatusLabels";
+
 export const THERMAL_CHART_NOT_SET = "не задано";
 
 export const LOSS_CATEGORY_COLORS: Record<LossCategoryKey, string> = {

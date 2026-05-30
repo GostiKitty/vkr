@@ -1,9 +1,11 @@
 import { useMemo } from "react";
-import { Bar, BarChart, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import type { TooltipProps } from "recharts";
 import type { NameType, ValueType } from "recharts/types/component/DefaultTooltipContent";
 import type { LossShareBreakdown } from "../../../core/thermal/thermalSimulationExport";
 import type { LossCategoryKey } from "../../../core/thermal/thermalResultsChartPayload";
+import { MetricInfoTooltip } from "../../../shared/ui";
+import { resultsMetricInfo } from "../resultsMetricInfo";
 import { LossCategoryLegend } from "./LossCategoryLegend";
 import { ThermalChartTooltip } from "./ThermalChartTooltip";
 import { formatChartPercent, LOSS_CATEGORY_COLORS, LOSS_CATEGORY_LABELS } from "./thermalChartTheme";
@@ -18,13 +20,13 @@ function LossShareTooltip({ active, payload }: TooltipProps<ValueType, NameType>
   if (!active || !payload?.length) {
     return null;
   }
-  const row = payload[0]?.payload as { key: LossCategoryKey; percent: number };
+  const row = payload[0]?.payload as { key: LossCategoryKey; percent: number; name: string };
   return (
     <ThermalChartTooltip
       active
       payload={payload}
-      title={LOSS_CATEGORY_LABELS[row.key]}
-      rows={[{ label: "Доля от всех теплопотерь в пиковом срезе", value: formatChartPercent(row.percent) }]}
+      title={`${row.name} · ${formatChartPercent(row.percent)}`}
+      rows={[]}
     />
   );
 }
@@ -40,61 +42,89 @@ export function LossShareChart({ share }: LossShareChartProps) {
     [share]
   );
 
-  const stackedRow = useMemo(() => {
-    const row: Record<string, number | string> = { name: "Структура потерь" };
-    for (const segment of segments) {
-      row[segment.key] = segment.percent;
-    }
-    return row;
-  }, [segments]);
-
   if (!segments.length) {
     return (
-      <p className="text-sm text-[color:var(--text-muted)]">Доли потерь не заданы для текущего результата.</p>
+      <section className="ui-chart-shell">
+        <ShareChartHeader />
+        <div className="ui-loss-chart__empty">Доли потерь не заданы для текущего результата.</div>
+      </section>
     );
   }
 
   return (
-    <div className="space-y-3">
-      <p className="text-sm font-semibold text-[color:var(--text-base)]">
-        100% всех теплопотерь (пиковый срез)
-      </p>
-      <LossCategoryLegend />
-      <div className="h-14 w-full min-w-0 rounded-xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)] p-2">
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={[stackedRow]} layout="vertical" margin={{ top: 4, right: 8, left: 8, bottom: 4 }} stackOffset="expand" accessibilityLayer>
-            <XAxis type="number" hide domain={[0, 1]} />
-            <YAxis type="category" dataKey="name" hide width={0} />
-            <Tooltip content={<LossShareTooltip />} cursor={{ fill: "transparent" }} />
-            {segments.map((segment) => (
-              <Bar
-                key={segment.key}
-                dataKey={segment.key}
-                stackId="share"
-                fill={LOSS_CATEGORY_COLORS[segment.key]}
-                radius={segment.key === segments[0].key ? [8, 0, 0, 8] : segment.key === segments[segments.length - 1].key ? [0, 8, 8, 0] : 0}
+    <section className="ui-chart-shell" data-testid="loss-share-chart">
+      <ShareChartHeader />
+      <LossCategoryLegend className="mt-3" variant="compact" />
+
+      <div className="ui-loss-share mt-4">
+        <div className="ui-loss-share__donut">
+          <ResponsiveContainer width="100%" height="100%">
+            <PieChart accessibilityLayer>
+              <Pie
+                data={segments}
+                dataKey="percent"
+                nameKey="name"
+                cx="50%"
+                cy="50%"
+                innerRadius="58%"
+                outerRadius="88%"
+                paddingAngle={2}
+                stroke="var(--surface-elevated)"
+                strokeWidth={2}
               >
-                <Cell fill={LOSS_CATEGORY_COLORS[segment.key]} />
-              </Bar>
-            ))}
-          </BarChart>
-        </ResponsiveContainer>
+                {segments.map((segment) => (
+                  <Cell key={segment.key} fill={LOSS_CATEGORY_COLORS[segment.key]} />
+                ))}
+              </Pie>
+              <Tooltip content={<LossShareTooltip />} />
+            </PieChart>
+          </ResponsiveContainer>
+        </div>
+
+        <ul className="ui-loss-share__list">
+          {[...segments]
+            .sort((a, b) => b.percent - a.percent)
+            .map((segment) => (
+            <li key={segment.key} className="ui-loss-share__item">
+              <div className="ui-loss-share__item-head">
+                <span className="ui-loss-share__item-label">
+                  <span
+                    className="ui-loss-chart__swatch"
+                    style={{ backgroundColor: LOSS_CATEGORY_COLORS[segment.key] }}
+                    aria-hidden
+                  />
+                  {segment.name}
+                </span>
+                <span className="ui-loss-share__item-value">{formatChartPercent(segment.percent)}</span>
+              </div>
+              <div className="ui-loss-share__item-track" aria-hidden>
+                <div
+                  className="ui-loss-share__item-fill"
+                  style={{
+                    width: `${segment.percent}%`,
+                    backgroundColor: LOSS_CATEGORY_COLORS[segment.key],
+                  }}
+                />
+              </div>
+            </li>
+          ))}
+        </ul>
       </div>
-      <ul className="grid gap-2 sm:grid-cols-2">
-        {segments.map((segment) => (
-          <li
-            key={segment.key}
-            className="flex items-center justify-between gap-2 rounded-xl border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] px-3 py-2 text-sm"
-          >
-            <span className="inline-flex items-center gap-2 text-[color:var(--text-muted)]">
-              <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: LOSS_CATEGORY_COLORS[segment.key] }} aria-hidden />
-              {segment.name}
-            </span>
-            <span className="tabular-nums font-semibold text-[color:var(--text-base)]">{formatChartPercent(segment.percent)}</span>
-          </li>
-        ))}
-      </ul>
-    </div>
+    </section>
+  );
+}
+
+function ShareChartHeader() {
+  return (
+    <header className="ui-loss-chart__head">
+      <div>
+        <div className="flex items-center gap-1.5">
+          <h3 className="text-sm font-semibold text-[color:var(--text-base)]">Структура теплопотерь</h3>
+          <MetricInfoTooltip {...resultsMetricInfo.lossShareBreakdown} />
+        </div>
+        <p className="mt-0.5 text-xs text-[color:var(--text-soft)]">100% всех теплопотерь в пиковом срезе</p>
+      </div>
+    </header>
   );
 }
 

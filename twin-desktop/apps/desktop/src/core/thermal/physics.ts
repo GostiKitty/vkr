@@ -13,6 +13,7 @@ import {
 import { airflowFromACH } from "./formulas";
 import { computeSolarPosition } from "../solar/solarPosition";
 import { computeFacadeSolarAccessFactor, orientationToAzimuthDeg } from "../solar/solarShading";
+import { resolveModelHomogeneityCoefficient } from "../../shared/utils/homogeneityFromModel";
 
 const AIR_DENSITY_KG_M3 = 1.204;
 const AIR_CP_J_KG_K = 1005;
@@ -155,7 +156,8 @@ export function buildThermalPhysicsModel(
   const networkContext = buildThermalNetworkContext(model, options);
   const levelMap = new Map(model.levels.map((level) => [level.id, level]));
   const orientationByWallId = new Map(adjacency.external.map((edge) => [edge.wallId, edge.orientation]));
-  const { surfaces, warnings: surfaceWarnings } = buildSurfaceEstimates(renderGeometry, options, orientationByWallId);
+  const bridgeFactor = resolveBridgeFactor(model);
+  const { surfaces, warnings: surfaceWarnings } = buildSurfaceEstimates(renderGeometry, options, orientationByWallId, bridgeFactor);
   const roomSurfaces = new Map<string, ThermalSurfaceEstimate[]>();
   surfaces.forEach((surface) => {
     if (surface.positiveRoomId) {
@@ -268,7 +270,8 @@ function createRoomSeed(
 function buildSurfaceEstimates(
   renderGeometry: GeometryRenderModel,
   options: ThermalPhysicsOptions,
-  orientationByWallId: Map<string, Orientation>
+  orientationByWallId: Map<string, Orientation>,
+  bridgeFactor = 1
 ): { surfaces: ThermalSurfaceEstimate[]; warnings: string[] } {
   const warnings: string[] = [];
   const surfaces = renderGeometry.walls.map(({ wall, openings }) => {
@@ -285,8 +288,6 @@ function buildSurfaceEstimates(
       y: midpoint.y - normal.y * probeDistance,
     });
     const windFactor = clamp(options.windFactor ?? DEFAULT_WIND_FACTOR, 0.4, 2.4);
-    /** Мостики холода — в нормативном R_pr (СП 50); в RC без эвристического множителя. */
-    const bridgeFactor = 1;
     const conductanceMultiplier = positiveRoom && negativeRoom ? 1 : windFactor * bridgeFactor;
     const facade = computeWallFacadeConductances(
       wall,
@@ -789,6 +790,18 @@ function resolveEquipmentNominalPower(
   return typeof item.params.nominalPowerW === "number" && item.params.nominalPowerW > 0
     ? item.params.nominalPowerW
     : fallbackW;
+}
+
+/**
+ * Поправочный множитель на тепловые мостики ограждения: 1/r по данным ψ/χ модели.
+ * Если мостиков нет — возвращает 1 (без изменения теплопотерь).
+ */
+function resolveBridgeFactor(model: BuildingModel): number {
+  const homogeneity = resolveModelHomogeneityCoefficient(model);
+  if (homogeneity.hasBridgeData && homogeneity.value != null && homogeneity.value > 0) {
+    return 1 / homogeneity.value;
+  }
+  return 1;
 }
 
 function computeSolarGainW(

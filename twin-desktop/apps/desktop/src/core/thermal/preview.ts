@@ -1,4 +1,5 @@
 import type { BuildingModel } from "../../entities/geometry/types";
+import { buildResolvedGeometryRenderModel } from "../geometry/bimPipeline";
 import { buildThermalPhysicsModel, type ThermalPhysicsOptions } from "./physics";
 import type { ThermalTimelinePoint } from "./solver";
 
@@ -17,11 +18,16 @@ export function buildPreviewThermalFrame(
   options: PreviewThermalOptions = {}
 ): ThermalTimelinePoint {
   const outdoorTemperatureC = options.outdoorTemperatureC ?? DEFAULT_OUTDOOR_TEMPERATURE_C;
-  const physics = buildThermalPhysicsModel(model, {
-    ...options,
-    outdoorTemperatureC,
-    setpointTemperatureC: options.setpointTemperatureC ?? DEFAULT_SETPOINT_C,
-  });
+  const renderGeometry = buildResolvedGeometryRenderModel(model, null);
+  const physics = buildThermalPhysicsModel(
+    model,
+    {
+      ...options,
+      outdoorTemperatureC,
+      setpointTemperatureC: options.setpointTemperatureC ?? DEFAULT_SETPOINT_C,
+    },
+    renderGeometry
+  );
 
   const rooms: ThermalTimelinePoint["rooms"] = {};
   physics.roomBalances.forEach((balance) => {

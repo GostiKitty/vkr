@@ -1,14 +1,9 @@
 import { useMemo } from "react";
-import { Bar, BarChart, CartesianGrid, Cell, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import type { TooltipProps } from "recharts";
-import type { NameType, ValueType } from "recharts/types/component/DefaultTooltipContent";
 import type { LossCategoryKey } from "../../../core/thermal/thermalResultsChartPayload";
+import { MetricInfoTooltip } from "../../../shared/ui";
+import { resultsMetricInfo } from "../resultsMetricInfo";
 import { LossCategoryLegend } from "./LossCategoryLegend";
-import { ThermalChartTooltip } from "./ThermalChartTooltip";
 import {
-  CHART_AXIS_TICK,
-  CHART_MARGIN_VERTICAL,
-  formatChartAxisPower,
   formatChartPercent,
   formatChartPower,
   LOSS_CATEGORY_COLORS,
@@ -22,25 +17,6 @@ export type BuildingLossChartRow = {
   note: string;
 };
 
-function BuildingLossTooltip({ active, payload }: TooltipProps<ValueType, NameType>) {
-  if (!active || !payload?.length) {
-    return null;
-  }
-  const row = payload[0]?.payload as BuildingLossChartRow;
-  return (
-    <ThermalChartTooltip
-      active
-      payload={payload}
-      title={row.label}
-      rows={[
-        { label: "Потери", value: formatChartPower(row.valueW) },
-        { label: "Доля", value: formatChartPercent(row.share) },
-      ]}
-      footnote={row.note}
-    />
-  );
-}
-
 interface BuildingLossChartProps {
   rows: BuildingLossChartRow[];
 }
@@ -51,45 +27,86 @@ export function BuildingLossChart({ rows }: BuildingLossChartProps) {
     [rows]
   );
 
+  const totalW = useMemo(() => data.reduce((sum, row) => sum + row.valueW, 0), [data]);
+  const maxW = data[0]?.valueW ?? 0;
+
   if (!data.length) {
     return (
-      <div className="flex h-48 items-center justify-center rounded-2xl border border-dashed border-[color:var(--border-soft)] bg-[color:var(--surface-base)] px-4 text-center text-sm text-[color:var(--text-soft)]">
-        Теплопотери по компонентам не заданы.
-      </div>
+      <section className="ui-chart-shell" data-testid="building-loss-chart">
+        <ChartHeader totalW={null} />
+        <div className="ui-loss-chart__empty">
+          Теплопотери по компонентам не заданы.
+        </div>
+      </section>
     );
   }
 
   return (
-    <figure aria-labelledby="building-loss-title" aria-describedby="building-loss-desc">
-      <figcaption id="building-loss-title" className="sr-only">
-        Теплопотери по компонентам
-      </figcaption>
+    <section className="ui-chart-shell" data-testid="building-loss-chart" aria-labelledby="building-loss-title">
+      <ChartHeader totalW={totalW} />
+      <LossCategoryLegend className="mt-3" variant="compact" />
+      <ol className="ui-loss-chart__bars mt-4 space-y-3" aria-describedby="building-loss-desc">
+        {data.map((row, index) => {
+          const widthPct = maxW > 0 ? (row.valueW / maxW) * 100 : 0;
+          return (
+            <li key={row.key} className="ui-loss-chart__row group" style={{ animationDelay: `${index * 45}ms` }}>
+              <div className="ui-loss-chart__row-head">
+                <span className="ui-loss-chart__row-label">
+                  <span
+                    className="ui-loss-chart__swatch"
+                    style={{ backgroundColor: LOSS_CATEGORY_COLORS[row.key] }}
+                    aria-hidden
+                  />
+                  {row.label}
+                </span>
+                <span className="ui-loss-chart__row-values">
+                  <span className="ui-loss-chart__power">{formatChartPower(row.valueW)}</span>
+                  <span className="ui-loss-chart__share">{formatChartPercent(row.share)}</span>
+                </span>
+              </div>
+              <div
+                className="ui-loss-chart__track"
+                role="img"
+                aria-label={`${row.label}: ${formatChartPower(row.valueW)}, ${formatChartPercent(row.share)}`}
+              >
+                <div
+                  className="ui-loss-chart__fill"
+                  style={{
+                    width: `${widthPct}%`,
+                    backgroundColor: LOSS_CATEGORY_COLORS[row.key],
+                  }}
+                />
+              </div>
+            </li>
+          );
+        })}
+      </ol>
       <p id="building-loss-desc" className="sr-only">
         Горизонтальная диаграмма показывает теплопотери через ограждения, окна, двери и инфильтрацию в ваттах.
       </p>
-      <LossCategoryLegend className="mb-3" />
-      <div className="h-64 rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)] p-2 sm:h-72">
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={data} layout="vertical" margin={CHART_MARGIN_VERTICAL} accessibilityLayer>
-            <CartesianGrid stroke="var(--chart-grid)" strokeDasharray="3 3" horizontal={false} />
-            <XAxis type="number" tick={CHART_AXIS_TICK} tickFormatter={formatChartAxisPower} />
-            <YAxis dataKey="label" type="category" width={168} tick={CHART_AXIS_TICK} />
-            <Tooltip content={<BuildingLossTooltip />} cursor={{ fill: "var(--accent-muted)", fillOpacity: 0.12 }} />
-            <Bar dataKey="valueW" radius={[0, 8, 8, 0]} maxBarSize={32}>
-              {data.map((row) => (
-                <Cell key={row.key} fill={LOSS_CATEGORY_COLORS[row.key]} />
-              ))}
-              <LabelList
-                dataKey="valueW"
-                position="right"
-                formatter={(value: number) => formatChartPower(Number(value))}
-                fill="var(--text-muted)"
-                fontSize={10}
-              />
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-    </figure>
+    </section>
   );
 }
+
+function ChartHeader({ totalW }: { totalW: number | null }) {
+  return (
+    <header className="ui-loss-chart__head">
+      <div>
+        <div className="flex items-center gap-1.5">
+          <h3 id="building-loss-title" className="text-sm font-semibold text-[color:var(--text-base)]">
+            Теплопотери по компонентам
+          </h3>
+          <MetricInfoTooltip {...resultsMetricInfo.buildingLossBreakdown} />
+        </div>
+      </div>
+      {totalW != null ? (
+        <div className="ui-loss-chart__total">
+          <span className="ui-loss-chart__total-label">Суммарно</span>
+          <span className="ui-loss-chart__total-value">{formatChartPower(totalW)}</span>
+        </div>
+      ) : null}
+    </header>
+  );
+}
+
+export default BuildingLossChart;

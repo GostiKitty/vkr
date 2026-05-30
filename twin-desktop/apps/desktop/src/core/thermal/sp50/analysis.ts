@@ -1,4 +1,4 @@
-import type { BuildingModel, EnvelopeSurface, Sp50BuildingMetadata, Sp50ConstructionType, WallLayer } from "../../../entities/geometry/types";
+import type { BuildingModel, EnvelopeSurface, Sp50BuildingMetadata, Sp50ConstructionType, WallLayer, Sp50EnvelopeFragmentInput } from "../../../entities/geometry/types";
 import type { EnvelopeElementResult } from "../engineering/types";
 import { gsop as calculateGsopSafe } from "../formulas";
 import { calculateConstructionResistance, calculateHeatTransferCoefficient } from "./calculations";
@@ -443,12 +443,17 @@ function buildConstructionChecks(
             })
           : null;
     const requiredResistance = requiredResistanceBase !== null ? requiredResistanceBase * mp : null;
-    const reducedResistance = buildReducedResistance(actualResistance, entry.areaM2, wall?.layers, indoorTemperatureC, outdoorTemperatureC, constructionType);
+    const reducedResistance = buildReducedResistance(actualResistance, entry.areaM2, wall?.layers, indoorTemperatureC, outdoorTemperatureC, constructionType, fragment?.heterogeneity);
     const margin = actualResistance !== null && requiredResistance !== null ? actualResistance - requiredResistance : null;
     const dewPointTemperatureC = computeDewPointApproximation(indoorTemperatureC, context.sourceData.indoorRelativeHumidityPercent ?? 55);
+    const alphaIn = getInternalHeatTransferCoefficient(mapConstructionToSurface(constructionType));
+    const rsi = isFiniteNumber(entry.internalSurfaceResistance_m2K_W)
+      ? entry.internalSurfaceResistance_m2K_W
+      : 1 / Math.max(alphaIn, 1e-6);
+    // T_si = T_in - ΔT * Rsi / R_total  (СП 50.13330.2024 формула для внутренней поверхности)
     const internalSurfaceTemperatureC =
-      actualResistance !== null
-        ? indoorTemperatureC - (indoorTemperatureC - outdoorTemperatureC) * (1 / Math.max(actualResistance * (entry.uValue_W_m2K || 1), 1))
+      actualResistance !== null && actualResistance > 0
+        ? indoorTemperatureC - (indoorTemperatureC - outdoorTemperatureC) * rsi / actualResistance
         : null;
     const temperatureProfile = buildTemperatureProfile(layers, indoorTemperatureC, outdoorTemperatureC, constructionType);
     const homogeneityCoefficient =
@@ -538,6 +543,7 @@ function buildTemperatureCheck(constructions: Sp50ConstructionCheck[]): Sp50Temp
 }
 
 function buildTransientCheck(constructions: Sp50ConstructionCheck[], context: DerivedContext): Sp50TransientCheck {
+  // Per-layer R×S products kept for display (thermalInertiaByLayer in the result).
   const inertiaLayers = constructions.flatMap((entry) =>
     entry.layers.map((layer) =>
       layer.resistance_m2K_W !== null && layer.heatAbsorption_W_m2K !== null
@@ -545,7 +551,25 @@ function buildTransientCheck(constructions: Sp50ConstructionCheck[], context: De
         : 0
     )
   );
-  const thermalInertia = inertiaLayers.reduce((sum, value) => sum + value, 0) / Math.max(constructions.length, 1);
+  // D = Σ R_k × S_k computed per construction (СП 50.13330.2024, разд. 7.3).
+  // Use the minimum D among exterior walls/coverings as the most critical check element.
+  const perConstructionD = constructions.map((entry) =>
+    entry.layers.reduce(
+      (sum, layer) =>
+        sum +
+        (layer.resistance_m2K_W !== null && layer.heatAbsorption_W_m2K !== null
+          ? layer.resistance_m2K_W * layer.heatAbsorption_W_m2K
+          : 0),
+      0
+    )
+  );
+  const envelopeD = constructions
+    .map((entry, idx) => ({ type: entry.constructionType, d: perConstructionD[idx] ?? 0 }))
+    .filter((x) => x.type === "wall" || x.type === "covering" || x.type === "floorOnGround")
+    .map((x) => x.d)
+    .filter((d) => d > 0);
+  const positiveD = envelopeD.length > 0 ? envelopeD : perConstructionD.filter((d) => d > 0);
+  const thermalInertia = positiveD.length ? Math.min(...positiveD) : 0;
   const july = context.buildingMeta.climate?.julyAverageTemperatureC ?? null;
   const summerAmplitude = context.buildingMeta.climate?.summerOutdoorAmplitudeC ?? null;
   const wind = context.buildingMeta.climate?.summerWindSpeedM_s ?? null;
@@ -581,7 +605,12 @@ function buildAirPermeabilityCheck(constructions: Sp50ConstructionCheck[], conte
   const indoorTemperature = context.sourceData.indoorTemperatureC;
   const outdoorTemperature = context.sourceData.outdoorDesignTemperatureC;
   const height = context.buildingMeta.storeys ? context.buildingMeta.storeys * 3 : null;
-  const wind = context.buildingMeta.climate?.summerWindSpeedM_s ?? 4;
+  // СП 50.13330.2024 разд. 8: ΔP использует январскую скорость ветра (СП 131, табл. Б.2), не летнюю.
+  const wind =
+    context.buildingMeta.climate?.winterWindSpeedM_s ??
+    (context.buildingMeta.climate?.summerWindSpeedM_s != null
+      ? context.buildingMeta.climate.summerWindSpeedM_s * 1.4
+      : 5);
   const gammaIndoor = indoorTemperature !== null ? 3463 / (273 + indoorTemperature) : null;
   const gammaOutdoor = outdoorTemperature !== null ? 3463 / (273 + outdoorTemperature) : null;
   const pressureDifference =
@@ -806,39 +835,96 @@ function buildTemperatureProfile(
 ): Sp50TemperaturePoint[] {
   const alphaIn = getInternalHeatTransferCoefficient(mapConstructionToSurface(constructionType));
   const alphaOut = getExternalHeatTransferCoefficient(mapConstructionToSurface(constructionType)) ?? 23;
-  const resistances = [1 / alphaIn, ...layers.map((layer) => layer.resistance_m2K_W ?? 0), 1 / alphaOut];
-  const totalResistance = resistances.reduce((sum, value) => sum + value, 0);
+  const rsi = 1 / Math.max(alphaIn, 1e-6);
+  const rse = 1 / Math.max(alphaOut, 1e-6);
+  const resistances = [rsi, ...layers.map((layer) => layer.resistance_m2K_W ?? 0), rse];
+  const totalResistance = Math.max(resistances.reduce((sum, value) => sum + value, 0), 1e-9);
+  const deltaT = indoorTemperatureC - outdoorTemperatureC;
+
+  const points: Sp50TemperaturePoint[] = [
+    { positionM: 0, temperatureC: indoorTemperatureC, label: "Внутренний воздух" },
+    { positionM: 0, temperatureC: indoorTemperatureC - deltaT * rsi / totalResistance, label: "Внутренняя поверхность" },
+  ];
+
   let position = 0;
-  let cumulativeResistance = 0;
-  const points: Sp50TemperaturePoint[] = [{ positionM: 0, temperatureC: indoorTemperatureC, label: "Внутренний воздух" }];
-  layers.forEach((layer, index) => {
-    cumulativeResistance += index === 0 ? resistances[0] : 0;
+  let cumulativeResistance = rsi;
+  layers.forEach((layer) => {
     cumulativeResistance += layer.resistance_m2K_W ?? 0;
     position += layer.thicknessM;
     points.push({
       positionM: position,
-      temperatureC: indoorTemperatureC - ((indoorTemperatureC - outdoorTemperatureC) * cumulativeResistance) / Math.max(totalResistance, 1e-9),
+      temperatureC: indoorTemperatureC - deltaT * cumulativeResistance / totalResistance,
       label: layer.materialLabel,
     });
   });
-  points.push({ positionM: position, temperatureC: outdoorTemperatureC, label: "Наружный воздух" });
+
+  points.push(
+    { positionM: position, temperatureC: outdoorTemperatureC + deltaT * rse / totalResistance, label: "Наружная поверхность" },
+    { positionM: position, temperatureC: outdoorTemperatureC, label: "Наружный воздух" },
+  );
   return points;
 }
 
+/**
+ * Приведённое сопротивление теплопередаче по СП 50.13330.2024:
+ * 1) Учёт плоскостной неоднородности (параллельные зоны с разным составом):
+ *    U_ср = (A_осн·U_0 + Σ A_i·U_i) / A  (площадно-взвешенное U).
+ * 2) Линейные и точечные тепловые мостики:
+ *    U_pr = U_ср + (Σ ψ_i·L_i + Σ χ_j·n_j) / A, R_pr = 1/U_pr.
+ */
 function buildReducedResistance(
   actualResistance: number | null,
   areaM2: number,
   layers: WallLayer[] | undefined,
   indoorTemperatureC: number,
   outdoorTemperatureC: number,
-  constructionType: Sp50ConstructionType
+  constructionType: Sp50ConstructionType,
+  heterogeneity?: Sp50EnvelopeFragmentInput["heterogeneity"]
 ): number | null {
-  void areaM2;
   void layers;
   void indoorTemperatureC;
   void outdoorTemperatureC;
   void constructionType;
-  return actualResistance;
+  if (actualResistance === null || !Number.isFinite(actualResistance) || actualResistance <= 0) {
+    return actualResistance;
+  }
+  if (!heterogeneity || areaM2 <= 0) {
+    return actualResistance;
+  }
+
+  // 1. Плоскостная неоднородность: площадно-взвешенное U по параллельным зонам.
+  const planarZones = heterogeneity.planar ?? [];
+  let baseU = 1 / actualResistance;
+  if (planarZones.length > 0) {
+    const planarAreaTotal = planarZones.reduce((sum, zone) => sum + Math.max(0, zone.areaM2), 0);
+    if (planarAreaTotal > 0 && planarAreaTotal < areaM2) {
+      const baseAreaFraction = (areaM2 - planarAreaTotal) / areaM2;
+      const planarUContribution = planarZones.reduce(
+        (sum, zone) => sum + (zone.areaM2 / areaM2) * (1 / Math.max(zone.resistance_m2K_W, 1e-6)),
+        0
+      );
+      baseU = baseAreaFraction * (1 / actualResistance) + planarUContribution;
+    }
+  }
+
+  // 2. Линейные и точечные тепловые мостики.
+  const linearBridge_W_K = (heterogeneity.linear ?? []).reduce(
+    (sum, bridge) => sum + bridge.psi_W_mK * bridge.lengthM,
+    0
+  );
+  const pointBridge_W_K = (heterogeneity.point ?? []).reduce(
+    (sum, bridge) => sum + bridge.chi_W_K * (bridge.count ?? 1),
+    0
+  );
+  const totalBridge_W_K = linearBridge_W_K + pointBridge_W_K;
+  if (baseU <= 1 / actualResistance && totalBridge_W_K <= 0) {
+    return actualResistance;
+  }
+  const uPr = baseU + totalBridge_W_K / areaM2;
+  if (!Number.isFinite(uPr) || uPr <= 0) {
+    return actualResistance;
+  }
+  return 1 / Math.max(uPr, 1e-6);
 }
 
 function calculateFloorHeatAbsorption(layers: Sp50LayerResult[]): number | null {

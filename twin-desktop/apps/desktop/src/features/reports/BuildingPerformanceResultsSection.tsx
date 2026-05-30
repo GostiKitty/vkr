@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import type { BuildingPerformanceDiagnostics, DerivedMetricValue } from "../../core/thermal/derived/types";
 import { CollapsibleSection, EngineeringMetricTile, MetricInfoTooltip } from "../../shared/ui";
 import { formatNumber } from "../../shared/utils/format";
+import { formatSurfaceTemperatureFactorStatus } from "../../shared/utils/engineeringStatusLabels";
 import { resultsMetricInfo } from "./resultsMetricInfo";
 
 interface BuildingPerformanceResultsSectionProps {
@@ -62,7 +63,14 @@ export function BuildingPerformanceResultsSection({ diagnostics }: BuildingPerfo
     );
   }
 
-  const { heatLossBreakdown, co2, validation } = diagnostics;
+  const { heatLossBreakdown, co2 } = diagnostics;
+  if (!heatLossBreakdown || !co2) {
+    return (
+      <section className="ui-panel-muted rounded-2xl p-4">
+        <p className="text-sm text-[color:var(--text-muted)]">{NO_DATA} — выполните тепловой расчёт.</p>
+      </section>
+    );
+  }
 
   return (
     <section className="space-y-6" data-testid="building-performance-metrics">
@@ -90,10 +98,14 @@ export function BuildingPerformanceResultsSection({ diagnostics }: BuildingPerfo
       <div className="space-y-3">
         <h4 className="text-sm font-semibold text-[color:var(--text-base)]">Комфорт</h4>
         <div className="grid gap-3 md:grid-cols-2">
-          <PerformanceMetricCard label="DH_underheat (здание)" metric={diagnostics.degreeHoursUnderheat.building} infoKey="degreeHoursUnderheat" digits={1} />
-          <PerformanceMetricCard label="DH_overheat (здание)" metric={diagnostics.degreeHoursOverheat.building} infoKey="degreeHoursOverheat" digits={1} />
+          {diagnostics.degreeHoursUnderheat?.building ? (
+            <PerformanceMetricCard label="DH_underheat (здание)" metric={diagnostics.degreeHoursUnderheat.building} infoKey="degreeHoursUnderheat" digits={1} />
+          ) : null}
+          {diagnostics.degreeHoursOverheat?.building ? (
+            <PerformanceMetricCard label="DH_overheat (здание)" metric={diagnostics.degreeHoursOverheat.building} infoKey="degreeHoursOverheat" digits={1} />
+          ) : null}
         </div>
-        {diagnostics.operativeTemperature.zones.length ? (
+        {diagnostics.operativeTemperature?.zones?.length ? (
           <CollapsibleSection title="Оперативная температура по помещениям">
             <div className="overflow-x-auto pt-3">
               <table className="min-w-full text-sm">
@@ -119,7 +131,7 @@ export function BuildingPerformanceResultsSection({ diagnostics }: BuildingPerfo
             </div>
           </CollapsibleSection>
         ) : null}
-        {diagnostics.surfaceTemperatureFactor.surfaces.length ? (
+        {diagnostics.surfaceTemperatureFactor?.surfaces?.length ? (
           <CollapsibleSection title="Температура внутренней поверхности конструкций">
             <div className="overflow-x-auto pt-3">
               <table className="min-w-full text-sm">
@@ -137,7 +149,9 @@ export function BuildingPerformanceResultsSection({ diagnostics }: BuildingPerfo
                       <td className="px-4 py-2">{surface.label}</td>
                       <td className="px-4 py-2">{formatMetricValue(surface.f_Rsi)}</td>
                       <td className="px-4 py-2">{formatMetricValue(surface.tau_si_C)}</td>
-                      <td className="px-4 py-2">{surface.status ?? NO_DATA}</td>
+                      <td className="px-4 py-2">
+                        {formatSurfaceTemperatureFactorStatus(surface.status, NO_DATA)}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -147,9 +161,9 @@ export function BuildingPerformanceResultsSection({ diagnostics }: BuildingPerfo
         ) : null}
       </div>
 
-      <div className="space-y-3">
-        <h4 className="text-sm font-semibold text-[color:var(--text-base)]">Инженерные сети</h4>
-        {diagnostics.pipeHeatLoss.pipes.length ? (
+      {diagnostics.pipeHeatLoss?.pipes?.length ? (
+        <div className="space-y-3">
+          <h4 className="text-sm font-semibold text-[color:var(--text-base)]">Инженерные сети</h4>
           <div className="grid gap-3 md:grid-cols-2">
             {diagnostics.pipeHeatLoss.pipes.map((pipe) => (
               <div key={pipe.pipeId} className="ui-panel-muted rounded-2xl p-4">
@@ -171,36 +185,44 @@ export function BuildingPerformanceResultsSection({ diagnostics }: BuildingPerfo
               </div>
             ))}
           </div>
-        ) : (
-          <p className="text-sm text-[color:var(--text-muted)]">{NO_DATA} — задайте трубопроводы с U_pipe, L и T_water.</p>
-        )}
-      </div>
+        </div>
+      ) : null}
 
       <div className="space-y-3">
         <h4 className="text-sm font-semibold text-[color:var(--text-base)]">Экология</h4>
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           <PerformanceMetricCard label="CO₂" metric={co2.CO2_kg} infoKey="co2Footprint" digits={1} />
           <PerformanceMetricCard label="CO₂" metric={co2.CO2_tonnes} infoKey="co2Footprint" digits={3} />
           <PerformanceMetricCard label="EF" metric={co2.emissionFactor} infoKey="co2Footprint" digits={3} />
-          <div className="ui-panel-muted rounded-2xl p-4">
-            <p className="text-sm font-semibold">Источник энергии</p>
-            <p className="mt-2 text-lg font-semibold">{co2.energySource.value ?? NO_DATA}</p>
-            <p className="mt-1 text-sm text-[color:var(--text-muted)]">
-              E = {formatMetricValue(co2.energyKWh, 1)} {co2.energyKWh.unit ?? "кВт·ч"}
-            </p>
-          </div>
         </div>
       </div>
 
-      <div className="space-y-3">
-        <h4 className="text-sm font-semibold text-[color:var(--text-base)]">Валидация цифрового двойника</h4>
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          <PerformanceMetricCard label="MBE" metric={validation.MBE_percent} infoKey="validationMbe" digits={2} />
-          <PerformanceMetricCard label="CVRMSE" metric={validation.CVRMSE_percent} infoKey="validationCvrmse" digits={2} />
-          <PerformanceMetricCard label="RMSE_T" metric={validation.RMSE_T_C} infoKey="validationRmse" digits={2} />
-        </div>
-      </div>
     </section>
+  );
+}
+
+export function BuildingPerformanceValidationSection({
+  diagnostics,
+}: BuildingPerformanceResultsSectionProps) {
+  if (!diagnostics) {
+    return null;
+  }
+
+  if (!diagnostics?.validation) {
+    return null;
+  }
+
+  const { validation } = diagnostics;
+
+  return (
+    <div className="space-y-3" data-testid="building-performance-validation">
+      <h4 className="text-sm font-semibold text-[color:var(--text-base)]">Валидация цифрового двойника</h4>
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        <PerformanceMetricCard label="MBE" metric={validation.MBE_percent} infoKey="validationMbe" digits={2} />
+        <PerformanceMetricCard label="CVRMSE" metric={validation.CVRMSE_percent} infoKey="validationCvrmse" digits={2} />
+        <PerformanceMetricCard label="RMSE_T" metric={validation.RMSE_T_C} infoKey="validationRmse" digits={2} />
+      </div>
+    </div>
   );
 }
 

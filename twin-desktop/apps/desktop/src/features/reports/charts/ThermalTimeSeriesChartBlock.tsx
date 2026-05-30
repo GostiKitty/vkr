@@ -1,4 +1,5 @@
 import { useTwinStore } from "../../../entities/twin/twin.store";
+import { useWorkflowStore } from "../../../entities/workflow/workflow.store";
 import { ThermalTimeSeriesChart, type ThermalTimeSeriesHeatingDisplay } from "./ThermalTimeSeriesChart";
 import { useThermalChartResult } from "./useThermalChartResult";
 
@@ -14,6 +15,7 @@ interface ThermalTimeSeriesChartBlockProps {
  */
 export function ThermalTimeSeriesChartBlock({ heatingDisplay, onRunCalculation }: ThermalTimeSeriesChartBlockProps) {
   const selectSpace = useTwinStore((state) => state.selectSpace);
+  const monteCarloResult = useWorkflowStore((state) => state.monteCarloResult);
   const { chartResult, chartRoomOptions, chartRoomId, resultState, simulationSource, activeOptions } =
     useThermalChartResult();
 
@@ -32,6 +34,7 @@ export function ThermalTimeSeriesChartBlock({ heatingDisplay, onRunCalculation }
           ? activeOptions.heatingCapacityW / 1000
           : null
       }
+      monteCarloResult={monteCarloResult}
     />
   );
 }

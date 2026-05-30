@@ -18,7 +18,7 @@ export class ApiError extends Error {
 const ensureBaseUrl = () => {
     const runtimeBase = getEngineBaseUrl().trim().replace(/\/+$/, "");
     if (!runtimeBase) {
-        throw new Error("Базовый URL движка не настроен. Откройте вкладку «Настройки».");
+        throw new Error("Базовый URL движка не настроен. Откройте страницу «Настройки».");
     }
     return runtimeBase;
 };
@@ -35,6 +35,22 @@ const toHeaders = (input) => {
 const displayNetworkError = (silent) => {
     if (!silent) {
         notifyError("Сеть недоступна. Проверьте соединение с движком.");
+    }
+};
+const extractSnippet = (payload) => {
+    if (payload == null) {
+        return undefined;
+    }
+    if (typeof payload === "string") {
+        const trimmed = payload.trim();
+        return trimmed ? trimmed.slice(0, 800) : undefined;
+    }
+    try {
+        const serialized = JSON.stringify(payload);
+        return serialized ? serialized.slice(0, 800) : undefined;
+    }
+    catch {
+        return undefined;
     }
 };
 export async function apiFetch(path, options = {}) {
@@ -63,7 +79,7 @@ export async function apiFetch(path, options = {}) {
             status: undefined,
             ok: false,
             durationMs: Date.now() - startedAt,
-            error: error instanceof Error ? error.message : "Неизвестная ошибка сети",
+            error: error instanceof Error ? error.message : "Неизвестная сетевая ошибка",
         });
         throw error;
     }
@@ -71,6 +87,7 @@ export async function apiFetch(path, options = {}) {
     const isJson = contentType?.includes("application/json");
     const shouldParseJson = isJson && response.status !== 204;
     const payload = shouldParseJson ? await response.json() : await response.text();
+    const snippet = extractSnippet(payload);
     if (!response.ok) {
         if (!silent) {
             const message = typeof payload === "string" && payload.trim().length
@@ -82,7 +99,7 @@ export async function apiFetch(path, options = {}) {
             status: response.status,
             ok: false,
             durationMs: Date.now() - startedAt,
-            responseSnippet: typeof payload === "string" ? payload.slice(0, 500) : JSON.stringify(payload).slice(0, 500),
+            responseSnippet: snippet,
             error: response.statusText || "Ошибка ответа",
         });
         throw new ApiError({
@@ -96,6 +113,7 @@ export async function apiFetch(path, options = {}) {
         status: response.status,
         ok: true,
         durationMs: Date.now() - startedAt,
+        responseSnippet: snippet,
     });
     return payload ?? undefined;
 }
@@ -183,7 +201,7 @@ export function apiUpload(path, formData, options = {}) {
                     status,
                     ok: false,
                     error: xhr.statusText || "Ошибка ответа",
-                    responseSnippet: typeof payload === "string" ? payload.slice(0, 500) : JSON.stringify(payload).slice(0, 500),
+                    responseSnippet: extractSnippet(payload),
                 });
                 reject(new ApiError({
                     status,
@@ -197,6 +215,7 @@ export function apiUpload(path, formData, options = {}) {
             finalizeLog({
                 status,
                 ok: true,
+                responseSnippet: extractSnippet(payload),
             });
             resolve(payload ?? undefined);
         };

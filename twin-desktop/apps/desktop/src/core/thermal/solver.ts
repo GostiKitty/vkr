@@ -270,6 +270,8 @@ function resolveRcSolarOptions(options: ThermalSimulationOptions): RcSolarSimula
       options.solar?.irradianceW_m2 ??
       engineering?.solarIrradianceW_m2 ??
       DEFAULT_RC_SOLAR_CONFIG.irradianceW_m2,
+    diffuseHorizIrradianceW_m2:
+      options.solar?.diffuseHorizIrradianceW_m2 ?? DEFAULT_RC_SOLAR_CONFIG.diffuseHorizIrradianceW_m2,
   };
 }
 

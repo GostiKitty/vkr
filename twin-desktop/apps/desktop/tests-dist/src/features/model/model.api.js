@@ -1,5 +1,5 @@
 import { apiUpload, buildUrl, ApiError } from "../../shared/api/client";
-const IMPORT_ENDPOINTS = ["/import", "/api/import", "/ifc/import"];
+const IMPORT_ENDPOINTS = ["/import/ifc", "/import", "/api/import", "/ifc/import"];
 export async function importModel(file, options) {
     const method = "POST";
     const buildFormData = () => {
@@ -63,7 +63,7 @@ export async function importModel(file, options) {
         });
         throw lastError;
     }
-    throw new Error("Не удалось найти рабочий эндпоинт импорта");
+    throw new Error("Не удалось найти рабочий маршрут импорта IFC.");
 }
 export const modelApi = { importModel };
 const extractSnippet = (payload) => {

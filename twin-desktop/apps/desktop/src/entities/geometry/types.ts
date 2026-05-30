@@ -184,6 +184,8 @@ export interface Sp50ClimateData {
   julyAverageTemperatureC?: number;
   summerOutdoorAmplitudeC?: number;
   summerWindSpeedM_s?: number;
+  /** Расчётная скорость ветра в январе (СП 131.13330, табл. Б.2), м/с. Используется в проверке воздухопроницаемости СП 50. */
+  winterWindSpeedM_s?: number;
   humidityZone?: Sp50HumidityZone;
   solarRadiationZone?: string;
   solarRadiationImax_W_m2?: number;

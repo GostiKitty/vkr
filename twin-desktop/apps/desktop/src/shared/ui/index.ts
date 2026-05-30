@@ -5,17 +5,14 @@ export {
   isAutoCalculatedDataSource,
 } from "./AutoCalculatedSourceIcon";
 export { ModelSourceIcon, MODEL_SOURCE_LABEL, isModelDataSource } from "./ModelSourceIcon";
-export {
-  DemoFallbackSourceIcon,
-  DEMO_FALLBACK_SOURCE_LABEL,
-  isDemoFallbackDataSource,
-} from "./DemoFallbackSourceIcon";
 export { SourceBadgeIconFilters } from "./sourceBadgeIcon";
 export { EmptyState } from "./EmptyState";
 export { Tabs } from "./Tabs";
 export { NotificationPanel } from "./NotificationPanel";
 export { FormulaTooltip, MetricInfoTooltip } from "./FormulaTooltip";
 export { default as Tooltip } from "./Tooltip";
+export { ToolbarTooltip } from "./ToolbarTooltip";
+export { SelectDropdown, type SelectDropdownOption } from "./SelectDropdown";
 export {
   EngineeringCallout,
   EngineeringMetricTile,
@@ -35,6 +32,7 @@ export {
   WorkspacePageHeader,
   WorkspacePane,
   WorkspaceShell,
+  WorkspaceInlineNotice,
 } from "./workspace";
 export {
   AnimatedTabs,
@@ -52,7 +50,11 @@ export * from "./icons";
 export {
   DocumentPreviewStack,
   InsightTile,
+  LandingImpactBanner,
   ProductHeroMockup,
+  QuickActionTile,
   WorkflowFeatureCard,
+  WorkflowPipeline,
   WorkspaceDarkPreview,
 } from "./landing";
+export type { WorkflowPipelineStep } from "./landing";

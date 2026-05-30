@@ -1,6 +1,11 @@
 import { pointToSegmentDistance, polygonContainsPoint } from "../../entities/geometry/geom";
 import type { BuildingModel, Vec2, Wall } from "../../entities/geometry/types";
-import { buildGeometryRenderModel, dedupeRoomVolumesForModel, type GeometryRenderModel, type RoomVolumeDescriptor } from "../geometry/bimPipeline";
+import {
+  buildGeometryRenderModel,
+  finalizeRoomVolumesForModel,
+  type GeometryRenderModel,
+  type RoomVolumeDescriptor,
+} from "../geometry/bimPipeline";
 import { getDefaultSurfaceResistanceProfile } from "../../norms/sp50_2024/heatTransferCoefficients";
 import {
   buildThermalPhysicsModel,
@@ -119,10 +124,10 @@ export function createThermalFieldModel(
   physicsArg?: ThermalPhysicsModel
 ): ThermalFieldModel {
   const baseRender = renderGeometryArg ?? buildGeometryRenderModel(model);
-  const renderGeometry: GeometryRenderModel =
-    physicsArg === undefined
-      ? { ...baseRender, roomVolumes: dedupeRoomVolumesForModel(baseRender.roomVolumes, model.rooms, null) }
-      : baseRender;
+  const renderGeometry: GeometryRenderModel = {
+    ...baseRender,
+    roomVolumes: finalizeRoomVolumesForModel(baseRender.roomVolumes, model.rooms, null),
+  };
   const physicsBuilt =
     physicsArg ??
     buildThermalPhysicsModel(

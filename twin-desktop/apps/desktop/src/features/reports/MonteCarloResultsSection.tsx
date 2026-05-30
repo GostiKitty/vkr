@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Area,
   AreaChart,
@@ -27,13 +27,14 @@ import {
   type ThermalMonteCarloResult,
   type ThermalMonteCarloSensitivityFactor,
 } from "../../core/uncertainty/thermalMonteCarlo";
-import { Badge, CollapsibleSection, EmptyState, MetricInfoTooltip } from "../../shared/ui";
+import { Badge, CollapsibleSection, EmptyState, MetricInfoTooltip, WorkspaceInlineNotice } from "../../shared/ui";
 import { formatEnergy, formatNumber, formatPercentage } from "../../shared/utils/format";
 import { getRoomDisplayName } from "../../shared/utils/roomNames";
 import { MonteCarloChart } from "./charts/MonteCarloChart";
 import { MonteCarloScatterChart } from "./charts/MonteCarloScatterChart";
 import { ThermalTimeSeriesChartBlock } from "./charts/ThermalTimeSeriesChartBlock";
 import { resultsMetricInfo, type MetricInfoDefinition } from "./resultsMetricInfo";
+import { MonteCarloRunControls } from "../scenarios/MonteCarloRunControls";
 
 interface MonteCarloResultsSectionProps {
   baseResult: ThermalSimulationResult | null;
@@ -41,7 +42,6 @@ interface MonteCarloResultsSectionProps {
   buildingModel: BuildingModel;
   climateLabel: string | null;
   monteCarloResult: ThermalMonteCarloResult | null;
-  onEditUncertainty?: () => void;
   onRunCalculation?: () => void;
 }
 
@@ -125,7 +125,6 @@ export function MonteCarloResultsSection({
   buildingModel,
   climateLabel,
   monteCarloResult,
-  onEditUncertainty,
   onRunCalculation,
 }: MonteCarloResultsSectionProps) {
   const roomNameMap = useMemo(() => {
@@ -136,21 +135,14 @@ export function MonteCarloResultsSection({
     return map;
   }, [buildingModel.rooms]);
 
-  const defaultPeakThresholdKW = useMemo(() => {
+  const peakThresholdKW = useMemo(() => {
     if (!baseResult) {
       return null;
     }
     return roundValue(baseResult.summary.peakLoadKW * DEFAULT_PEAK_MARGIN_FACTOR, 2);
   }, [baseResult]);
 
-  const [peakThresholdInput, setPeakThresholdInput] = useState("");
   const [selectedTargetMetric, setSelectedTargetMetric] = useState<ThermalMonteCarloTargetMetricId>("totalEnergyKWh");
-
-  useEffect(() => {
-    setPeakThresholdInput(formatInputNumber(defaultPeakThresholdKW));
-  }, [defaultPeakThresholdKW]);
-
-  const peakThresholdKW = useMemo(() => parsePositiveNumber(peakThresholdInput), [peakThresholdInput]);
   const selectedTargetMetricDefinition = useMemo(
     () => getThermalMonteCarloTargetMetricDefinition(selectedTargetMetric),
     [selectedTargetMetric]
@@ -270,18 +262,28 @@ export function MonteCarloResultsSection({
     }));
   }, [monteCarloResult?.percentilesByTime, baseResult?.timeline]);
 
+  const runControls = (
+    <>
+      {!baseResult ? (
+        <WorkspaceInlineNotice
+          message="Сначала базовый RC-расчёт."
+          actions={
+            onRunCalculation ? (
+              <button type="button" onClick={onRunCalculation} className="ui-btn-primary px-4 py-2 text-sm">
+                Запустить расчёт
+              </button>
+            ) : null
+          }
+        />
+      ) : null}
+      <MonteCarloRunControls />
+    </>
+  );
+
   if (!monteCarloResult) {
     return (
       <div className="space-y-5" data-testid="monte-carlo-results-section">
-        <EmptyState
-          title="Вероятностный анализ ещё не выполнен"
-          message="Перейдите в раздел «Вероятностный анализ» и запустите Monte Carlo поверх нестационарного RC-расчёта."
-        />
-        {onEditUncertainty ? (
-          <button type="button" onClick={onEditUncertainty} className="ui-btn-primary px-4 py-2 text-sm">
-            Перейти к вероятностному анализу
-          </button>
-        ) : null}
+        {runControls}
         <ThermalTimeSeriesChartBlock heatingDisplay="raw" onRunCalculation={onRunCalculation} />
       </div>
     );
@@ -289,30 +291,16 @@ export function MonteCarloResultsSection({
 
   if (!baseResult || !presentation) {
     return (
-      <div className="space-y-3">
-        <EmptyState
-          title="Нет базового RC-расчёта"
-          message="Сначала выполните базовый RC-расчёт, чтобы сравнить его с распределением Monte Carlo."
-          tone="warning"
-        />
+      <div className="space-y-5" data-testid="monte-carlo-results-section">
+        {runControls}
+        <ThermalTimeSeriesChartBlock heatingDisplay="raw" onRunCalculation={onRunCalculation} />
       </div>
     );
   }
 
   return (
     <section className="space-y-5" data-testid="monte-carlo-results-section">
-      <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-        <div>
-          <h3 className="ui-heading-panel">Monte Carlo поверх нестационарного RC-расчёта</h3>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Badge tone="accent">{formatNumber(monteCarloResult.runs, { maximumFractionDigits: 0 })} сценариев</Badge>
-          {climateLabel ? <Badge tone="info">{climateLabel}</Badge> : null}
-          <Badge tone={riskBadgeTone(resolveRiskStatus(presentation.underheatingRisk ?? 0))}>
-            Риск недогрева {formatPercentage(presentation.underheatingRisk)}
-          </Badge>
-        </div>
-      </div>
+      {runControls}
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
         <KpiCard label="Базовый расчёт" value={formatEnergy(baseResult.summary.totalEnergyKWh, "кВт·ч")} info={resultsMetricInfo.energy} />
@@ -326,19 +314,11 @@ export function MonteCarloResultsSection({
         <KpiCard
           label="Главный фактор"
           value={presentation.mainFactor?.label ?? "—"}
-          hint={
-            selectedTargetMetricHasData
-              ? `По метрике «${selectedTargetMetricDefinition.shortLabel}»`
-              : selectedTargetMetricDefinition.emptyStateMessage
-          }
           info={resultsMetricInfo.sensitivity}
         />
       </div>
 
-      <div className="space-y-2">
-        <p className="text-sm font-semibold text-[color:var(--text-base)]">Базовый нестационарный RC (исходные шаги)</p>
-        <ThermalTimeSeriesChartBlock heatingDisplay="raw" onRunCalculation={onRunCalculation} />
-      </div>
+      <ThermalTimeSeriesChartBlock heatingDisplay="raw" onRunCalculation={onRunCalculation} />
 
       <section className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)] p-4">
         <div className="mb-1 flex items-center gap-1.5">
@@ -353,19 +333,12 @@ export function MonteCarloResultsSection({
               key={`${card.id}-var`}
               label={`VaR · ${card.label}`}
               value={formatMetricValue(card.valueAtRisk, card.unit, card.decimals)}
-              hint={`P${formatNumber(presentation.varLevelPercent, { maximumFractionDigits: 0 })} — не превышается в ${formatNumber(
-                presentation.varLevelPercent,
-                { maximumFractionDigits: 0 }
-              )}% сценариев`}
               info={resultsMetricInfo.valueAtRisk}
             />,
             <SummaryStripItem
               key={`${card.id}-cvar`}
               label={`CVaR · ${card.label}`}
               value={formatMetricValue(card.conditionalValueAtRisk, card.unit, card.decimals)}
-              hint={`Среднее в худших ${formatNumber(100 - presentation.varLevelPercent, {
-                maximumFractionDigits: 0,
-              })}% сценариев`}
               info={resultsMetricInfo.conditionalValueAtRisk}
             />,
           ])}
@@ -381,77 +354,36 @@ export function MonteCarloResultsSection({
           <SummaryStripItem
             label="P50 энергии"
             value={formatEnergy(monteCarloResult.totalEnergy.p50, "кВт·ч")}
-            hint={`Среднее ${formatEnergy(monteCarloResult.totalEnergy.mean, "кВт·ч")}`}
             info={resultsMetricInfo.monteCarloP50}
           />
           <SummaryStripItem
             label="Диапазон P10–P90"
             value={formatRangeValue(monteCarloResult.totalEnergy.p10, monteCarloResult.totalEnergy.p90, "кВт·ч", 1)}
-            hint={`Ширина ${formatSpreadValue(monteCarloResult.totalEnergy, "кВт·ч", 1)}`}
             info={resultsMetricInfo.probabilisticSpread}
           />
           <SummaryStripItem
             label="CV энергии"
             value={formatPercentValue(monteCarloResult.totalEnergy.coefficientOfVariationPercent)}
-            hint={describeCv(monteCarloResult.totalEnergy.coefficientOfVariationPercent).label}
             info={resultsMetricInfo.coefficientOfVariation}
           />
           <SummaryStripItem
             label="Устойчивость режима"
             value={formatPercentValue(presentation.stabilityIndexPercent)}
-            hint={describeStability(presentation.stabilityIndexPercent).label}
             info={resultsMetricInfo.stabilityIndex}
           />
-          <div className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] px-4 py-3">
-            <div className="flex items-center gap-1.5">
-              <p className="text-sm font-semibold text-[color:var(--text-muted)]">
-                Порог пиковой мощности, кВт
-              </p>
-              <MetricInfoTooltip {...resultsMetricInfo.exceedanceProbability} />
-            </div>
-            <div className="mt-2 flex items-center gap-2">
-              <input
-                type="number"
-                min={0}
-                step="0.1"
-                value={peakThresholdInput}
-                onChange={(event) => setPeakThresholdInput(event.target.value)}
-                className="ui-field min-w-0 flex-1 px-3 py-2 text-sm shadow-inner"
-              />
-              <button
-                type="button"
-                className="shrink-0 rounded-full border border-[color:var(--border-soft)] px-3 py-1.5 text-sm font-semibold text-[color:var(--text-muted)] transition hover:bg-[color:var(--surface-elevated)]"
-                onClick={() => setPeakThresholdInput(formatInputNumber(defaultPeakThresholdKW))}
-              >
-                1,2× база
-              </button>
-            </div>
-            <p className="mt-2 text-xs text-[color:var(--text-muted)]">
-              По умолчанию 120% от базовой пиковой нагрузки. Пустое поле — вероятность превышения не считается.
-            </p>
-          </div>
           <SummaryStripItem
             label="Риск превышения пика"
             value={formatPercentage(presentation.peakExceedanceProbability)}
-            hint={peakThresholdKW === null ? "Введите порог Q_lim" : `Q_lim = ${formatNumber(peakThresholdKW, { maximumFractionDigits: 2 })} кВт`}
             info={resultsMetricInfo.exceedanceProbability}
           />
           <SummaryStripItem
             label="Риск роста энергии"
             value={formatPercentage(presentation.energyGrowthProbability)}
-            hint={`Порог 1.2 × E_base = ${formatEnergy(baseResult.summary.totalEnergyKWh * DEFAULT_ENERGY_GROWTH_FACTOR, "кВт·ч")}`}
             info={resultsMetricInfo.energyGrowthRisk}
           />
           <SummaryStripItem
             label="Самое рискованное помещение"
             value={presentation.riskiestRoom?.roomName ?? "—"}
-            hint={
-              presentation.riskiestRoom
-                ? `${formatPercentage(presentation.riskiestRoom.underheatingRisk)} · запас ${formatSignedTemperature(
-                    presentation.riskiestRoom.marginTo20C
-                  )}`
-                : "Нет риска по помещениям"
-            }
             info={resultsMetricInfo.roomMargin}
           />
         </div>
@@ -547,7 +479,7 @@ export function MonteCarloResultsSection({
             </thead>
             <tbody>
               <ComparisonRow
-                label="totalEnergyKWh"
+                label={getThermalMonteCarloTargetMetricDefinition("totalEnergyKWh").shortLabel}
                 info={resultsMetricInfo.energy}
                 baseline={formatEnergy(baseResult.summary.totalEnergyKWh, "кВт·ч")}
                 p10={formatEnergy(monteCarloResult.totalEnergy.p10, "кВт·ч")}
@@ -555,7 +487,7 @@ export function MonteCarloResultsSection({
                 p90={formatEnergy(monteCarloResult.totalEnergy.p90, "кВт·ч")}
               />
               <ComparisonRow
-                label="peakLoadKW"
+                label={getThermalMonteCarloTargetMetricDefinition("peakLoadKW").shortLabel}
                 info={resultsMetricInfo.peakLoad}
                 baseline={`${formatNumber(baseResult.summary.peakLoadKW, { maximumFractionDigits: 2 })} кВт`}
                 p10={`${formatNumber(monteCarloResult.peakLoad.p10, { maximumFractionDigits: 2 })} кВт`}
@@ -563,7 +495,7 @@ export function MonteCarloResultsSection({
                 p90={`${formatNumber(monteCarloResult.peakLoad.p90, { maximumFractionDigits: 2 })} кВт`}
               />
               <ComparisonRow
-                label="discomfortHours"
+                label={getThermalMonteCarloTargetMetricDefinition("discomfortHours").shortLabel}
                 info={resultsMetricInfo.discomfort}
                 baseline={`${formatNumber(baseResult.summary.discomfortHours, { maximumFractionDigits: 1 })} ч`}
                 p10={`${formatNumber(monteCarloResult.discomfort.p10, { maximumFractionDigits: 1 })} ч`}
@@ -644,7 +576,7 @@ export function MonteCarloResultsSection({
         {presentation.energyCdf.length ? (
           <div className="h-72">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={presentation.energyCdf} margin={{ top: 8, right: 16, bottom: 8, left: 8 }}>
+              <AreaChart data={presentation.energyCdf} margin={{ top: 28, right: 16, bottom: 28, left: 12 }}>
                 <defs>
                   <linearGradient id="mc-cdf-fill" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0%" stopColor="var(--accent-base)" stopOpacity={0.35} />
@@ -689,7 +621,7 @@ export function MonteCarloResultsSection({
                       x={marker.value}
                       stroke="var(--chart-line-muted)"
                       strokeDasharray="4 4"
-                      label={{ value: marker.label, position: "top", fill: "var(--text-soft)", fontSize: 10 }}
+                      label={{ value: marker.label, position: "top", offset: 6, fill: "var(--text-soft)", fontSize: 10 }}
                     />
                   ) : null
                 )}
@@ -748,15 +680,15 @@ export function MonteCarloResultsSection({
               <thead>
                 <tr className="text-sm text-[color:var(--text-soft)]">
                   <th className="px-4 py-2 font-semibold">Помещение</th>
-                  <th className="px-4 py-2 font-semibold">temperatureP50C</th>
-                  <th className="px-4 py-2 font-semibold">minimumTemperatureP10C</th>
+                  <th className="px-4 py-2 font-semibold">Температура P50</th>
+                  <th className="px-4 py-2 font-semibold">Мин. температура P10</th>
                   <th className="px-4 py-2 font-semibold">
                     <span className="inline-flex items-center gap-1.5">
-                      <span>Margin_room</span>
+                      <span>Запас до порога</span>
                       <MetricInfoTooltip {...resultsMetricInfo.roomMargin} />
                     </span>
                   </th>
-                  <th className="px-4 py-2 font-semibold">underheatingRisk</th>
+                  <th className="px-4 py-2 font-semibold">Риск недогрева</th>
                   <th className="px-4 py-2 font-semibold">Статус</th>
                 </tr>
               </thead>
@@ -973,12 +905,10 @@ function KpiCard({
 function SummaryStripItem({
   label,
   value,
-  hint,
   info,
 }: {
   label: string;
   value: string;
-  hint?: string;
   info: MetricInfoDefinition;
 }) {
   return (
@@ -988,7 +918,6 @@ function SummaryStripItem({
         <MetricInfoTooltip {...info} />
       </div>
       <p className="mt-1 text-base font-semibold text-[color:var(--text-base)]">{value}</p>
-      {hint ? <p className="mt-1 text-xs text-[color:var(--text-muted)]">{hint}</p> : null}
     </div>
   );
 }
@@ -1054,16 +983,13 @@ function buildRiskRows(
     },
     {
       id: "peak",
-      label:
-        peakThresholdKW === null
-          ? "Порог пиковой мощности не задан"
-          : `Пиковая мощность выше ${formatNumber(peakThresholdKW, { maximumFractionDigits: 2 })} кВт`,
+      label: "Пиковая мощность выше базового результата на 20%",
       probability: peakProbability,
       status: resolveRiskStatus(peakProbability ?? 0),
     },
     {
       id: "energy",
-      label: "Энергия выше base на 20%",
+      label: "Энергия выше базового результата на 20%",
       probability: energyProbability,
       status: resolveRiskStatus(energyProbability ?? 0),
     },
@@ -1222,24 +1148,6 @@ function formatSignedTemperature(value: number | null): string {
   }
   const sign = value > 0 ? "+" : "";
   return `${sign}${formatNumber(value, { maximumFractionDigits: 1 })} °C`;
-}
-
-function parsePositiveNumber(value: string): number | null {
-  if (!value.trim()) {
-    return null;
-  }
-  const normalized = Number(value.replace(",", "."));
-  if (!Number.isFinite(normalized) || normalized <= 0) {
-    return null;
-  }
-  return normalized;
-}
-
-function formatInputNumber(value: number | null): string {
-  if (value === null || !Number.isFinite(value)) {
-    return "";
-  }
-  return String(roundValue(value, 2));
 }
 
 function roundValue(value: number, digits: number): number {

@@ -70,6 +70,14 @@ export function buildSp50ClimateFromSp131City(
       overwriteOutdoor || base?.heatingPeriodDurationDays == null
         ? city.heatingPeriodDurationDays
         : base.heatingPeriodDurationDays,
+    winterWindSpeedM_s:
+      overwriteOutdoor || base?.winterWindSpeedM_s == null
+        ? city.winterWindSpeedM_s
+        : base.winterWindSpeedM_s,
+    summerWindSpeedM_s:
+      overwriteOutdoor || base?.summerWindSpeedM_s == null
+        ? city.summerWindSpeedM_s
+        : base.summerWindSpeedM_s,
     indoorTemperatureC: base?.indoorTemperatureC ?? indoorTemperatureC,
     indoorRelativeHumidityPercent: base?.indoorRelativeHumidityPercent ?? indoorRelativeHumidityPercent,
     humidityZone: base?.humidityZone ?? "normal",

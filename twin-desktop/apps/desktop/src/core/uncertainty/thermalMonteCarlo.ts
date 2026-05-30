@@ -566,8 +566,8 @@ function applySampleToOptions(
     },
     internalGains: {
       ...baseOptions.internalGains,
-      dayGain_W_m2: Math.max(0, baseOptions.internalGains.dayGain_W_m2 * sample.internalGainMultiplier),
-      nightGain_W_m2: Math.max(0, baseOptions.internalGains.nightGain_W_m2 * sample.internalGainMultiplier),
+      dayGain_W_m2: Math.max(0, (baseOptions.internalGains?.dayGain_W_m2 ?? 0) * sample.internalGainMultiplier),
+      nightGain_W_m2: Math.max(0, (baseOptions.internalGains?.nightGain_W_m2 ?? 0) * sample.internalGainMultiplier),
     },
     occupancy: {
       ...occupancy,
@@ -765,8 +765,8 @@ export function buildSensitivityFactors(
     dayFraction: 1,
     nightFraction: 0.2,
   };
-  const averageInternalGains =
-    (baseOptions.internalGains.dayGain_W_m2 + baseOptions.internalGains.nightGain_W_m2) / 2;
+  const internalGains = baseOptions.internalGains ?? { dayGain_W_m2: 0, nightGain_W_m2: 0 };
+  const averageInternalGains = (internalGains.dayGain_W_m2 + internalGains.nightGain_W_m2) / 2;
   const averageOccupancy = ((occupancy.dayFraction ?? 1) + (occupancy.nightFraction ?? 0.2)) / 2;
   const infiltrationBase = baseOptions.infiltrationACH ?? 0.5;
 

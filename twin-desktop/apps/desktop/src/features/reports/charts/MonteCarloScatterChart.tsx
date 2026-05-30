@@ -18,7 +18,7 @@ import {
   type ThermalMonteCarloTargetMetricDefinition,
   type ThermalMonteCarloTargetMetricId,
 } from "../../../core/uncertainty/thermalMonteCarlo";
-import { EmptyState, MetricInfoTooltip } from "../../../shared/ui";
+import { EmptyState, MetricInfoTooltip, SelectDropdown } from "../../../shared/ui";
 import { formatNumber } from "../../../shared/utils/format";
 
 type ScatterParameterId =
@@ -87,10 +87,10 @@ export function MonteCarloScatterChart({
         <div>
           <div className="flex items-center gap-1.5">
             <p className="text-sm font-semibold text-[color:var(--text-base)]">
-              {`Scatter: ${parameterOption.label} → ${targetMetricOption.shortLabel}`}
+              {`Точечная диаграмма: ${parameterOption.label} → ${targetMetricOption.shortLabel}`}
             </p>
             <MetricInfoTooltip
-              title="Scatter Monte Carlo"
+              title="Точечная диаграмма Monte Carlo"
               meaning="Показывает, как изменение входного параметра связано с выбранной целевой метрикой по сценариям."
               formula={`(x_i, y_i) = (input_i, ${targetMetric})`}
               inputs={["samples", targetMetricOption.tooltipSeriesKey]}
@@ -99,35 +99,19 @@ export function MonteCarloScatterChart({
           </div>
         </div>
 
-        <div className="grid gap-3 md:grid-cols-2">
-          <label className="text-sm text-[color:var(--text-muted)]">
-            Фактор
-            <select
-              value={parameter}
-              onChange={(event) => setParameter(event.target.value as ScatterParameterId)}
-              className="mt-1 block min-w-[220px] rounded-xl border border-[color:var(--border-soft)] bg-[color:var(--surface-elevated)] px-3 py-2 text-sm text-[color:var(--text-base)]"
-            >
-              {PARAMETER_OPTIONS.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="text-sm text-[color:var(--text-muted)]">
-            Целевая метрика
-            <select
-              value={targetMetric}
-              onChange={(event) => onTargetMetricChange(event.target.value as ThermalMonteCarloTargetMetricId)}
-              className="mt-1 block min-w-[240px] rounded-xl border border-[color:var(--border-soft)] bg-[color:var(--surface-elevated)] px-3 py-2 text-sm text-[color:var(--text-base)]"
-            >
-              {THERMAL_MONTE_CARLO_TARGET_METRICS.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
+        <div className="grid w-full gap-3 md:grid-cols-2 md:min-w-[28rem]">
+          <SelectDropdown
+            label="Фактор"
+            value={parameter}
+            options={PARAMETER_OPTIONS.map((option) => ({ value: option.id, label: option.label }))}
+            onChange={setParameter}
+          />
+          <SelectDropdown
+            label="Целевая метрика"
+            value={targetMetric}
+            options={THERMAL_MONTE_CARLO_TARGET_METRICS.map((option) => ({ value: option.id, label: option.label }))}
+            onChange={onTargetMetricChange}
+          />
         </div>
       </div>
 
@@ -215,7 +199,7 @@ function resolveParameterValue(
     case "nightSetpoint":
       return baseOptions.setpoints.night + sample.setpointOffsetC;
     case "internalGains":
-      return Math.max(0, baseOptions.internalGains.dayGain_W_m2 * sample.internalGainMultiplier);
+      return Math.max(0, (baseOptions.internalGains?.dayGain_W_m2 ?? 0) * sample.internalGainMultiplier);
     case "occupancy":
       return Math.max(0, (baseOptions.occupancy?.dayFraction ?? 1) * sample.occupancyMultiplier);
     default:

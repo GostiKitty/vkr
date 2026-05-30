@@ -85,22 +85,28 @@ function buildVentilationRecovery(
   buildingDiagnostics: ThermalBuildingDiagnostics
 ): DerivedVentilationRecovery {
   const recovery = Math.min(1, Math.max(0, options.heatRecoveryFactor ?? 0));
-  const before = Number.isFinite(buildingDiagnostics.totalMechanicalVentilationLossW)
+  // The RC solver already applies (1 − heatRecoveryFactor) to ventilationConductance_W_K,
+  // so totalMechanicalVentilationLossW is the post-recovery (actual) value from the solver.
+  const after = Number.isFinite(buildingDiagnostics.totalMechanicalVentilationLossW)
     ? buildingDiagnostics.totalMechanicalVentilationLossW
     : null;
-  const after = before === null ? null : before * (1 - recovery);
-  const saved = before === null || after === null ? null : before - after;
+  // Reconstruct the pre-recovery baseline so users see what losses would be without HRV.
+  const before =
+    recovery > 0 && recovery < 1 && after !== null
+      ? after / (1 - recovery)
+      : after;
+  const saved = before !== null && after !== null ? before - after : null;
   const warnings =
     recovery > 0
       ? [
-          "КПД рекуперации показан как derived-only проверка и не уменьшает основной RC-solver без отдельного режима.",
+          "КПД рекуперации учтён в RC-solver через уменьшение conductance вентиляции; значение «до» рассчитано обратным ходом от фактических потерь solver.",
         ]
       : [];
 
   return {
     efficiency: metric(recovery, "доля", "user input", "derived-only", "derived-only", false),
-    ventilationLossBeforeRecovery_W: metric(before, "Вт", "solver", "rc-runtime", "main-runtime", true),
-    ventilationLossAfterRecovery_W: metric(after, "Вт", "engineering-derived", "derived-only", "derived-only", false, [], warnings),
+    ventilationLossBeforeRecovery_W: metric(before, "Вт", "engineering-derived", "derived-only", "derived-only", false),
+    ventilationLossAfterRecovery_W: metric(after, "Вт", "solver", "rc-runtime", "main-runtime", true, [], warnings),
     savedByRecovery_W: metric(saved, "Вт", "engineering-derived", "derived-only", "derived-only", false, [], warnings),
   };
 }
