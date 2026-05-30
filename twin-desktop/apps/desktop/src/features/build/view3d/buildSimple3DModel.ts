@@ -1,0 +1,535 @@
+import type { BuildingModel, Door, Vec2, Wall, Window } from "../../../entities/geometry/types";
+import type { Equipment } from "../../../entities/networks/types";
+import type { ThermalFieldModel } from "../../../core/thermal/field";
+import { sampleWallSurfaceTemperatures } from "../../../core/thermal/field";
+import { buildSimplePreviewBounds, resolveSimplePreviewLevelId } from "./simplePreviewMath";
+
+export const DEBUG_SIMPLE_3D = false;
+
+export interface SimpleScenePoint {
+  x: number;
+  y: number;
+  z: number;
+}
+
+export interface SimpleRoomModel {
+  id: string;
+  levelId: string;
+  boundary: Vec2[];
+  elevation_m: number;
+  temperature_C: number | null;
+}
+
+export interface SimpleWallModel {
+  id: string;
+  levelId: string;
+  start: Vec2;
+  end: Vec2;
+  elevation_m: number;
+  height_m: number;
+  thickness_m: number;
+  temperature_C: number | null;
+}
+
+export interface SimpleOpeningModel {
+  id: string;
+  type: "window" | "door";
+  levelId: string;
+  center: SimpleScenePoint;
+  wallCenter: SimpleScenePoint;
+  width_m: number;
+  height_m: number;
+  depth_m: number;
+  rotationY_rad: number;
+  wallId: string | null;
+  onWall: boolean;
+  uValue_W_m2K?: number;
+  envelopePresetId?: string;
+}
+
+export interface SimpleRoofModel {
+  id: string;
+  levelId: string;
+  boundary: Vec2[];
+  elevation_m: number;
+  thickness_m: number;
+  kind: "flat" | "pitched";
+  slope?: { directionDeg: number; risePerMeter: number };
+}
+
+export interface SimpleSlabModel {
+  id: string;
+  levelId: string;
+  boundary: Vec2[];
+  elevation_m: number;
+  thickness_m: number;
+}
+
+export interface SimplePipeModel {
+  id: string;
+  levelId: string;
+  path: SimpleScenePoint[];
+  diameter_m: number;
+  colorRole: "supply" | "return";
+}
+
+export interface SimpleDuctModel {
+  id: string;
+  levelId: string;
+  path: SimpleScenePoint[];
+  width_m: number;
+  height_m: number;
+}
+
+export interface SimpleEquipmentModel {
+  id: string;
+  levelId: string;
+  type: Equipment["type"];
+  position: SimpleScenePoint;
+}
+
+export interface SimpleSensorModel {
+  id: string;
+  levelId: string;
+  position: SimpleScenePoint;
+}
+
+export interface SimpleTemperatureSurface {
+  id: string;
+  sourceType: "room" | "wall";
+  levelId: string;
+  boundary?: Vec2[];
+  wall?: {
+    start: Vec2;
+    end: Vec2;
+    thickness_m: number;
+    height_m: number;
+    elevation_m: number;
+  };
+  temperature_C: number;
+}
+
+export interface SimpleTemperatureSummary {
+  min_C: number;
+  max_C: number;
+  average_C: number;
+  warnings: string[];
+}
+
+export interface Simple3DModelBuildOptions {
+  showNetworks?: boolean;
+  showEquipment?: boolean;
+  showTemperature?: boolean;
+  showWallTemperature?: boolean;
+  thermalField?: ThermalFieldModel | null;
+}
+
+export interface Simple3DModel {
+  levelId: string | null;
+  simpleRooms: SimpleRoomModel[];
+  simpleWalls: SimpleWallModel[];
+  simpleWindows: SimpleOpeningModel[];
+  simpleDoors: SimpleOpeningModel[];
+  simpleRoofs: SimpleRoofModel[];
+  simpleSlabs: SimpleSlabModel[];
+  simplePipes: SimplePipeModel[];
+  simpleDucts: SimpleDuctModel[];
+  simpleEquipment: SimpleEquipmentModel[];
+  simpleSensors: SimpleSensorModel[];
+  simpleTemperatureSurfaces: SimpleTemperatureSurface[];
+  temperatureSummary: SimpleTemperatureSummary | null;
+  bounds: ReturnType<typeof buildSimplePreviewBounds>;
+  warnings: string[];
+}
+
+function logDebug(message: string, payload: Record<string, unknown>) {
+  if (DEBUG_SIMPLE_3D) {
+    console.info("[simple-3d]", message, payload);
+  }
+}
+
+export function planToSimpleScene(point: Vec2, elevation_m: number): SimpleScenePoint {
+  return {
+    x: point.x,
+    y: elevation_m,
+    z: point.y,
+  };
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function computePolygonBounds(points: Vec2[]) {
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  points.forEach((point) => {
+    minX = Math.min(minX, point.x);
+    minY = Math.min(minY, point.y);
+    maxX = Math.max(maxX, point.x);
+    maxY = Math.max(maxY, point.y);
+  });
+  return { minX, minY, maxX, maxY };
+}
+
+function polygonsRoughlyAlign(primary: Vec2[], candidate: Vec2[]) {
+  if (primary.length < 3 || candidate.length < 3) {
+    return false;
+  }
+  const primaryBounds = computePolygonBounds(primary);
+  const candidateBounds = computePolygonBounds(candidate);
+  const width = Math.max(primaryBounds.maxX - primaryBounds.minX, 0.01);
+  const height = Math.max(primaryBounds.maxY - primaryBounds.minY, 0.01);
+  const marginX = Math.max(0.35, width * 0.08);
+  const marginY = Math.max(0.35, height * 0.08);
+  return !(
+    candidateBounds.minX < primaryBounds.minX - marginX ||
+    candidateBounds.maxX > primaryBounds.maxX + marginX ||
+    candidateBounds.minY < primaryBounds.minY - marginY ||
+    candidateBounds.maxY > primaryBounds.maxY + marginY
+  );
+}
+
+function getLevelElevation(model: BuildingModel, levelId: string) {
+  return model.levels.find((level) => level.id === levelId)?.elevation_m ?? 0;
+}
+
+function resolveOpeningPlacement(
+  wall: Wall | null,
+  opening: Door | Window,
+  levelElevation_m: number,
+  type: "window" | "door"
+): SimpleOpeningModel | null {
+  if (!wall) {
+    return null;
+  }
+  const dx = wall.b.x - wall.a.x;
+  const dz = wall.b.y - wall.a.y;
+  const length = Math.hypot(dx, dz);
+  if (length < 1e-6) {
+    return null;
+  }
+  const dirX = dx / length;
+  const dirZ = dz / length;
+  const anchorT = Number.isFinite(opening.anchor.t) ? opening.anchor.t : 0;
+  const offsetRatio = Number.isFinite(opening.anchor.offset_m) ? opening.anchor.offset_m / length : anchorT;
+  const t = clamp(anchorT > 0 && anchorT < 1 ? anchorT : offsetRatio, 0, 1);
+  const baseX = wall.a.x + dx * t;
+  const baseZ = wall.a.y + dz * t;
+  const normalX = -dirZ;
+  const normalZ = dirX;
+  const depth_m = Math.max(Math.min(wall.thickness_m * 0.22, 0.12), 0.05);
+  const surfaceOffset_m = wall.thickness_m * 0.5 + depth_m * 0.55 + 0.012;
+  const centerX = baseX + normalX * surfaceOffset_m;
+  const centerZ = baseZ + normalZ * surfaceOffset_m;
+  const height_m = Math.max(opening.height_m || (type === "door" ? 2.1 : 1.4), type === "door" ? 2 : 1.1);
+  const sill_m = type === "door" ? 0 : Math.max(opening.sill_m ?? 0.9, 0.1);
+  const centerY = levelElevation_m + sill_m + height_m * 0.5;
+
+  return {
+    id: opening.id,
+    type,
+    levelId: wall.levelId,
+    center: { x: centerX, y: centerY, z: centerZ },
+    wallCenter: { x: baseX, y: centerY, z: baseZ },
+    width_m: Math.max(opening.width_m || 0.9, type === "door" ? 0.8 : 0.6),
+    height_m,
+    depth_m,
+    rotationY_rad: -Math.atan2(dz, dx),
+    wallId: wall.id,
+    onWall: true,
+    uValue_W_m2K: opening.runtimeU_W_m2K,
+    envelopePresetId: opening.envelopePresetId,
+  };
+}
+
+function buildSimpleOpenings(
+  model: BuildingModel,
+  levelId: string | null,
+  type: "window" | "door"
+): SimpleOpeningModel[] {
+  const wallsById = new Map(model.walls.map((wall) => [wall.id, wall]));
+  const source = type === "window" ? model.windows : model.doors;
+  return source
+    .map((opening) => {
+      const wall = opening.anchor.wallId ? wallsById.get(opening.anchor.wallId) ?? null : null;
+      if (!wall) {
+        return null;
+      }
+      if (levelId && wall.levelId !== levelId) {
+        return null;
+      }
+      return resolveOpeningPlacement(wall, opening, getLevelElevation(model, wall.levelId), type);
+    })
+    .filter((item): item is SimpleOpeningModel => Boolean(item));
+}
+
+function buildSimpleTemperatureSurfaces(
+  model: BuildingModel,
+  levelId: string | null,
+  thermalField: ThermalFieldModel | null,
+  showTemperature: boolean,
+  showWallTemperature: boolean
+) {
+  const surfaces: SimpleTemperatureSurface[] = [];
+  const warnings: string[] = [];
+
+  if (!showTemperature && !showWallTemperature) {
+    return { surfaces, summary: null };
+  }
+  if (!thermalField) {
+    return {
+      surfaces,
+      summary: {
+        min_C: 0,
+        max_C: 0,
+        average_C: 0,
+        warnings: ["Нет температурных данных."],
+      },
+    };
+  }
+
+  if (showTemperature) {
+    thermalField.rooms.forEach((room) => {
+      if (levelId && room.levelId !== levelId) {
+        return;
+      }
+      const existingRoom = model.rooms.find((item) => item.id === room.roomId);
+      if (!existingRoom) {
+        warnings.push(`Температурная комната ${room.roomId} не найдена в модели.`);
+        return;
+      }
+      if (!polygonsRoughlyAlign(existingRoom.polygon, room.polygon)) {
+        warnings.push(`Температурный слой для помещения ${room.roomId} отключен: геометрия не согласована с планом.`);
+        return;
+      }
+      surfaces.push({
+        id: `room:${room.roomId}`,
+        sourceType: "room",
+        levelId: room.levelId,
+        boundary: existingRoom.polygon.map((point) => ({ ...point })),
+        temperature_C: room.baseTemperatureC,
+      });
+      if (!existingRoom) {
+        warnings.push(`Температурная комната ${room.roomId} не найдена в модели.`);
+      }
+    });
+  }
+
+  if (showWallTemperature) {
+    thermalField.boundaries.forEach((boundary) => {
+      if (levelId && boundary.levelId !== levelId) {
+        return;
+      }
+      const wallSample = sampleWallSurfaceTemperatures(thermalField, boundary.wallId);
+      if (!wallSample) {
+        return;
+      }
+      surfaces.push({
+        id: `wall:${boundary.wallId}`,
+        sourceType: "wall",
+        levelId: boundary.levelId,
+        wall: {
+          start: { ...boundary.wall.a },
+          end: { ...boundary.wall.b },
+          thickness_m: boundary.wall.thickness_m,
+          height_m: boundary.wall.height_m,
+          elevation_m: getLevelElevation(model, boundary.levelId),
+        },
+        temperature_C: wallSample.averageC,
+      });
+    });
+  }
+
+  const temperatures = surfaces.map((surface) => surface.temperature_C).filter(Number.isFinite);
+  return {
+    surfaces,
+    summary: temperatures.length
+      ? {
+          min_C: Math.min(...temperatures),
+          max_C: Math.max(...temperatures),
+          average_C: temperatures.reduce((sum, value) => sum + value, 0) / temperatures.length,
+          warnings,
+        }
+      : {
+          min_C: thermalField.minTemperatureC,
+          max_C: thermalField.maxTemperatureC,
+          average_C: (thermalField.minTemperatureC + thermalField.maxTemperatureC) * 0.5,
+          warnings: warnings.length ? warnings : ["Нет температурных поверхностей для текущего уровня."],
+        },
+  };
+}
+
+export function buildSimple3DModel(
+  model: BuildingModel,
+  activeLevelId: string | null,
+  options: Simple3DModelBuildOptions = {}
+): Simple3DModel {
+  const levelId = resolveSimplePreviewLevelId(model, activeLevelId);
+  const bounds = buildSimplePreviewBounds(model, levelId);
+  const showNetworks = options.showNetworks ?? true;
+  const showEquipment = options.showEquipment ?? true;
+  const showTemperature = options.showTemperature ?? false;
+  const showWallTemperature = options.showWallTemperature ?? false;
+
+  const simpleRooms: SimpleRoomModel[] = model.rooms
+    .filter((room) => !levelId || room.levelId === levelId)
+    .map((room) => ({
+      id: room.id,
+      levelId: room.levelId,
+      boundary: room.polygon.map((point) => ({ ...point })),
+      elevation_m: getLevelElevation(model, room.levelId),
+      temperature_C: options.thermalField?.roomMap.get(room.id)?.baseTemperatureC ?? null,
+    }));
+
+  const simpleWalls: SimpleWallModel[] = model.walls
+    .filter((wall) => !levelId || wall.levelId === levelId)
+    .map((wall) => ({
+      id: wall.id,
+      levelId: wall.levelId,
+      start: { ...wall.a },
+      end: { ...wall.b },
+      elevation_m: getLevelElevation(model, wall.levelId),
+      height_m: wall.height_m,
+      thickness_m: wall.thickness_m,
+      temperature_C: options.thermalField ? sampleWallSurfaceTemperatures(options.thermalField, wall.id)?.averageC ?? null : null,
+    }));
+
+  const simpleWindows = buildSimpleOpenings(model, levelId, "window");
+  const simpleDoors = buildSimpleOpenings(model, levelId, "door");
+
+  // Вычисляем реальный верх стен для каждого уровня, чтобы не было разрыва между
+  // крышей и зданием: крыша не может начинаться ниже, чем верхняя грань стен.
+  const wallTopByLevel = new Map<string, number>();
+  model.walls.forEach((wall) => {
+    const levelElev = getLevelElevation(model, wall.levelId);
+    const wallTop = levelElev + Math.max(wall.height_m, 2.4);
+    const current = wallTopByLevel.get(wall.levelId) ?? 0;
+    wallTopByLevel.set(wall.levelId, Math.max(current, wallTop));
+  });
+
+  const simpleRoofs: SimpleRoofModel[] = (model.roofs ?? [])
+    .filter((roof) => !levelId || roof.levelId === levelId)
+    .map((roof) => {
+      const wallTop = wallTopByLevel.get(roof.levelId);
+      // Прижимаем низ крыши к верху стен; если elevationBase уже выше — оставляем как есть
+      const elevation_m =
+        wallTop !== undefined ? Math.max(roof.elevationBase_m, wallTop) : roof.elevationBase_m;
+      return {
+        id: roof.id,
+        levelId: roof.levelId,
+        boundary: roof.boundary.map((point) => ({ ...point })),
+        elevation_m,
+        thickness_m: roof.thickness_m,
+        kind: roof.kind,
+        slope: roof.slope ? { ...roof.slope } : undefined,
+      };
+    });
+
+  const simpleSlabs: SimpleSlabModel[] = (model.floorSlabs ?? [])
+    .filter((slab) => !levelId || slab.levelId === levelId)
+    .map((slab) => ({
+      id: slab.id,
+      levelId: slab.levelId,
+      boundary: slab.boundary.map((point) => ({ ...point })),
+      elevation_m: slab.elevation_m,
+      thickness_m: slab.thickness_m,
+    }));
+
+  const simplePipes: SimplePipeModel[] = showNetworks
+    ? model.pipes
+        .filter((pipe) => !levelId || pipe.levelId === levelId)
+        .map((pipe) => {
+          const elevation_m = getLevelElevation(model, pipe.levelId) + 0.24;
+          return {
+            id: pipe.id,
+            levelId: pipe.levelId,
+            path: pipe.path.map((point) => planToSimpleScene(point, elevation_m)),
+            diameter_m: Math.max(pipe.diameter_mm / 1000, 0.025),
+            colorRole: pipe.type === "heating_return" ? "return" : "supply",
+          };
+        })
+    : [];
+
+  const simpleDucts: SimpleDuctModel[] = showNetworks
+    ? model.ducts
+        .filter((duct) => !levelId || duct.levelId === levelId)
+        .map((duct) => {
+          const elevation_m = getLevelElevation(model, duct.levelId) + 2.3;
+          return {
+            id: duct.id,
+            levelId: duct.levelId,
+            path: duct.path.map((point) => planToSimpleScene(point, elevation_m)),
+            width_m: Math.max(0.12, (duct.section.width_mm ?? duct.section.diameter_mm ?? 300) / 1000),
+            height_m: Math.max(0.08, (duct.section.height_mm ?? duct.section.diameter_mm ?? 240) / 1000),
+          };
+        })
+    : [];
+
+  const simpleEquipment: SimpleEquipmentModel[] = showEquipment
+    ? model.equipment
+        .filter((item) => !levelId || item.levelId === levelId)
+        .map((item) => ({
+          id: item.id,
+          levelId: item.levelId,
+          type: item.type,
+          position: planToSimpleScene(
+            item.position,
+            getLevelElevation(model, item.levelId) + (item.type === "diffuser" ? 2.7 : item.type === "radiator" ? 0.28 : item.type === "boiler" ? 0.5 : 0.24)
+          ),
+        }))
+    : [];
+
+  const simpleSensors: SimpleSensorModel[] = showEquipment
+    ? model.sensors
+        .filter((sensor) => !levelId || sensor.levelId === levelId)
+        .map((sensor) => ({
+          id: sensor.id,
+          levelId: sensor.levelId,
+          position: planToSimpleScene(sensor.position, getLevelElevation(model, sensor.levelId) + 1.6),
+        }))
+    : [];
+
+  const temperatureBuild = buildSimpleTemperatureSurfaces(
+    model,
+    levelId,
+    options.thermalField ?? null,
+    showTemperature,
+    showWallTemperature
+  );
+
+  const result: Simple3DModel = {
+    levelId,
+    simpleRooms,
+    simpleWalls,
+    simpleWindows,
+    simpleDoors,
+    simpleRoofs,
+    simpleSlabs,
+    simplePipes,
+    simpleDucts,
+    simpleEquipment,
+    simpleSensors,
+    simpleTemperatureSurfaces: temperatureBuild.surfaces,
+    temperatureSummary: temperatureBuild.summary,
+    bounds,
+    warnings: temperatureBuild.summary?.warnings ?? [],
+  };
+
+  logDebug("counts", {
+    rooms: result.simpleRooms.length,
+    walls: result.simpleWalls.length,
+    windows: result.simpleWindows.length,
+    doors: result.simpleDoors.length,
+    roofs: result.simpleRoofs.length,
+    slabs: result.simpleSlabs.length,
+    pipes: result.simplePipes.length,
+    ducts: result.simpleDucts.length,
+    equipment: result.simpleEquipment.length + result.simpleSensors.length,
+    thermalSurfaces: result.simpleTemperatureSurfaces.length,
+  });
+
+  return result;
+}

@@ -15,14 +15,14 @@ __pycache__/
 *.pyo
 *.pyd
 
-# Build outputs
+# Build outputs (leading / = repo root only; bare build/ would ignore src/features/build)
 dist/
-build/
+/build/
 out/
 .vite/
 **/dist/
-**/build/
 **/out/
+# Intentionally no **/build/ — it would ignore src/features/build and src/entities/build (app source)
 **/.vite/
 
 # Environment files
