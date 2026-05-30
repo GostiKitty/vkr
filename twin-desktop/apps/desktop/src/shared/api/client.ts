@@ -1,6 +1,8 @@
 import { notifyError } from "../../entities/notifications/notification.store";
 import { logRequestEnd, logRequestStart } from "../../entities/debug/networkLog.store";
 import { getEngineBaseUrl } from "../../entities/settings/engine.store";
+import { fetchWithTimeout, FetchTimeoutError } from "../http/fetchWithTimeout";
+import { isWebProductionRuntime, WEB_API_REQUEST_TIMEOUT_MS } from "../runtime/webProduction";
 
 export interface ApiRequestOptions extends RequestInit {
   json?: unknown;
@@ -90,21 +92,32 @@ export async function apiFetch<TResponse = unknown>(
 
   const logId = logRequestStart(method, url);
   const startedAt = Date.now();
+  const timeoutMs = isWebProductionRuntime() ? WEB_API_REQUEST_TIMEOUT_MS : undefined;
 
   let response: Response;
   try {
-    response = await fetch(url, {
+    const requestInit = {
       ...rest,
       headers,
       body,
-    });
+    };
+    response =
+      timeoutMs != null
+        ? await fetchWithTimeout(url, requestInit, timeoutMs)
+        : await fetch(url, requestInit);
   } catch (error) {
     displayNetworkError(silent);
+    const message =
+      error instanceof FetchTimeoutError
+        ? error.message
+        : error instanceof Error
+          ? error.message
+          : "Неизвестная сетевая ошибка";
     logRequestEnd(logId, {
       status: undefined,
       ok: false,
       durationMs: Date.now() - startedAt,
-      error: error instanceof Error ? error.message : "Неизвестная сетевая ошибка",
+      error: message,
     });
     throw error;
   }

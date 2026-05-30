@@ -42,6 +42,7 @@ import { normalizeEngineeringEquipment,
   rebuildEngineeringSystemsForEquipment,
 } from "./engineering2d/catalog";
 import { syncAndEnrichThermalProtection } from "./envelope/syncAndEnrichThermalProtection";
+import { isWebProductionRuntime } from "../../shared/runtime/webProduction";
 
 
 
@@ -1143,15 +1144,51 @@ const prepareModelForEditing = (
 
 
 
+let buildPersistenceHydrated = !isWebProductionRuntime();
+
+const modelHasGeometry = (model: BuildingModel): boolean =>
+  model.rooms.length > 0 ||
+  model.walls.length > 0 ||
+  (model.roofs?.length ?? 0) > 0 ||
+  (model.floorSlabs?.length ?? 0) > 0;
+
+export function deferBuildStorePersistenceHydration(): void {
+  if (buildPersistenceHydrated || typeof window === "undefined") {
+    return;
+  }
+  const run = () => {
+    if (buildPersistenceHydrated) {
+      return;
+    }
+    buildPersistenceHydrated = true;
+    const key = useBuildStore.getState().projectKey;
+    const stored = loadPersistedState(key);
+    if (!stored || !modelHasGeometry(stored.model)) {
+      return;
+    }
+    useBuildStore.getState().setProjectKey(key);
+  };
+  if ("requestIdleCallback" in window) {
+    window.requestIdleCallback(() => run(), { timeout: 2_000 });
+  } else {
+    window.setTimeout(run, 0);
+  }
+}
+
 export const useBuildStore = create<BuildStoreState>((set, get) => {
 
   const initialKey = DEFAULT_LOCAL_PROJECT_KEY;
+  const skipHeavyBootstrap = isWebProductionRuntime();
 
-  const initialPersisted = loadPersistedState(initialKey) ?? createDefaultPersistedState();
+  const initialPersisted = skipHeavyBootstrap
+    ? createDefaultPersistedState()
+    : loadPersistedState(initialKey) ?? createDefaultPersistedState();
 
   const normalizedInitial = normalizeModel(initialPersisted.model);
 
-  const initialWithAuto = prepareModelForEditing(normalizedInitial);
+  const initialWithAuto = skipHeavyBootstrap
+    ? { model: normalizedInitial, problems: [] as RoomProblem[], loops: [] as RoomLoopCandidate[] }
+    : prepareModelForEditing(normalizedInitial);
 
   const initialRevisioned = ensureModelRevision(initialWithAuto.model);
 
@@ -1169,31 +1206,20 @@ export const useBuildStore = create<BuildStoreState>((set, get) => {
 
   const initialLoopDebug = initialPersisted.loopDebugOverlay ?? false;
 
-
-
-  saveStateToStorage(
-
-    initialKey,
-
-    buildSnapshotFromState(initialRevisioned.model, {
-
-      activeLevelId: initialActiveLevel,
-
-      selection: initialSelection,
-
-      tool: initialTool,
-
-      gridStep: initialGridStep,
-
-      orthogonalMode: initialOrthogonal,
-
-      adjacencyOverlay: initialAdjacency,
-
-      loopDebugOverlay: initialLoopDebug,
-
-    })
-
-  );
+  if (!skipHeavyBootstrap) {
+    saveStateToStorage(
+      initialKey,
+      buildSnapshotFromState(initialRevisioned.model, {
+        activeLevelId: initialActiveLevel,
+        selection: initialSelection,
+        tool: initialTool,
+        gridStep: initialGridStep,
+        orthogonalMode: initialOrthogonal,
+        adjacencyOverlay: initialAdjacency,
+        loopDebugOverlay: initialLoopDebug,
+      })
+    );
+  }
 
 
 
@@ -1329,6 +1355,13 @@ export const useBuildStore = create<BuildStoreState>((set, get) => {
     setProjectKey: (key) => {
       const nextKey = key?.trim() || DEFAULT_LOCAL_PROJECT_KEY;
       if (get().projectKey === nextKey) {
+        if (isWebProductionRuntime() && !buildPersistenceHydrated) {
+          buildPersistenceHydrated = true;
+          const stored = loadPersistedState(nextKey);
+          if (stored && modelHasGeometry(stored.model)) {
+            replaceModel(stored, nextKey);
+          }
+        }
         return;
       }
       const stored = loadPersistedState(nextKey) ?? createDefaultPersistedState();

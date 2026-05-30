@@ -1,14 +1,5 @@
-import React from "react";
-import BuildPage from "../features/build/BuildPage";
-import TwinPage from "../features/twin/TwinPage";
-import FormulasPage from "../features/formulas/FormulasPage";
-import SettingsPage from "../features/settings/SettingsPage";
+import React, { lazy, Suspense } from "react";
 import ProjectPage from "../features/project/ProjectPage";
-import ScenariosWorkspacePage from "../features/scenarios/ScenariosWorkspacePage";
-import CalculationWorkspacePage from "../features/runs/CalculationWorkspacePage";
-import UncertaintyWorkspacePage from "../features/scenarios/UncertaintyWorkspacePage";
-import ResultsWorkspacePage from "../features/reports/ResultsWorkspacePage";
-import DrawingSheetPage from "../features/drawings/DrawingSheetPage";
 
 export interface AppRoute {
   id: string;
@@ -16,6 +7,25 @@ export interface AppRoute {
   title: string;
   component: React.ComponentType;
   hiddenInNav?: boolean;
+}
+
+function RouteLoadingFallback() {
+  return (
+    <div className="ui-panel mx-auto max-w-[min(100%,48rem)] px-5 py-8 text-sm text-[color:var(--text-muted)]">
+      Загрузка раздела…
+    </div>
+  );
+}
+
+function lazyRoute(factory: () => Promise<{ default: React.ComponentType }>): React.ComponentType {
+  const LazyPage = lazy(factory);
+  return function LazyRoutePage() {
+    return (
+      <Suspense fallback={<RouteLoadingFallback />}>
+        <LazyPage />
+      </Suspense>
+    );
+  };
 }
 
 export const routes: AppRoute[] = [
@@ -30,64 +40,64 @@ export const routes: AppRoute[] = [
     id: "model",
     path: "/model",
     title: "Модель",
-    component: BuildPage,
+    component: lazyRoute(() => import("../features/build/BuildPage")),
   },
   {
     id: "scenarios",
     path: "/scenarios",
     title: "Данные",
-    component: ScenariosWorkspacePage,
+    component: lazyRoute(() => import("../features/scenarios/ScenariosWorkspacePage")),
   },
   {
     id: "calculation",
     path: "/calculation",
     title: "Расчёт",
-    component: CalculationWorkspacePage,
+    component: lazyRoute(() => import("../features/runs/CalculationWorkspacePage")),
     hiddenInNav: true,
   },
   {
     id: "uncertainty",
     path: "/uncertainty",
     title: "Анализ",
-    component: UncertaintyWorkspacePage,
+    component: lazyRoute(() => import("../features/scenarios/UncertaintyWorkspacePage")),
   },
   {
     id: "results",
     path: "/results",
     title: "Отчёты",
-    component: ResultsWorkspacePage,
+    component: lazyRoute(() => import("../features/reports/ResultsWorkspacePage")),
   },
   {
     id: "build",
     path: "/build",
     title: "Конструирование",
-    component: BuildPage,
+    component: lazyRoute(() => import("../features/build/BuildPage")),
     hiddenInNav: true,
   },
   {
     id: "formulas",
     path: "/formulas",
     title: "Формулы",
-    component: FormulasPage,
+    component: lazyRoute(() => import("../features/formulas/FormulasPage")),
   },
   {
     id: "drawing",
     path: "/drawing",
     title: "Чертёж",
-    component: DrawingSheetPage,
+    component: lazyRoute(() => import("../features/drawings/DrawingSheetPage")),
     hiddenInNav: true,
   },
   {
     id: "settings",
     path: "/settings",
     title: "Настройки",
-    component: SettingsPage,
+    component: lazyRoute(() => import("../features/settings/SettingsPage")),
   },
   {
     id: "studio",
     path: "/studio",
     title: "Студия",
-    component: TwinPage,
+    component: lazyRoute(() => import("../features/twin/TwinPage")),
     hiddenInNav: true,
   },
 ];

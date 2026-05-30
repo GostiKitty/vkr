@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { isLocalEngineUrl, isWebProductionRuntime } from "../../shared/runtime/webProduction";
 
 const STORAGE_KEY = "twinstudio.engine.base";
 /** Совпадает с примером в Settings и портом dev:engine. */
@@ -16,7 +17,11 @@ const readInitial = (): string => {
   }
   const stored = window.localStorage.getItem(STORAGE_KEY);
   if (stored !== null) {
-    return sanitize(stored);
+    const normalizedStored = sanitize(stored);
+    if (isWebProductionRuntime() && isLocalEngineUrl(normalizedStored)) {
+      return envValue;
+    }
+    return normalizedStored;
   }
   return envValue;
 };
