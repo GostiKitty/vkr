@@ -1383,6 +1383,11 @@ function BuildPageContent() {
       unit: SURFACE_FIELD_MODE_UNITS[thermalDisplay.surfaceFieldMode],
     };
   }, [surfaceFieldResult, thermalDisplay.showSurfaceField, thermalDisplay.surfaceFieldMode]);
+  const show3DThermalLegend =
+    thermalDisplay.showLegend &&
+    !engineeringOverviewActive &&
+    ((thermalDisplay.showSurfaceField && threeDSurfaceLegend) ||
+      (!THREE_D_SAFE_MODE && !thermalDisplay.showSurfaceField && threeDTemperatureRange));
   const previewUsesLegacy3DThermal = legacy3DThermalVisualizationActive && !thermalDisplay.showSurfaceField;
   const show3DFloorThermalField = previewUsesLegacy3DThermal || thermalDisplay.showFloorField;
   const showAny3DThermalLayer = legacy3DThermalVisualizationActive || surfaceThermalVisualizationActive;
@@ -3085,6 +3090,7 @@ function BuildPageContent() {
                           surfaceFieldOpacity={thermalDisplay.surfaceFieldOpacity}
                           showTemperature={show3DFloorThermalField}
                           showWallTemperature={show3DFloorThermalField}
+                          suppressTemperatureSummaryOverlay={show3DThermalLegend}
                           solarPosition={solarPosition}
                           onSelect={(sel) => {
                             setSelection(sel);
@@ -3197,10 +3203,7 @@ function BuildPageContent() {
                           />
                         </div>
                       )}
-                      {thermalDisplay.showLegend &&
-                      !engineeringOverviewActive &&
-                      ((thermalDisplay.showSurfaceField && threeDSurfaceLegend) ||
-                        (!THREE_D_SAFE_MODE && !thermalDisplay.showSurfaceField && threeDTemperatureRange)) ? (
+                      {show3DThermalLegend ? (
                         <div className="ui-overlay pointer-events-none absolute bottom-4 left-4 z-10 w-72 animate-fade-scale">
                           <ThermalFieldLegend
                             minC={thermalDisplay.showSurfaceField ? (threeDSurfaceLegend?.min ?? 0) : (threeDTemperatureRange?.min ?? 15)}

@@ -219,6 +219,8 @@ interface Build3DCanonicalPreviewProps {
   surfaceFieldOpacity?: number;
   showTemperature?: boolean;
   showWallTemperature?: boolean;
+  /** When BuildPage already renders ThermalFieldLegend, hide the built-in summary card. */
+  suppressTemperatureSummaryOverlay?: boolean;
   solarPosition?: SolarPosition | null;
   onSelect?: (selection: Selection | null) => void;
   onHoverInfo?: (info: BuildSceneHoverInfo | null) => void;
@@ -844,6 +846,7 @@ export const Build3DCanonicalPreview = React.forwardRef<Build3DCanonicalPreviewH
       showThermalBridges = false,
       showTemperature = false,
       showWallTemperature = false,
+      suppressTemperatureSummaryOverlay = false,
       surfaceFieldOpacity = 0.52,
       solarPosition = null,
       onSelect,
@@ -1833,7 +1836,10 @@ export const Build3DCanonicalPreview = React.forwardRef<Build3DCanonicalPreviewH
     return (
       <div className="relative h-full w-full overflow-hidden touch-none">
         <canvas ref={canvasRef} className="block h-full w-full touch-none overscroll-contain" />
-        {temperatureEnabled && temperatureColorScale && (coloredRoomFloorCount > 0 || coloredWallCount > 0 || coloredInterfloorSlabCount > 0) ? (
+        {!suppressTemperatureSummaryOverlay &&
+        temperatureEnabled &&
+        temperatureColorScale &&
+        (coloredRoomFloorCount > 0 || coloredWallCount > 0 || coloredInterfloorSlabCount > 0) ? (
           <div className="pointer-events-none absolute bottom-3 left-3 z-10">
             <div className="ui-overlay max-w-[15rem] px-3 py-2.5">
               <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Температурное поле</p>

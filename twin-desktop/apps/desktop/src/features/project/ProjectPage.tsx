@@ -23,7 +23,7 @@ export function ProjectPage() {
     () => openModel("view3d"),
     () => openModel("plan"),
     () => navigate("/scenarios"),
-    () => navigate("/calculation"),
+    () => navigate("/formulas"),
     () => navigate("/results"),
   ];
 
