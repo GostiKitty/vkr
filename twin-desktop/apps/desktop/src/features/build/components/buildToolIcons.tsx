@@ -9,6 +9,7 @@ export type BuildToolIconName =
   | "window"
   | "door"
   | "erase"
+  | "stair"
   | "wallsFromRooms"
   | "pipeSupply"
   | "pipeReturn"
@@ -131,6 +132,15 @@ export function BuildToolIcon({ name, className = "h-4 w-4" }: { name: BuildTool
           <path {...commonProps} d="M4 21.5h16" />
           <rect {...commonProps} x="5.5" y="2.8" width="13" height="18.7" rx="0.6" />
           <path {...commonProps} d="M16 10v4.8" />
+        </svg>
+      );
+    case "stair":
+      return (
+        <svg viewBox="0 0 24 24" className={className} aria-hidden="true">
+          {/* Профиль лестницы — три ступени */}
+          <path {...commonProps} d="M4 20h4v-4h4v-4h4v-4h4" />
+          {/* Стрелка подъёма */}
+          <path {...commonProps} d="M16 8v-4h4" strokeDasharray="0" />
         </svg>
       );
     case "erase":

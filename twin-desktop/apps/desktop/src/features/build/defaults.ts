@@ -13,6 +13,7 @@ export const FLOOR_SLAB_DEFAULTS = {
   kind: "interfloor",
   heatedSide: "below",
 } as const;
+export const STAIR_DEFAULTS = { stepCount: 12, totalRise_m: 3.0 } as const;
 export const DOOR_DEFAULTS = { width: 0.9, height: 2.1, swingDirection: "left" as const, openingDirection: "inward" as const } as const;
 export const WINDOW_DEFAULTS = { width: 1.2, height: 1.4, sill: 0.9 } as const;
 

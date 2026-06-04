@@ -1,5 +1,5 @@
 import { polygonContainsPoint, validateRoomPolygon } from "../../../entities/geometry/geom";
-import type { BuildingModel, FloorSlab, Vec2, Wall } from "../../../entities/geometry/types";
+import type { BuildingModel, FloorSlab, Stair, Vec2, Wall } from "../../../entities/geometry/types";
 import type { Equipment } from "../../../entities/networks/types";
 import type { ThermalFieldModel } from "../../../core/thermal/field";
 import {
@@ -85,6 +85,16 @@ export interface CanonicalSlabModel {
   thickness_m: number;
 }
 
+export interface CanonicalStairModel {
+  id: string;
+  levelId: string;
+  /** Прямоугольный контур подошвы лестницы в плане. */
+  boundary: Vec2[];
+  elevation_m: number;
+  stepCount: number;
+  totalRise_m: number;
+}
+
 export interface CanonicalPipeModel {
   id: string;
   levelId: string;
@@ -138,6 +148,7 @@ export interface Canonical3DModel {
   doors: CanonicalOpeningModel[];
   roofs: CanonicalRoofModel[];
   slabs: CanonicalSlabModel[];
+  stairs: CanonicalStairModel[];
   pipes: CanonicalPipeModel[];
   ducts: CanonicalDuctModel[];
   equipment: CanonicalEquipmentModel[];
@@ -791,6 +802,15 @@ export function buildCanonical3DModel(
     thickness_m: slab.thickness_m,
   }));
 
+  const stairs = filterLevel(model.stairs ?? []).map((stair: Stair) => ({
+    id: stair.id,
+    levelId: stair.levelId,
+    boundary: clonePolygon(stair.boundary),
+    elevation_m: levelMap.get(stair.levelId)?.elevation_m ?? 0,
+    stepCount: stair.stepCount,
+    totalRise_m: stair.totalRise_m,
+  }));
+
   const pipes = filterLevel(model.pipes).map((pipe) => {
     const levelElevation = levelMap.get(pipe.levelId)?.elevation_m ?? 0;
     return {
@@ -856,6 +876,7 @@ export function buildCanonical3DModel(
     doors: openings.filter((opening) => opening.type === "door"),
     roofs,
     slabs,
+    stairs,
     pipes,
     ducts,
     equipment,

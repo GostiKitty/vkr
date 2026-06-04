@@ -9,9 +9,10 @@ interface LevelsPanelProps {
   onSelectLevel: (levelId: string) => void;
   onAddLevel: (payload: { name: string; elevation_m: number; height_m: number }) => void;
   onUpdateLevel: (levelId: string, patch: Partial<Level>) => void;
+  onCopyLevelModel?: (targetLevelId: string) => void;
 }
 
-export function LevelsPanel({ levels, activeLevelId, onSelectLevel, onAddLevel, onUpdateLevel }: LevelsPanelProps) {
+export function LevelsPanel({ levels, activeLevelId, onSelectLevel, onAddLevel, onUpdateLevel, onCopyLevelModel }: LevelsPanelProps) {
   const rootRef = useRef<HTMLElement | null>(null);
   const activeSummaryRef = useRef<HTMLDivElement | null>(null);
   const metricsGridRef = useRef<HTMLDivElement | null>(null);
@@ -157,6 +158,26 @@ export function LevelsPanel({ levels, activeLevelId, onSelectLevel, onAddLevel, 
               <p data-level-metric-label className="ui-kicker text-[10px]">Выше</p>
               <p data-level-metric-value className="min-w-0 text-right font-semibold text-[color:var(--text-base)]">{nextLevel ? getLevelDisplayLabel({ levels: orderedLevels }, nextLevel.id) : "Нет уровня"}</p>
             </div>
+          </div>
+        </div>
+      ) : null}
+
+      {activeLevel && onCopyLevelModel && orderedLevels.length > 1 ? (
+        <div className="space-y-1.5">
+          <p className="ui-kicker text-[10px]">Скопировать план на уровень</p>
+          <div className="flex flex-wrap gap-1.5">
+            {orderedLevels
+              .filter((level) => level.id !== activeLevelId)
+              .map((level) => (
+                <button
+                  key={level.id}
+                  type="button"
+                  onClick={() => onCopyLevelModel(level.id)}
+                  className="ui-control rounded-[12px] border border-[color:var(--border-soft)] bg-[color:var(--surface-elevated)] px-2.5 py-1 text-xs font-medium text-[color:var(--text-muted)] hover:border-[color:var(--border-strong)]"
+                >
+                  {getLevelDisplayLabel({ levels: orderedLevels }, level.id)}
+                </button>
+              ))}
           </div>
         </div>
       ) : null}

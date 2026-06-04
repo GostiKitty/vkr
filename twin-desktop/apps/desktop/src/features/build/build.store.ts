@@ -14,6 +14,7 @@ import type {
   Roof,
 
   Room,
+  Stair,
 
   Wall,
 
@@ -56,6 +57,7 @@ export type BuildTool =
   | "slab"
   | "door"
   | "window"
+  | "stair"
   | "erase"
   | "pipe"
   | "duct"
@@ -75,6 +77,8 @@ export type Selection =
   | { kind: "roof"; id: string }
 
   | { kind: "slab"; id: string }
+
+  | { kind: "stair"; id: string }
 
   | { kind: "door"; id: string }
 
@@ -227,6 +231,12 @@ interface BuildStoreState {
   updateFloorSlab: (slabId: string, patch: Partial<FloorSlab>) => void;
 
   removeFloorSlab: (slabId: string) => void;
+
+  addStair: (stair: Stair) => void;
+
+  updateStair: (stairId: string, patch: Partial<Stair>) => void;
+
+  removeStair: (stairId: string) => void;
 
   addDoor: (door: Door) => void;
 
@@ -995,6 +1005,14 @@ const cloneFloorSlabEntity = (slab: FloorSlab): FloorSlab => ({
 
 });
 
+const cloneStairEntity = (stair: Stair): Stair => ({
+
+  ...stair,
+
+  boundary: stair.boundary.map((point) => ({ ...point })),
+
+});
+
 
 
 const cloneDoorEntity = (door: Door): Door => ({
@@ -1032,6 +1050,8 @@ const cloneModel = (model: BuildingModel): BuildingModel => ({
   roofs: (model.roofs ?? []).map(cloneRoofEntity),
 
   floorSlabs: (model.floorSlabs ?? []).map(cloneFloorSlabEntity),
+
+  stairs: (model.stairs ?? []).map(cloneStairEntity),
 
   doors: model.doors.map(cloneDoorEntity),
 
@@ -1662,6 +1682,42 @@ export const useBuildStore = create<BuildStoreState>((set, get) => {
           ...model,
 
           floorSlabs: (model.floorSlabs ?? []).filter((slab) => slab.id !== slabId),
+
+        }),
+
+        { resetSelection: true }
+
+      ),
+
+    addStair: (stair) =>
+
+      applyModelUpdate((model) => ({
+
+        ...model,
+
+        stairs: upsert(model.stairs ?? [], cloneStairEntity(stair)),
+
+      })),
+
+    updateStair: (stairId, patch) =>
+
+      applyModelUpdate((model) => ({
+
+        ...model,
+
+        stairs: (model.stairs ?? []).map((stair) => (stair.id === stairId ? { ...stair, ...patch } : stair)),
+
+      })),
+
+    removeStair: (stairId) =>
+
+      applyModelUpdate(
+
+        (model) => ({
+
+          ...model,
+
+          stairs: (model.stairs ?? []).filter((stair) => stair.id !== stairId),
 
         }),
 

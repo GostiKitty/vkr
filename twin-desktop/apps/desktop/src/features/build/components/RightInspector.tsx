@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo } from "react";
 import { polygonArea, polygonCentroid, polygonContainsPoint } from "../../../entities/geometry/geom";
 import { createId } from "../../../shared/utils/id";
-import type { BuildingModel, ConstructionLayer, Door, FloorSlab, Roof, Room, Wall, Window } from "../../../entities/geometry/types";
+import type { BuildingModel, ConstructionLayer, Door, FloorSlab, Roof, Room, Stair, Wall, Window } from "../../../entities/geometry/types";
 import type { EngineeringEquipment, EngineeringEquipmentType, EngineeringPipe } from "../../../entities/engineering/types";
 import type { DuctNetwork, Equipment, PipeNetwork, SensorDevice } from "../../../entities/networks/types";
 import {
@@ -119,6 +119,8 @@ interface RightInspectorProps {
   onUpdateEngineeringPipe: (pipeId: string, patch: Partial<EngineeringPipe>) => void;
   onAddFloorSlab: (slab: FloorSlab) => void;
   onRemoveSelection: () => void;
+  onDuplicateSelection?: () => void;
+  onUpdateStair?: (stairId: string, patch: Partial<Stair>) => void;
   onCreateRoomFromLoop: (loopId: string) => void;
 }
 
@@ -127,6 +129,7 @@ type SelectedEntity =
   | Wall
   | Roof
   | FloorSlab
+  | Stair
   | Door
   | Window
   | PipeNetwork
@@ -136,7 +139,7 @@ type SelectedEntity =
   | EngineeringEquipment
   | EngineeringPipe
   | RoomLoopCandidate;
-type DraftKind = "room" | "wall" | "roof" | "slab" | "door" | "window" | "pipe" | "duct" | "equipment" | "sensor" | "engineeringEquipment" | "engineeringPipe";
+type DraftKind = "room" | "wall" | "roof" | "slab" | "stair" | "door" | "window" | "pipe" | "duct" | "equipment" | "sensor" | "engineeringEquipment" | "engineeringPipe";
 type SelectionKind = NonNullable<Selection>["kind"];
 
 const PIPE_DIAMETER_OPTIONS = [15, 20, 25, 32, 40, 50, 65, 80, 100] as const;
@@ -160,7 +163,7 @@ function defaultPipeMarkingColor(type: PipeSystemType): PipeMarkingColor {
 }
 
 export function RightInspector(props: RightInspectorProps) {
-  const { model, selection, tool, equipmentPreset, pipePreset, activeLevelLabel, minimal = false, onRemoveSelection } = props;
+  const { model, selection, tool, equipmentPreset, pipePreset, activeLevelLabel, minimal = false, onRemoveSelection, onDuplicateSelection } = props;
 
   const selectedEntity = useMemo<SelectedEntity | null>(() => {
     if (!selection) {
@@ -175,6 +178,8 @@ export function RightInspector(props: RightInspectorProps) {
         return (model.roofs ?? []).find((roof) => roof.id === selection.id) ?? null;
       case "slab":
         return (model.floorSlabs ?? []).find((slab) => slab.id === selection.id) ?? null;
+      case "stair":
+        return (model.stairs ?? []).find((stair) => stair.id === selection.id) ?? null;
       case "door":
         return model.doors.find((door) => door.id === selection.id) ?? null;
       case "window":
@@ -206,6 +211,7 @@ export function RightInspector(props: RightInspectorProps) {
       case "wall":
       case "roof":
       case "slab":
+      case "stair":
       case "door":
       case "window":
       case "pipe":
@@ -246,13 +252,25 @@ export function RightInspector(props: RightInspectorProps) {
               )}
             </div>
             {mode === "selected" && selection ? (
-              <button
-                type="button"
-                onClick={onRemoveSelection}
-                className="ui-control shrink-0 rounded-[10px] border border-[color:var(--danger-border)]/70 bg-[color:var(--danger-bg)]/70 px-2.5 py-1 text-xs font-semibold text-[color:var(--danger-fg)] hover:border-[color:var(--danger-border)] hover:bg-[color:var(--danger-bg)]"
-              >
-                Удалить
-              </button>
+              <div className="flex shrink-0 items-center gap-1.5">
+                {onDuplicateSelection ? (
+                  <button
+                    type="button"
+                    onClick={onDuplicateSelection}
+                    title="Дублировать (Ctrl+V)"
+                    className="ui-control rounded-[10px] border border-[color:var(--border-soft)] bg-[color:var(--surface-elevated)] px-2.5 py-1 text-xs font-semibold text-[color:var(--text-muted)] hover:border-[color:var(--border-strong)]"
+                  >
+                    Дублировать
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={onRemoveSelection}
+                  className="ui-control rounded-[10px] border border-[color:var(--danger-border)]/70 bg-[color:var(--danger-bg)]/70 px-2.5 py-1 text-xs font-semibold text-[color:var(--danger-fg)] hover:border-[color:var(--danger-border)] hover:bg-[color:var(--danger-bg)]"
+                >
+                  Удалить
+                </button>
+              </div>
             ) : null}
           </header>
         ) : null}
@@ -297,6 +315,7 @@ function SelectionForm({
   onUpdateDuct,
   onUpdateEquipment,
   onUpdateSensor,
+  onUpdateStair,
   onUpdateEngineeringEquipment,
   onUpdateEngineeringPipe,
   onCreateRoomFromLoop,
@@ -369,6 +388,8 @@ function SelectionForm({
       return <RoofForm roof={entity as Roof} levels={model.levels} onUpdateRoof={onUpdateRoof} />;
     case "slab":
       return <FloorSlabForm slab={entity as FloorSlab} levels={model.levels} onUpdateFloorSlab={onUpdateFloorSlab} />;
+    case "stair":
+      return <StairForm stair={entity as Stair} levels={model.levels} onUpdateStair={(id, patch) => onUpdateStair?.(id, patch)} />;
     case "door":
       return <OpeningForm kind="door" opening={entity as Door} model={model} onUpdate={(patch) => onUpdateDoor(selection.id, patch)} />;
     case "window":
@@ -463,6 +484,8 @@ function DraftForm({
       return <EnvelopePresetField kind="roof" value={roofPreset} onChange={() => undefined} />;
     case "slab":
       return <EnvelopePresetField kind="slab" value={slabPreset} onChange={() => undefined} />;
+    case "stair":
+      return null;
     case "door":
       return <EnvelopePresetField kind="door" value={doorPreset} onChange={() => undefined} />;
     case "window":
@@ -1022,6 +1045,56 @@ function WallForm({
     </div>
   );
 }
+function StairForm({
+  stair,
+  levels,
+  onUpdateStair,
+}: {
+  stair: Stair;
+  levels: BuildingModel["levels"];
+  onUpdateStair: (stairId: string, patch: Partial<Stair>) => void;
+}) {
+  const area = stair.boundary.length >= 4
+    ? Math.abs(
+        stair.boundary.reduce((sum, p, i, arr) => {
+          const next = arr[(i + 1) % arr.length];
+          return sum + p.x * next.y - next.x * p.y;
+        }, 0) / 2
+      )
+    : 0;
+  return (
+    <div className="space-y-3">
+      <TextField
+        label="Название"
+        value={stair.name}
+        onChange={(value) => onUpdateStair(stair.id, { name: value })}
+      />
+      <InfoCard
+        rows={[
+          { label: "Этаж", value: getLevelDisplayLabel({ levels }, stair.levelId) },
+          { label: "Площадь", value: `${area.toFixed(2)} м²` },
+        ]}
+      />
+      <NumberField
+        label="Число ступеней"
+        value={stair.stepCount}
+        min={2}
+        max={40}
+        step={1}
+        onChange={(value) => onUpdateStair(stair.id, { stepCount: Math.round(Math.max(2, value)) })}
+      />
+      <NumberField
+        label="Высота марша, м"
+        value={stair.totalRise_m}
+        min={0.3}
+        max={10}
+        step={0.1}
+        onChange={(value) => onUpdateStair(stair.id, { totalRise_m: value })}
+      />
+    </div>
+  );
+}
+
 function OpeningForm({
   kind,
   opening,

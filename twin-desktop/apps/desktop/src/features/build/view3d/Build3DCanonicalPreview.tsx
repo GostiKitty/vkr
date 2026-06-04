@@ -282,6 +282,7 @@ const SLAB_MATERIAL = new THREE.MeshStandardMaterial({
   roughness: 0.95,
   metalness: 0.02,
 });
+const STAIR_MATERIAL = new THREE.MeshStandardMaterial({ color: 0x84cc16, roughness: 0.82, metalness: 0.04 });
 const SUPPLY_MATERIAL = new THREE.MeshStandardMaterial({ color: 0xc2410c, roughness: 0.65, metalness: 0.04 });
 const RETURN_MATERIAL = new THREE.MeshStandardMaterial({ color: 0x2563eb, roughness: 0.65, metalness: 0.04 });
 const DUCT_MATERIAL = new THREE.MeshStandardMaterial({
@@ -1541,6 +1542,38 @@ export const Build3DCanonicalPreview = React.forwardRef<Build3DCanonicalPreviewH
           selection: { kind: "slab", id: slab.id } satisfies Selection,
         });
         shellRoot.add(mesh);
+      });
+
+      canonicalModel.stairs.forEach((stair) => {
+        if (stair.boundary.length < 4 || stair.stepCount < 1) return;
+        const xs = stair.boundary.map((p) => p.x);
+        const ys = stair.boundary.map((p) => p.y);
+        const minX = Math.min(...xs);
+        const maxX = Math.max(...xs);
+        const minY = Math.min(...ys);
+        const maxY = Math.max(...ys);
+        const footW = maxX - minX;
+        const footD = maxY - minY;
+        const n = Math.max(1, stair.stepCount);
+        const stepH = stair.totalRise_m / n;
+        const stepD = footD / n;
+        for (let i = 0; i < n; i++) {
+          const geo = new THREE.BoxGeometry(footW, stepH * (i + 1), stepD);
+          const stepMesh = new THREE.Mesh(geo, getSelectionMaterial(selection, "stair", stair.id, STAIR_MATERIAL));
+          stepMesh.position.set(
+            (minX + maxX) / 2,
+            stair.elevation_m + stepH * (i + 1) / 2,
+            minY + stepD * i + stepD / 2
+          );
+          setMeshIdentity(stepMesh, `stair:${stair.id}:step:${i}`, {
+            category: "stair",
+            sourceType: "stair",
+            sourceId: stair.id,
+            levelId: stair.levelId,
+            selection: { kind: "stair", id: stair.id } satisfies Selection,
+          });
+          shellRoot.add(stepMesh);
+        }
       });
 
       if (viewer.showNetworks) {

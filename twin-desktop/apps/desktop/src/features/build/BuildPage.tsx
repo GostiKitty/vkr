@@ -340,6 +340,7 @@ function BuildPageContent() {
   const [surfaceFieldOverlayDebug, setSurfaceFieldOverlayDebug] = useState<BuildSurfaceFieldDebugInfo | null>(null);
   const [sceneDebug, setSceneDebug] = useState<BuildSceneDebugOptions>(DEFAULT_BUILD_SCENE_DEBUG_OPTIONS);
   const [planExportMode, setPlanExportMode] = useState(false);
+  const [clipboard, setClipboard] = useState<NonNullable<import("./build.store").Selection> | null>(null);
   const showDevDebug = Boolean(import.meta.env.DEV);
   const cloneDeep = <T,>(value: T): T => {
     if (typeof structuredClone === "function") {
@@ -412,6 +413,7 @@ function BuildPageContent() {
   const addRoom = useBuildStore((state) => state.addRoom);
   const updateRoom = useBuildStore((state) => state.updateRoom);
   const removeRoom = useBuildStore((state) => state.removeRoom);
+  const addWall = useBuildStore((state) => state.addWall);
   const setWalls = useBuildStore((state) => state.setWalls);
   const updateWall = useBuildStore((state) => state.updateWall);
   const removeWall = useBuildStore((state) => state.removeWall);
@@ -421,6 +423,9 @@ function BuildPageContent() {
   const addFloorSlab = useBuildStore((state) => state.addFloorSlab);
   const updateFloorSlab = useBuildStore((state) => state.updateFloorSlab);
   const removeFloorSlab = useBuildStore((state) => state.removeFloorSlab);
+  const addStair = useBuildStore((state) => state.addStair);
+  const updateStair = useBuildStore((state) => state.updateStair);
+  const removeStair = useBuildStore((state) => state.removeStair);
   const addDoor = useBuildStore((state) => state.addDoor);
   const updateDoor = useBuildStore((state) => state.updateDoor);
   const removeDoor = useBuildStore((state) => state.removeDoor);
@@ -842,6 +847,10 @@ function BuildPageContent() {
         case "slab":
           removeFloorSlab(current.id);
           break;
+        case "stair":
+          removeStair(current.id);
+          break;
+
         case "door":
           removeDoor(current.id);
           break;
@@ -878,6 +887,7 @@ function BuildPageContent() {
       removeWall,
       removeRoof,
       removeFloorSlab,
+      removeStair,
       removeWindow,
       removePipe,
       removeDuct,
@@ -898,6 +908,175 @@ function BuildPageContent() {
     }
     removeSelection(null);
   }, [multiSelection, removeSelection, setMultiSelection]);
+
+  const COPY_OFFSET = 1.0;
+
+  const duplicateEntity = useCallback(
+    (source: NonNullable<import("./build.store").Selection>) => {
+      switch (source.kind) {
+        case "room": {
+          const room = model.rooms.find((r) => r.id === source.id);
+          if (!room) return;
+          const copy = { ...room, id: createId("room"), polygon: room.polygon.map((p) => ({ x: p.x + COPY_OFFSET, y: p.y + COPY_OFFSET })) };
+          addRoom(copy);
+          setSelection({ kind: "room", id: copy.id });
+          break;
+        }
+        case "wall": {
+          const wall = model.walls.find((w) => w.id === source.id);
+          if (!wall) return;
+          const copy = { ...wall, id: createId("wall"), a: { x: wall.a.x + COPY_OFFSET, y: wall.a.y + COPY_OFFSET }, b: { x: wall.b.x + COPY_OFFSET, y: wall.b.y + COPY_OFFSET } };
+          addWall(copy);
+          setSelection({ kind: "wall", id: copy.id });
+          break;
+        }
+        case "roof": {
+          const roof = (model.roofs ?? []).find((r) => r.id === source.id);
+          if (!roof) return;
+          const copy = { ...roof, id: createId("roof"), boundary: roof.boundary.map((p) => ({ x: p.x + COPY_OFFSET, y: p.y + COPY_OFFSET })) };
+          addRoof(copy);
+          setSelection({ kind: "roof", id: copy.id });
+          break;
+        }
+        case "slab": {
+          const slab = (model.floorSlabs ?? []).find((s) => s.id === source.id);
+          if (!slab) return;
+          const copy = { ...slab, id: createId("slab"), boundary: slab.boundary.map((p) => ({ x: p.x + COPY_OFFSET, y: p.y + COPY_OFFSET })) };
+          addFloorSlab(copy);
+          setSelection({ kind: "slab", id: copy.id });
+          break;
+        }
+        case "door": {
+          const door = model.doors.find((d) => d.id === source.id);
+          if (!door) return;
+          const copy = { ...door, id: createId("door"), anchor: { ...door.anchor, t: Math.min(door.anchor.t + 0.1, 0.9), offset_m: door.anchor.offset_m + 0.5 }, lost: false };
+          addDoor(copy);
+          setSelection({ kind: "door", id: copy.id });
+          break;
+        }
+        case "window": {
+          const win = model.windows.find((w) => w.id === source.id);
+          if (!win) return;
+          const copy = { ...win, id: createId("window"), anchor: { ...win.anchor, t: Math.min(win.anchor.t + 0.1, 0.9), offset_m: win.anchor.offset_m + 0.5 }, lost: false };
+          addWindow(copy);
+          setSelection({ kind: "window", id: copy.id });
+          break;
+        }
+        case "equipment": {
+          const eq = model.equipment.find((e) => e.id === source.id);
+          if (!eq) return;
+          const copy = { ...eq, id: createId("equip"), position: { x: eq.position.x + COPY_OFFSET, y: eq.position.y + COPY_OFFSET }, connectedNetworkIds: [] };
+          addEquipment(copy);
+          setSelection({ kind: "equipment", id: copy.id });
+          break;
+        }
+        case "sensor": {
+          const sensor = model.sensors.find((s) => s.id === source.id);
+          if (!sensor) return;
+          const copy = { ...sensor, id: createId("sensor"), position: { x: sensor.position.x + COPY_OFFSET, y: sensor.position.y + COPY_OFFSET } };
+          addSensor(copy);
+          setSelection({ kind: "sensor", id: copy.id });
+          break;
+        }
+        case "pipe": {
+          const pipe = model.pipes.find((p) => p.id === source.id);
+          if (!pipe) return;
+          const copy = { ...pipe, id: createId("pipe"), path: pipe.path.map((p) => ({ x: p.x + COPY_OFFSET, y: p.y + COPY_OFFSET })), connectedEquipmentIds: [] };
+          addPipe(copy);
+          setSelection({ kind: "pipe", id: copy.id });
+          break;
+        }
+        case "duct": {
+          const duct = model.ducts.find((d) => d.id === source.id);
+          if (!duct) return;
+          const copy = { ...duct, id: createId("duct"), path: duct.path.map((p) => ({ x: p.x + COPY_OFFSET, y: p.y + COPY_OFFSET })), connectedEquipmentIds: [] };
+          addDuct(copy);
+          setSelection({ kind: "duct", id: copy.id });
+          break;
+        }
+        case "engineeringEquipment": {
+          const ee = model.engineeringSystems?.equipment.find((e) => e.id === source.id);
+          if (!ee) return;
+          const copy = { ...ee, id: createId("ee"), x: ee.x + COPY_OFFSET, y: ee.y + COPY_OFFSET, ports: ee.ports.map((port) => ({ ...port })) };
+          addEngineeringEquipment(copy);
+          setSelection({ kind: "engineeringEquipment", id: copy.id });
+          break;
+        }
+        case "engineeringPipe": {
+          const ep = model.engineeringSystems?.pipes.find((p) => p.id === source.id);
+          if (!ep) return;
+          const copy = { ...ep, id: createId("ep"), points: ep.points.map((p) => ({ x: p.x + COPY_OFFSET, y: p.y + COPY_OFFSET })), fromEquipmentId: "", toEquipmentId: "", fromPortId: "", toPortId: "" };
+          addEngineeringPipe(copy);
+          setSelection({ kind: "engineeringPipe", id: copy.id });
+          break;
+        }
+        default:
+          break;
+      }
+    },
+    [
+      model, addRoom, addWall, addRoof, addFloorSlab, addDoor, addWindow,
+      addPipe, addDuct, addEquipment, addSensor, addEngineeringEquipment, addEngineeringPipe, setSelection,
+    ]
+  );
+
+  const handleCopyLevelModel = useCallback(
+    (targetLevelId: string) => {
+      if (!activeLevelId || activeLevelId === targetLevelId) return;
+
+      const wallIdMap = new Map<string, string>();
+      const sourceWalls = model.walls.filter((w) => w.levelId === activeLevelId);
+      const newWalls = sourceWalls.map((w) => {
+        const newId = createId("wall");
+        wallIdMap.set(w.id, newId);
+        return { ...w, id: newId, levelId: targetLevelId };
+      });
+
+      const newRooms = model.rooms
+        .filter((r) => r.levelId === activeLevelId)
+        .map((r) => ({ ...r, id: createId("room"), levelId: targetLevelId }));
+
+      const newRoofs = (model.roofs ?? [])
+        .filter((r) => r.levelId === activeLevelId)
+        .map((r) => ({ ...r, id: createId("roof"), levelId: targetLevelId }));
+
+      const newSlabs = (model.floorSlabs ?? [])
+        .filter((s) => s.levelId === activeLevelId)
+        .map((s) => ({ ...s, id: createId("slab"), levelId: targetLevelId }));
+
+      const sourceWallIds = new Set(sourceWalls.map((w) => w.id));
+      const newDoors = model.doors
+        .filter((d) => d.anchor.wallId != null && sourceWallIds.has(d.anchor.wallId))
+        .map((d) => ({
+          ...d,
+          id: createId("door"),
+          anchor: { ...d.anchor, wallId: wallIdMap.get(d.anchor.wallId!) ?? d.anchor.wallId },
+          lost: false,
+        }));
+
+      const newWindows = model.windows
+        .filter((w) => w.anchor.wallId != null && sourceWallIds.has(w.anchor.wallId))
+        .map((w) => ({
+          ...w,
+          id: createId("window"),
+          anchor: { ...w.anchor, wallId: wallIdMap.get(w.anchor.wallId!) ?? w.anchor.wallId },
+          lost: false,
+        }));
+
+      if (newWalls.length > 0) {
+        setWalls([...model.walls, ...newWalls]);
+      }
+      newRooms.forEach((r) => addRoom(r));
+      newRoofs.forEach((r) => addRoof(r));
+      newSlabs.forEach((s) => addFloorSlab(s));
+      newDoors.forEach((d) => addDoor(d));
+      newWindows.forEach((w) => addWindow(w));
+
+      const count = newRooms.length + newWalls.length + newRoofs.length + newSlabs.length;
+      notifyInfo(`Скопировано ${count} объектов на уровень`);
+    },
+    [activeLevelId, model, setWalls, addRoom, addRoof, addFloorSlab, addDoor, addWindow]
+  );
 
   function handleAddRoom(room: Parameters<typeof addRoom>[0]) {
     const normalizedRoom = { ...room, source: room.source ?? "manual" };
@@ -1142,6 +1321,16 @@ function BuildPageContent() {
         redo();
         return;
       }
+      if (hasModifier && event.code === "KeyC" && selection && selection.kind !== "loop") {
+        setClipboard(selection);
+        event.preventDefault();
+        return;
+      }
+      if (hasModifier && event.code === "KeyV" && clipboard) {
+        duplicateEntity(clipboard);
+        event.preventDefault();
+        return;
+      }
       const hasDismissibleOverlay = showHelp;
       if (key === "escape" && editingViewport && isWorkspaceSidebarOpen) {
         event.preventDefault();
@@ -1173,12 +1362,15 @@ function BuildPageContent() {
       },
       [
         activeViewport,
+        clipboard,
         closeAllTransientPanels,
+        duplicateEntity,
         isWorkspaceSidebarOpen,
         redo,
         removeAllSelected,
         selection,
         multiSelection,
+        setClipboard,
         setSelection,
         showHelp,
         tool,
@@ -2380,6 +2572,7 @@ function BuildPageContent() {
             }}
             onAddLevel={handleAddLevel}
             onUpdateLevel={updateLevel}
+            onCopyLevelModel={handleCopyLevelModel}
           />
           {engineeringModeUsesOverlay(visualizationMode) ? (
             <EngineeringLegendPanel styleMode={schematicStyle} compact />
@@ -2418,6 +2611,8 @@ function BuildPageContent() {
         onUpdateEngineeringEquipment={updateEngineeringEquipment}
         onUpdateEngineeringPipe={updateEngineeringPipe}
         onRemoveSelection={removeAllSelected}
+        onDuplicateSelection={selection && selection.kind !== "loop" ? () => duplicateEntity(selection) : undefined}
+        onUpdateStair={updateStair}
         onCreateRoomFromLoop={handleCreateRoomFromLoop}
       />
     ) : (
@@ -2720,6 +2915,17 @@ function BuildPageContent() {
                         handleToolChange("roof");
                       }}
                     />
+                    <QuickToolButton
+                      icon="stair"
+                      label="Лестница"
+                      title="Нарисовать лестничный марш"
+                      active={tool === "stair"}
+                      compact
+                      onClick={() => {
+                        handleViewportChange("plan");
+                        handleToolChange("stair");
+                      }}
+                    />
                   </BuildToolbarGroup>
 
                   <BuildToolbarDivider />
@@ -3017,6 +3223,8 @@ function BuildPageContent() {
                   onUpdateRoof={updateRoof}
                   onAddFloorSlab={addFloorSlab}
                   onUpdateFloorSlab={updateFloorSlab}
+                  onAddStair={addStair}
+                  onUpdateStair={updateStair}
                   onAddDoor={addDoor}
                   onUpdateDoor={updateDoor}
                   onAddWindow={addWindow}

@@ -86,9 +86,6 @@ export function MonteCarloScatterChart({
       <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div>
           <div className="flex items-center gap-1.5">
-            <p className="text-sm font-semibold text-[color:var(--text-base)]">
-              {`Точечная диаграмма: ${parameterOption.label} → ${targetMetricOption.shortLabel}`}
-            </p>
             <MetricInfoTooltip
               title="Точечная диаграмма Monte Carlo"
               meaning="Показывает, как изменение входного параметра связано с выбранной целевой метрикой по сценариям."

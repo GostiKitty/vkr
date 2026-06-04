@@ -13,6 +13,7 @@ import type {
   FloorSlab,
   Roof,
   Room,
+  Stair,
   Vec2,
   Wall,
   Window,
@@ -77,6 +78,7 @@ import {
   FLOOR_SLAB_DEFAULTS,
   ROOF_DEFAULTS,
   SENSOR_DEFAULTS,
+  STAIR_DEFAULTS,
   WALL_DEFAULTS,
   WINDOW_DEFAULTS,
 } from "../defaults";
@@ -183,6 +185,8 @@ interface Canvas2DProps {
   onUpdateRoof: (roofId: string, patch: Partial<Roof>) => void;
   onAddFloorSlab: (slab: FloorSlab) => void;
   onUpdateFloorSlab: (slabId: string, patch: Partial<FloorSlab>) => void;
+  onAddStair: (stair: Stair) => void;
+  onUpdateStair: (stairId: string, patch: Partial<Stair>) => void;
   onAddDoor: (door: Door) => void;
   onUpdateDoor: (doorId: string, patch: Partial<Door>) => void;
   onAddWindow: (window: Window) => void;
@@ -710,6 +714,7 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
       onUpdateWall,
       onAddRoof,
       onAddFloorSlab,
+      onAddStair,
       onAddDoor,
       onUpdateDoor,
       onAddWindow,
@@ -798,7 +803,7 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
     const [rectActiveField, setRectActiveField] = useState<RoomRectInputField>("width");
     const rectActiveFieldRef = useRef<RoomRectInputField>("width");
     const finalizeRectangleShapeRef = useRef<
-      (start: Vec2, end: Vec2, kind: "roomRect" | "roof" | "slab") => void
+      (start: Vec2, end: Vec2, kind: "roomRect" | "roof" | "slab" | "stair") => void
     >(() => {});
     const [wallLengthInput, setWallLengthInput] = useState("");
 
@@ -899,6 +904,10 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
     const floorSlabs = useMemo(
       () => (model.floorSlabs ?? []).filter((slab) => slab.levelId === activeLevelId),
       [activeLevelId, model.floorSlabs]
+    );
+    const stairs = useMemo(
+      () => (model.stairs ?? []).filter((stair) => stair.levelId === activeLevelId),
+      [activeLevelId, model.stairs]
     );
     const contextRooms = useMemo(
       () =>
@@ -1323,6 +1332,7 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
       belowLevelRooms.forEach((room) => room.polygon.forEach((point) => points.push(point)));
       roofs.forEach((roof) => roof.boundary.forEach((point) => points.push(point)));
       floorSlabs.forEach((slab) => slab.boundary.forEach((point) => points.push(point)));
+      stairs.forEach((stair) => stair.boundary.forEach((point) => points.push(point)));
       walls.forEach((wall) => {
         points.push(wall.a, wall.b, midpoint(wall.a, wall.b));
       });
@@ -1342,6 +1352,7 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
       rooms,
       roofs,
       floorSlabs,
+      stairs,
       walls,
       pipes,
       ducts,
@@ -1558,7 +1569,7 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
       const handleKeyDown = (event: KeyboardEvent) => {
         const wallLengthTypingActive = tool === "wall" && linearDraft?.tool === "wall" && linearDraft.points.length > 0;
         const rectTypingActive =
-          rectStart != null && (tool === "roomRect" || tool === "roof" || tool === "slab");
+          rectStart != null && (tool === "roomRect" || tool === "roof" || tool === "slab" || tool === "stair");
         const inTextInput = Boolean((event.target as HTMLElement)?.closest("input,textarea,[contenteditable=true]"));
 
         if (rectTypingActive && !event.ctrlKey && !event.metaKey && !event.altKey && !inTextInput) {
@@ -1678,7 +1689,7 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
               finalizeRectangleShapeRef.current(
                 rectStart,
                 buildRectEndFromInputs(rectStart, typedWidth, typedHeight),
-                tool as "roomRect" | "roof" | "slab"
+                tool as "roomRect" | "roof" | "slab" | "stair"
               );
               clearRectDraft();
             } else if (typedHeight != null && typedHeight >= MIN_RECT_SIZE) {
@@ -1808,6 +1819,7 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
       rooms.forEach((room) => room.polygon.forEach((point) => points.push(point)));
       roofs.forEach((roof) => roof.boundary.forEach((point) => points.push(point)));
       floorSlabs.forEach((slab) => slab.boundary.forEach((point) => points.push(point)));
+      stairs.forEach((stair) => stair.boundary.forEach((point) => points.push(point)));
       walls.forEach((wall) => {
         points.push(wall.a, wall.b);
       });
@@ -1820,7 +1832,7 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
       engineeringPipes.forEach((pipe) => pipe.points.forEach((point) => points.push(point)));
       engineeringEquipment.forEach((item) => points.push({ x: item.x, y: item.y }));
       return points;
-    }, [ducts, engineeringEquipment, engineeringPipes, equipment, floorSlabs, pipes, roofs, rooms, sensors, showSmartOverlay, walls]);
+    }, [ducts, engineeringEquipment, engineeringPipes, equipment, floorSlabs, stairs, pipes, roofs, rooms, sensors, showSmartOverlay, walls]);
 
     const zoomToFitContent = useCallback(
       (force = false) => {
@@ -1880,6 +1892,8 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
                   ? roofs.find((entry) => entry.id === target.id)?.boundary ?? []
                   : target.kind === "slab"
                     ? floorSlabs.find((entry) => entry.id === target.id)?.boundary ?? []
+                  : target.kind === "stair"
+                    ? stairs.find((entry) => entry.id === target.id)?.boundary ?? []
                   : target.kind === "door" || target.kind === "window"
                   ? (() => {
                       const opening =
@@ -2070,7 +2084,7 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
     );
 
     useEffect(() => {
-      if (!rectStart || !(tool === "roomRect" || tool === "roof" || tool === "slab")) {
+      if (!rectStart || !(tool === "roomRect" || tool === "roof" || tool === "slab" || tool === "stair")) {
         return;
       }
       if (!rectInputLocked) {
@@ -2174,7 +2188,7 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
       const worldPoint = resolveWallLengthPoint(resolvePointerPoint(rawPoint, tool));
       setPointerWorld(worldPoint);
 
-      if (tool === "roomRect" || tool === "roof" || tool === "slab") {
+      if (tool === "roomRect" || tool === "roof" || tool === "slab" || tool === "stair") {
         if (!rectStart) {
           setRectStart(worldPoint);
           setRectPreview(worldPoint);
@@ -2438,7 +2452,7 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
       const previewPoint = resolveWallLengthPoint(basePreview);
       setPointerWorld(previewPoint);
       updateGuides(previewPoint);
-      if (!isPanning && rectStart && (tool === "roomRect" || tool === "roof" || tool === "slab")) {
+      if (!isPanning && rectStart && (tool === "roomRect" || tool === "roof" || tool === "slab" || tool === "stair")) {
         setRectPreview(previewPoint);
         const dx = previewPoint.x - rectStart.x;
         const dy = previewPoint.y - rectStart.y;
@@ -2592,7 +2606,7 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
           // ignore
         }
       }
-      if (rectStart && (tool === "roomRect" || tool === "roof" || tool === "slab")) {
+      if (rectStart && (tool === "roomRect" || tool === "roof" || tool === "slab" || tool === "stair")) {
         const typedWidth = parseLengthInput(rectInput.width);
         const typedHeight = parseLengthInput(rectInput.height);
         const hasTypedDimensions =
@@ -2710,6 +2724,11 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
               targets.push({ kind: "slab", id: slab.id });
             }
           }
+          for (const stair of stairs) {
+            if (polygonIntersectsBounds(bounds, stair.boundary)) {
+              targets.push({ kind: "stair", id: stair.id });
+            }
+          }
           for (const wall of walls) {
             if (segmentIntersectsBounds(bounds, wall.a, wall.b)) {
               targets.push({ kind: "wall", id: wall.id });
@@ -2766,6 +2785,7 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
               "wall",
               "roof",
               "slab",
+              "stair",
               "door",
               "window",
               "equipment",
@@ -2877,7 +2897,7 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
     };
 
     const handlePointerLeave = (event: React.PointerEvent) => {
-      if (rectStart && (tool === "roof" || tool === "slab")) {
+      if (rectStart && (tool === "roof" || tool === "slab" || tool === "stair")) {
         clearRectDraft();
       }
       // Only finalize the drag if the button is already released.
@@ -2954,7 +2974,7 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
       onToolChange("select");
     };
 
-    const finalizeRectangleShape = (start: Vec2, end: Vec2, kind: "roomRect" | "roof" | "slab") => {
+    const finalizeRectangleShape = (start: Vec2, end: Vec2, kind: "roomRect" | "roof" | "slab" | "stair") => {
       if (!activeLevelId) {
         notifyError("Создайте уровень, чтобы рисовать элемент.");
         return;
@@ -3016,6 +3036,19 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
         );
         onAddFloorSlab(slab);
         onSelectionChange({ kind: "slab", id: slab.id });
+        return;
+      }
+      if (kind === "stair") {
+        const stair: Stair = {
+          id: createId("stair"),
+          name: `Лестница ${stairs.length + 1}`,
+          levelId: activeLevelId,
+          boundary: polygon,
+          stepCount: STAIR_DEFAULTS.stepCount,
+          totalRise_m: level?.height_m ?? STAIR_DEFAULTS.totalRise_m,
+        };
+        onAddStair(stair);
+        onSelectionChange({ kind: "stair", id: stair.id });
         return;
       }
       const newRoom: Room = {
@@ -3433,6 +3466,12 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
         const edges = slab.boundary.map((vertex, index) => [vertex, slab.boundary[(index + 1) % slab.boundary.length]] as const);
         if (edges.some(([a, b]) => pointToSegmentDistance(point, a, b) < 0.2) || isPointInsidePolygon(point, slab.boundary)) {
           return { kind: "slab", id: slab.id };
+        }
+      }
+      for (const stair of stairs) {
+        const edges = stair.boundary.map((vertex, index) => [vertex, stair.boundary[(index + 1) % stair.boundary.length]] as const);
+        if (edges.some(([a, b]) => pointToSegmentDistance(point, a, b) < 0.2) || isPointInsidePolygon(point, stair.boundary)) {
+          return { kind: "stair", id: stair.id };
         }
       }
       for (const pipe of pipes) {
@@ -4037,6 +4076,14 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
                   arrow={roof.kind === "pitched" ? roof.slope : undefined}
                   badgeText={transientSourceMatches(transientFrame, "roof", roof.id) ? transientBadge?.label : undefined}
                   unstable={transientSourceMatches(transientFrame, "roof", roof.id) ? !transientFrame?.stable : false}
+                />
+              ))}
+              {stairs.map((stair) => (
+                <PlanStair
+                  key={stair.id}
+                  stair={stair}
+                  worldToScreen={worldToScreen}
+                  selected={isSelected("stair", stair.id)}
                 />
               ))}
               {rooms.map((room) => (
@@ -5029,6 +5076,84 @@ const PlanSurfacePolygon = ({
           </text>
         </g>
       ) : null}
+    </g>
+  );
+};
+
+const PlanStair = ({
+  stair,
+  worldToScreen,
+  selected,
+}: {
+  stair: Stair;
+  worldToScreen: (point: Vec2) => Vec2;
+  selected: boolean;
+}) => {
+  if (stair.boundary.length < 4) return null;
+
+  const pts = stair.boundary.map((p) => worldToScreen(p));
+  const xs = pts.map((p) => p.x);
+  const ys = pts.map((p) => p.y);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const w = maxX - minX;
+  const h = maxY - minY;
+  const n = Math.max(2, stair.stepCount);
+  const stroke = selected ? "#0f172a" : "#16a34a";
+  const fill = selected ? "rgba(22,163,74,0.22)" : "rgba(22,163,74,0.08)";
+  const pointsAttr = pts.map((p) => `${p.x},${p.y}`).join(" ");
+
+  // Ступени перпендикулярны направлению движения:
+  // высокий марш (h > w) → движение по Y → линии горизонтальные (вдоль X)
+  // широкий марш (w > h) → движение по X → линии вертикальные (вдоль Y)
+  const stepLines: React.ReactNode[] = [];
+  if (h >= w) {
+    for (let i = 1; i < n; i++) {
+      const y = minY + (h * i) / n;
+      stepLines.push(<line key={i} x1={minX} y1={y} x2={maxX} y2={y} stroke={stroke} strokeWidth={0.8} opacity={0.55} />);
+    }
+  } else {
+    for (let i = 1; i < n; i++) {
+      const x = minX + (w * i) / n;
+      stepLines.push(<line key={i} x1={x} y1={minY} x2={x} y2={maxY} stroke={stroke} strokeWidth={0.8} opacity={0.55} />);
+    }
+  }
+
+  // Arrow of ascent toward the "far" end
+  const cx = (minX + maxX) / 2;
+  const cy = (minY + maxY) / 2;
+  const arrowLen = Math.min(w, h) * 0.4;
+  const ax = w >= h ? cx : cx;
+  const ay = w >= h ? cy : cy;
+  const aex = w >= h ? ax : ax;
+  const aey = w >= h ? ay - arrowLen : ay - arrowLen;
+
+  return (
+    <g>
+      <polygon points={pointsAttr} fill={fill} stroke={stroke} strokeWidth={selected ? 2 : 1.5} />
+      {stepLines}
+      <line x1={ax} y1={ay} x2={aex} y2={aey} stroke={stroke} strokeWidth={1.6} />
+      <polygon
+        points={`${aex},${aey} ${aex - 5},${aey + 7} ${aex + 5},${aey + 7}`}
+        fill={stroke}
+      />
+      <text
+        x={cx}
+        y={cy + 4}
+        textAnchor="middle"
+        fontSize={10}
+        fontWeight={600}
+        fill={stroke}
+        stroke="#fff"
+        strokeWidth={2}
+        strokeLinejoin="round"
+        paintOrder="stroke fill"
+        pointerEvents="none"
+      >
+        {stair.name}
+      </text>
     </g>
   );
 };

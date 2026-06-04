@@ -237,12 +237,25 @@ export interface Sp50BuildingMetadata {
   energyVentilation?: Sp50EnergyVentilationMetadata;
 }
 
+export interface Stair {
+  id: string;
+  levelId: string;
+  name: string;
+  /** 4-угольный прямоугольный контур (подошва лестницы на плане). */
+  boundary: Vec2[];
+  /** Число ступеней. */
+  stepCount: number;
+  /** Суммарный перепад высот марша (м). Обычно равен высоте уровня. */
+  totalRise_m: number;
+}
+
 export interface BuildingModel {
   levels: Level[];
   rooms: Room[];
   walls: Wall[];
   roofs?: Roof[];
   floorSlabs?: FloorSlab[];
+  stairs?: Stair[];
   doors: Door[];
   windows: Window[];
   pipes: PipeNetwork[];
@@ -265,6 +278,7 @@ export const createEmptyBuildingModel = (): BuildingModel => ({
   walls: [],
   roofs: [],
   floorSlabs: [],
+  stairs: [],
   doors: [],
   windows: [],
   pipes: [],

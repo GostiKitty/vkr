@@ -421,6 +421,17 @@ export function BuildToolPalette({
       },
     },
     {
+      icon: "stair",
+      label: "Лестница",
+      title: "Лестница",
+      description: "Прямой лестничный марш — прямоугольник с указанием числа ступеней.",
+      active: currentTool === "stair",
+      onClick: () => {
+        pickArchitectureViewport();
+        onToolChange("stair");
+      },
+    },
+    {
       icon: "window",
       label: "Окно",
       title: "Окно",
