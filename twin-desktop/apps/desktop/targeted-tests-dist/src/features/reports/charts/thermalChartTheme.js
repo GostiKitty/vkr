@@ -1,0 +1,110 @@
+import { formatNumber } from "../../../shared/utils/format";
+export { formatSurfaceTemperatureFactorStatus } from "../../../shared/utils/engineeringStatusLabels";
+export const THERMAL_CHART_NOT_SET = "не задано";
+export const LOSS_CATEGORY_COLORS = {
+    opaque: "var(--chart-loss-opaque, #0f766e)",
+    window: "var(--chart-loss-window, #3b82f6)",
+    door: "var(--chart-loss-door, #f97316)",
+    infiltration: "var(--chart-loss-infiltration, #dc2626)",
+    ventilation: "var(--chart-loss-ventilation, #7c3aed)",
+};
+export const LOSS_CATEGORY_LABELS = {
+    opaque: "Непрозрачные ограждения",
+    window: "Окна",
+    door: "Двери",
+    infiltration: "Инфильтрация",
+    ventilation: "Механическая вентиляция",
+};
+export const CHART_AXIS_TICK = { fill: "var(--text-soft)", fontSize: 11 };
+export const CHART_TOOLTIP_STYLE = {
+    background: "var(--surface-elevated)",
+    border: "1px solid var(--border-soft)",
+    borderRadius: 12,
+    fontSize: 12,
+    boxShadow: "var(--shadow-overlay, 0 8px 24px rgba(0,0,0,0.12))",
+};
+export const CHART_MARGIN = { top: 12, right: 28, left: 8, bottom: 8 };
+export const CHART_MARGIN_VERTICAL = { top: 12, right: 32, left: 12, bottom: 8 };
+export function formatChartPower(value) {
+    if (!Number.isFinite(value)) {
+        return THERMAL_CHART_NOT_SET;
+    }
+    const numeric = value;
+    if (Math.abs(numeric) >= 1000) {
+        return `${formatNumber(numeric / 1000, { maximumFractionDigits: 1 })} кВт`;
+    }
+    return `${formatNumber(numeric, { maximumFractionDigits: 0 })} Вт`;
+}
+export function formatChartTemperature(value) {
+    if (!Number.isFinite(value)) {
+        return THERMAL_CHART_NOT_SET;
+    }
+    return `${formatNumber(value, { maximumFractionDigits: 1 })} °C`;
+}
+export function formatChartPercent(value) {
+    if (!Number.isFinite(value)) {
+        return THERMAL_CHART_NOT_SET;
+    }
+    return `${formatNumber(value, { maximumFractionDigits: 1 })} %`;
+}
+export function formatChartAxisPower(value) {
+    if (Math.abs(value) >= 1000) {
+        return `${formatNumber(value / 1000, { maximumFractionDigits: 1 })} кВт`;
+    }
+    return `${formatNumber(value, { maximumFractionDigits: 0 })}`;
+}
+export function clampChart(value, min, max) {
+    return Math.min(Math.max(value, min), max);
+}
+export function getFiniteChartDomain(values) {
+    const finite = values.filter((value) => Number.isFinite(value));
+    if (!finite.length) {
+        return null;
+    }
+    return [Math.min(...finite), Math.max(...finite)];
+}
+/** Температура: холоднее — синее, теплее — янтарное (для поиска «холодных» зон). */
+export function heatColorTemperature(value, min, max) {
+    if (max <= min) {
+        return "rgba(148, 163, 184, 0.2)";
+    }
+    const ratio = clampChart((value - min) / (max - min), 0, 1);
+    const hue = 215 - ratio * 175;
+    return `hsla(${hue}, 72%, 58%, 0.55)`;
+}
+/** Нагрузка/потери: выше — насыщеннее (красно-оранжевый). */
+export function heatColorLoad(value, min, max) {
+    if (max <= min) {
+        return "rgba(148, 163, 184, 0.2)";
+    }
+    const ratio = clampChart((value - min) / (max - min), 0, 1);
+    const hue = 200 - ratio * 195;
+    return `hsla(${hue}, 78%, 52%, 0.5)`;
+}
+export function heatCellTextClass(ratio) {
+    return ratio > 0.55 ? "font-semibold text-white" : "font-semibold text-slate-900";
+}
+export function formatZoneStatusLabel(status) {
+    switch (status) {
+        case "ok":
+            return "Норма";
+        case "attention":
+            return "Внимание";
+        case "risk":
+            return "Риск";
+        default:
+            return THERMAL_CHART_NOT_SET;
+    }
+}
+export function statusBadgeClass(status) {
+    if (status === "risk") {
+        return "inline-flex rounded-full border border-[color:var(--danger-border)] bg-[color:var(--danger-bg)] px-2 py-0.5 text-[11px] font-medium text-[color:var(--danger-fg)]";
+    }
+    if (status === "attention") {
+        return "inline-flex rounded-full border border-[color:var(--warning-border)] bg-[color:var(--warning-bg)] px-2 py-0.5 text-[11px] font-medium text-[color:var(--warning-fg)]";
+    }
+    if (status === "ok") {
+        return "inline-flex rounded-full border border-[color:var(--success-border)] bg-[color:var(--success-bg)] px-2 py-0.5 text-[11px] font-medium text-[color:var(--success-fg)]";
+    }
+    return "text-[color:var(--text-soft)]";
+}

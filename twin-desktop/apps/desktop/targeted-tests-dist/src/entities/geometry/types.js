@@ -1,0 +1,22 @@
+import { createEmptyEngineeringSystems } from "../engineering/types";
+export const createEmptyBuildingModel = () => ({
+    levels: [],
+    rooms: [],
+    walls: [],
+    roofs: [],
+    floorSlabs: [],
+    stairs: [],
+    wallFillets: [],
+    doors: [],
+    windows: [],
+    pipes: [],
+    ducts: [],
+    equipment: [],
+    sensors: [],
+    scenarios: [],
+    activeScenarioId: null,
+    events: [],
+    meta: {},
+    thermalProtection: undefined,
+    engineeringSystems: createEmptyEngineeringSystems(),
+});
