@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import Tooltip from "../../../shared/ui/Tooltip";
-import type { EquipmentType, PipeSystemType } from "../../../entities/networks/types";
+import { EQUIPMENT_TYPE_LABELS, type EquipmentType, type PipeSystemType } from "../../../entities/networks/types";
 import type { EngineeringEquipmentType } from "../../../entities/engineering/types";
 import type { BuildTool } from "../build.store";
 import type { BuildViewportMode } from "./LeftToolbar";
@@ -399,6 +399,17 @@ export function BuildToolPalette({
       },
     },
     {
+      icon: "fillet",
+      label: "Скругление",
+      title: "Скругление углов",
+      description: "Клик по стыку стен задаёт радиус закругления угла — видно на плане, в 3D и в расчёте площадей.",
+      active: currentTool === "fillet",
+      onClick: () => {
+        pickArchitectureViewport();
+        onToolChange("fillet");
+      },
+    },
+    {
       icon: "roof",
       label: "Крыша",
       title: "Крыша",
@@ -504,6 +515,42 @@ export function BuildToolPalette({
       onClick: () => {
         pickNetworksViewport();
         onToolChange("duct");
+      },
+    },
+    {
+      icon: "ahu",
+      label: EQUIPMENT_TYPE_LABELS.ahu,
+      title: EQUIPMENT_TYPE_LABELS.ahu,
+      description: EQUIPMENT_TYPE_LABELS.ahu,
+      active: currentTool === "equipment" && equipmentPreset === "ahu",
+      onClick: () => {
+        pickNetworksViewport();
+        onEquipmentPresetChange("ahu");
+        onToolChange("equipment");
+      },
+    },
+    {
+      icon: "fancoil",
+      label: EQUIPMENT_TYPE_LABELS.fancoil,
+      title: EQUIPMENT_TYPE_LABELS.fancoil,
+      description: EQUIPMENT_TYPE_LABELS.fancoil,
+      active: currentTool === "equipment" && equipmentPreset === "fancoil",
+      onClick: () => {
+        pickNetworksViewport();
+        onEquipmentPresetChange("fancoil");
+        onToolChange("equipment");
+      },
+    },
+    {
+      icon: "diffuser",
+      label: EQUIPMENT_TYPE_LABELS.diffuser,
+      title: EQUIPMENT_TYPE_LABELS.diffuser,
+      description: EQUIPMENT_TYPE_LABELS.diffuser,
+      active: currentTool === "equipment" && equipmentPreset === "diffuser",
+      onClick: () => {
+        pickNetworksViewport();
+        onEquipmentPresetChange("diffuser");
+        onToolChange("equipment");
       },
     },
     {

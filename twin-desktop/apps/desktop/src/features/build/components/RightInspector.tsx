@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo } from "react";
 import { polygonArea, polygonCentroid, polygonContainsPoint } from "../../../entities/geometry/geom";
 import { createId } from "../../../shared/utils/id";
+import { CollapsibleSection } from "../../../shared/ui";
 import type { BuildingModel, ConstructionLayer, Door, FloorSlab, Roof, Room, Stair, Wall, Window } from "../../../entities/geometry/types";
 import type { EngineeringEquipment, EngineeringEquipmentType, EngineeringPipe } from "../../../entities/engineering/types";
 import type { DuctNetwork, Equipment, PipeNetwork, SensorDevice } from "../../../entities/networks/types";
@@ -589,6 +590,34 @@ function RoomForm({
         </div>
       ) : null}
 
+      {/* ── Скругление углов ─────────────────────────────────────────────── */}
+      {room.cornerRadii_m && Object.keys(room.cornerRadii_m).length > 0 ? (
+        <div className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)] p-3">
+          <div className="mb-2 flex items-center justify-between">
+            <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">Скругление</p>
+            <button
+              type="button"
+              className="text-[10px] text-[color:var(--text-soft)] hover:text-[color:var(--danger-fg)]"
+              onClick={() => onUpdateRoom(room.id, { cornerRadii_m: undefined, cornerRadius_m: undefined })}
+            >
+              Сбросить всё
+            </button>
+          </div>
+          <div className="grid grid-cols-2 gap-1.5">
+            {Object.entries(room.cornerRadii_m).map(([idx, r]) => (
+              <div key={idx} className="flex items-center justify-between rounded-xl bg-[color:var(--surface-muted)] px-2.5 py-1.5">
+                <span className="text-xs text-[color:var(--text-soft)]">Уг. {parseInt(idx) + 1}</span>
+                <span className="text-xs font-semibold text-[color:var(--text-base)]">{(r * 100).toFixed(0)} см</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div className="rounded-2xl border border-dashed border-[color:var(--border-soft)] bg-[color:var(--surface-muted)] px-3 py-2.5 text-xs text-[color:var(--text-soft)]">
+          Используйте инструмент <span className="font-semibold text-[color:var(--text-base)]">Скругление</span> для закругления конкретных углов.
+        </div>
+      )}
+
       {/* ── Перекрытие пола ──────────────────────────────────────────────── */}
       <div className="rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)] p-3">
         <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">
@@ -1024,24 +1053,32 @@ function WallForm({
         <NumberField label="Высота, м" value={wall.height_m} step={0.1} onChange={(value) => onUpdateWall(wall.id, { height_m: value })} />
       </div>
       {properties ? (
-        <div className="grid grid-cols-2 gap-2 rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)] p-3">
-          <ValueTile label="R, м²К/Вт" value={properties.rValue.toFixed(3)} />
-          <ValueTile label="U, Вт/(м²К)" value={properties.uValue.toFixed(3)} />
-          <div className="col-span-2">
-            <ValueTile label="Теплоёмкость, Дж/(м²К)" value={properties.heatCapacity_J_m2K.toFixed(0)} />
+        <CollapsibleSection title="Теплотехника">
+          <div className="pt-3">
+            <div className="grid grid-cols-2 gap-2 rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)] p-3">
+              <ValueTile label="R, м²К/Вт" value={properties.rValue.toFixed(3)} />
+              <ValueTile label="U, Вт/(м²К)" value={properties.uValue.toFixed(3)} />
+              <div className="col-span-2">
+                <ValueTile label="Теплоёмкость, Дж/(м²К)" value={properties.heatCapacity_J_m2K.toFixed(0)} />
+              </div>
+            </div>
           </div>
-        </div>
+        </CollapsibleSection>
       ) : null}
-      <ConstructionLayerEditor
-        title="Состав стены"
-        layers={layers}
-        hasCustomLayers={hasCustomLayers}
-        onUpdateLayer={updateLayer}
-        onAddLayer={addLayer}
-        onRemoveLayer={removeLayer}
-        onReset={resetToAssembly}
-        resetLabel="Вернуть по сборке"
-      />
+      <CollapsibleSection title="Слои">
+        <div className="pt-3">
+          <ConstructionLayerEditor
+            title="Состав стены"
+            layers={layers}
+            hasCustomLayers={hasCustomLayers}
+            onUpdateLayer={updateLayer}
+            onAddLayer={addLayer}
+            onRemoveLayer={removeLayer}
+            onReset={resetToAssembly}
+            resetLabel="Вернуть по сборке"
+          />
+        </div>
+      </CollapsibleSection>
     </div>
   );
 }

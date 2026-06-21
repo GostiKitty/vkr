@@ -22,11 +22,37 @@ export type EngineeringEquipmentType =
   | "flowMeter"         // Расходомер 2.9.04
   | "convector"         // Конвектор 3.1.04
   | "sensorFlow"        // Датчик расхода 5.1.07
-  | "sensorHumidity";   // Датчик влажности 5.1.09
+  | "sensorHumidity"    // Датчик влажности 5.1.09
+  // Воздушные сети
+  | "airHandlingUnit"
+  | "ductFan"
+  | "roofFan"
+  | "airDamper"
+  | "airCheckValve"
+  | "fireDamper"
+  | "airFilter"
+  | "airFlowRegulatorConst"
+  | "airFlowRegulatorVar"
+  | "silencer"
+  | "airHeater"
+  | "airCooler"
+  | "airHumidifier"
+  | "airDehumidifier"
+  | "supplyDiffuser"
+  | "exhaustGrille";
 
 export type EngineeringPortDirection = "left" | "right" | "top" | "bottom";
 
-export type EngineeringMedium = "supply" | "return" | "dhw" | "coldWater" | "drain" | "electric" | "signal";
+export type EngineeringMedium =
+  | "supply"
+  | "return"
+  | "dhw"
+  | "coldWater"
+  | "drain"
+  | "electric"
+  | "signal"
+  | "airSupply"
+  | "airExhaust";
 
 export interface EngineeringPipePoint {
   x: number;
