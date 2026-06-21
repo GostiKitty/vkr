@@ -143,10 +143,85 @@ function testStackHeightFromGeometry() {
   assert.ok(stack.value >= 5.9 && stack.value <= 6.1);
 }
 
+function testVentilationAchFromEngineeringAirSystems() {
+  const scenario = createDefaultScenarioConfig();
+  const model = createEmptyBuildingModel();
+  model.rooms = [
+    {
+      id: "r1",
+      levelId: "l1",
+      name: "Комната",
+      polygon: [
+        { x: 0, y: 0 },
+        { x: 10, y: 0 },
+        { x: 10, y: 10 },
+        { x: 0, y: 10 },
+      ],
+    },
+  ];
+  model.levels = [{ id: "l1", name: "1", elevation_m: 0, height_m: 3 }];
+  model.engineeringSystems = {
+    equipment: [
+      {
+        id: "ahu-1",
+        type: "airHandlingUnit",
+        name: "ПВУ-1",
+        x: 0,
+        y: 0,
+        width: 2.8,
+        height: 1.4,
+        rotation: 0,
+        ports: [],
+        parameters: { airflowM3H: 900, heatRecoveryEfficiency: 0.78 },
+        metadata: {},
+        levelId: "l1",
+      },
+      {
+        id: "sd-1",
+        type: "supplyDiffuser",
+        name: "Приток-1",
+        x: 1,
+        y: 1,
+        width: 0.8,
+        height: 0.8,
+        rotation: 0,
+        ports: [],
+        parameters: { airflowM3H: 900 },
+        metadata: {},
+        levelId: "l1",
+      },
+      {
+        id: "eg-1",
+        type: "exhaustGrille",
+        name: "Вытяжка-1",
+        x: 2,
+        y: 1,
+        width: 0.95,
+        height: 0.7,
+        rotation: 0,
+        ports: [],
+        parameters: { airflowM3H: 900 },
+        metadata: {},
+        levelId: "l1",
+      },
+    ],
+    pipes: [],
+  };
+
+  const ventilation = resolveVentilationACH(null, scenario, model);
+  assert.ok(ventilation.value > 2.99 && ventilation.value < 3.01, `expected ~3.0 1/ч, got ${ventilation.value}`);
+  assert.equal(ventilation.source, "calculated");
+
+  const recovery = resolveHeatRecoveryFactor(null, scenario, model);
+  assert.equal(recovery.value, 0.78);
+  assert.equal(recovery.source, "calculated");
+}
+
 export function runResolveScenarioVentilationTests() {
   testVentilationFromModel();
   testTypicalVentilationAndRecoveryWithoutModelData();
   testVentilationAchFromEquipmentAirflow();
+  testVentilationAchFromEngineeringAirSystems();
   testDisabledMechanicalVentilationZerosEffectiveValues();
   testStackHeightFromGeometry();
   console.log("resolveScenarioVentilation tests passed");

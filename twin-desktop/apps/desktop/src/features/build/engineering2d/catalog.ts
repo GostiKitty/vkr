@@ -28,32 +28,86 @@ type EquipmentPreset = {
   parameters: EngineeringEquipmentParameters;
 };
 
-export const ENGINEERING_EQUIPMENT_LABELS: Record<EngineeringEquipmentType, string> = {
+export const ENGINEERING_EQUIPMENT_LABELS = {
   heatExchanger: "Теплообменник",
   pump: "Насос",
   filter: "Фильтр",
-  valve: "Вентиль запорный",
-  checkValve: "Обратный клапан",
-  controlValve: "Регулирующий клапан",
+  valve: "Клапан запорный",
+  checkValve: "Клапан обратный",
+  controlValve: "Клапан регулирующий",
   expansionTank: "Расширительный бак",
   manifold: "Коллектор",
-  heatMeter: "Узел учёта",
+  heatMeter: "Теплосчётчик",
   automationCabinet: "Шкаф автоматики",
-  sensorTemperature: "Датчик T",
-  sensorPressure: "Датчик P",
+  sensorTemperature: "Датчик температуры",
+  sensorPressure: "Датчик давления",
   // АВОК СТО НП 1.05-2006
   gateValve: "Задвижка",
   ballValve: "Кран шаровой",
   threeWayValve: "Кран трёхходовой",
   balancingValve: "Клапан балансировочный",
   safetyValve: "Клапан предохранительный",
-  pressureRegulator: "Регулятор перепада давл.",
-  thermostaticValve: "Терморегулятор",
+  pressureRegulator: "Регулятор перепада давления",
+  thermostaticValve: "Терморегулятор радиаторный",
   flowMeter: "Расходомер",
   convector: "Конвектор",
   sensorFlow: "Датчик расхода",
   sensorHumidity: "Датчик влажности",
-};
+  airHandlingUnit: "Установка приточно-вытяжная",
+  ductFan: "Вентилятор",
+  roofFan: "Вентилятор крышный",
+  airDamper: "Клапан жалюзийный многостворчатый",
+  fireDamper: "Клапан противопожарный",
+  airFilter: "Фильтр воздушный",
+  silencer: "Шумоглушитель",
+  airHeater: "Подогреватель",
+  airCooler: "Охладитель",
+  airHumidifier: "Увлажнитель воздуха",
+  airDehumidifier: "Осушитель воздуха",
+  supplyDiffuser: "Устройство для входа/выхода приточного воздуха",
+  exhaustGrille: "Устройство для входа/выхода удаляемого воздуха",
+} as Record<EngineeringEquipmentType, string>;
+
+ENGINEERING_EQUIPMENT_LABELS.airFlowRegulatorConst = "Регулирующий клапан с постоянным расходом";
+ENGINEERING_EQUIPMENT_LABELS.airFlowRegulatorVar = "Регулирующий клапан с переменным расходом";
+ENGINEERING_EQUIPMENT_LABELS.airCheckValve = "Клапан обратный воздушный";
+
+export const ENGINEERING_AIR_EQUIPMENT_TYPES = [
+  "airHandlingUnit",
+  "ductFan",
+  "roofFan",
+  "airDamper",
+  "airCheckValve",
+  "fireDamper",
+  "airFilter",
+  "airFlowRegulatorConst",
+  "airFlowRegulatorVar",
+  "silencer",
+  "airHeater",
+  "airCooler",
+  "airHumidifier",
+  "airDehumidifier",
+  "supplyDiffuser",
+  "exhaustGrille",
+] as const satisfies EngineeringEquipmentType[];
+
+export const ENGINEERING_AIR_INLINE_TYPES = [
+  "ductFan",
+  "roofFan",
+  "airDamper",
+  "airCheckValve",
+  "fireDamper",
+  "airFilter",
+  "airFlowRegulatorConst",
+  "airFlowRegulatorVar",
+  "silencer",
+  "airHeater",
+  "airCooler",
+  "airHumidifier",
+  "airDehumidifier",
+] as const satisfies EngineeringEquipmentType[];
+
+const ENGINEERING_AIR_PORT_MEDIA = new Set<EngineeringMedium>(["airSupply", "airExhaust"]);
 
 export type EquipmentVariant = { key: string; label: string };
 
@@ -108,6 +162,8 @@ export const ENGINEERING_MEDIUM_LABELS: Record<EngineeringMedium, string> = {
   drain: "Дренаж",
   electric: "Электропитание",
   signal: "Сигнал",
+  airSupply: "Приток",
+  airExhaust: "Вытяжка",
 };
 
 export const ENGINEERING_MEDIUM_STYLES: Record<
@@ -121,7 +177,213 @@ export const ENGINEERING_MEDIUM_STYLES: Record<
   drain: { stroke: "#8f98a3", outline: "rgba(143,152,163,0.14)", dashArray: "9 6", width: 2.8 },
   electric: { stroke: "#9a67ea", outline: "rgba(154,103,234,0.14)", dashArray: "4 5", width: 2.1 },
   signal: { stroke: "#10a37f", outline: "rgba(16,163,127,0.14)", dashArray: "4 5", width: 2.1 },
+  airSupply: { stroke: "#0f8f7f", outline: "rgba(15,143,127,0.14)", width: 3.1 },
+  airExhaust: { stroke: "#5f6b7a", outline: "rgba(95,107,122,0.14)", dashArray: "8 5", width: 3.0 },
 };
+
+export function isEngineeringAirMedium(
+  medium: EngineeringMedium
+): medium is Extract<EngineeringMedium, "airSupply" | "airExhaust"> {
+  return medium === "airSupply" || medium === "airExhaust";
+}
+
+export function readEngineeringAirflowM3H(parameters: EngineeringEquipmentParameters): number | null {
+  const airflow = parameters.airflowM3H;
+  if (typeof airflow === "number" && Number.isFinite(airflow)) {
+    return Math.max(0, airflow);
+  }
+  const flowRate = parameters.flowRateM3H;
+  if (typeof flowRate === "number" && Number.isFinite(flowRate)) {
+    return Math.max(0, flowRate);
+  }
+  return null;
+}
+
+function readEngineeringParameterNumber(parameters: EngineeringEquipmentParameters, key: string): number | null {
+  const value = parameters[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function resolveEngineeringAirPipeTemperatureC(
+  medium: Extract<EngineeringMedium, "airSupply" | "airExhaust">,
+  fromEquipment: EngineeringEquipment,
+  toEquipment: EngineeringEquipment
+): number | null {
+  const candidates =
+    medium === "airSupply"
+      ? [
+          readEngineeringParameterNumber(fromEquipment.parameters, "supplyTemperatureC"),
+          readEngineeringParameterNumber(fromEquipment.parameters, "temperatureC"),
+          readEngineeringParameterNumber(toEquipment.parameters, "supplyTemperatureC"),
+          readEngineeringParameterNumber(toEquipment.parameters, "temperatureC"),
+        ]
+      : [
+          readEngineeringParameterNumber(fromEquipment.parameters, "temperatureC"),
+          readEngineeringParameterNumber(toEquipment.parameters, "temperatureC"),
+        ];
+
+  for (const candidate of candidates) {
+    if (candidate != null) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+type EngineeringAirPipeSection =
+  | {
+      shape: "rectangular";
+      widthMm: number;
+      heightMm: number;
+      hydraulicDiameterMm: number;
+    }
+  | {
+      shape: "round";
+      diameterMm: number;
+    };
+
+function readEngineeringAirPipeSection(
+  parameters: EngineeringEquipmentParameters
+): EngineeringAirPipeSection | null {
+  const sectionWidthMm = readEngineeringParameterNumber(parameters, "sectionWidthMm");
+  const sectionHeightMm = readEngineeringParameterNumber(parameters, "sectionHeightMm");
+  if (sectionWidthMm != null && sectionHeightMm != null && sectionWidthMm > 0 && sectionHeightMm > 0) {
+    const hydraulicDiameterMm = Math.round((2 * sectionWidthMm * sectionHeightMm) / (sectionWidthMm + sectionHeightMm));
+    return {
+      shape: "rectangular",
+      widthMm: Math.round(sectionWidthMm),
+      heightMm: Math.round(sectionHeightMm),
+      hydraulicDiameterMm: Math.max(1, hydraulicDiameterMm),
+    };
+  }
+  const diameterMm = readEngineeringParameterNumber(parameters, "diameterMm") ?? readEngineeringParameterNumber(parameters, "neckDiameterMm");
+  if (diameterMm != null && diameterMm > 0) {
+    return {
+      shape: "round",
+      diameterMm: Math.round(diameterMm),
+    };
+  }
+  return null;
+}
+
+function resolveEngineeringAirPipeSectionAreaMm2(section: EngineeringAirPipeSection): number {
+  if (section.shape === "rectangular") {
+    return section.widthMm * section.heightMm;
+  }
+  return (Math.PI * section.diameterMm * section.diameterMm) / 4;
+}
+
+function resolvePreferredEngineeringAirPipeSection(
+  fromSection: EngineeringAirPipeSection | null,
+  toSection: EngineeringAirPipeSection | null
+): EngineeringAirPipeSection | null {
+  if (!fromSection) {
+    return toSection;
+  }
+  if (!toSection) {
+    return fromSection;
+  }
+  const fromAreaMm2 = resolveEngineeringAirPipeSectionAreaMm2(fromSection);
+  const toAreaMm2 = resolveEngineeringAirPipeSectionAreaMm2(toSection);
+  return toAreaMm2 < fromAreaMm2 ? toSection : fromSection;
+}
+
+function buildEngineeringAirPipeSectionMetadata(
+  section: EngineeringAirPipeSection | null,
+  prefix = ""
+): Record<string, unknown> {
+  if (!section) {
+    return {};
+  }
+  const areaMm2 = resolveEngineeringAirPipeSectionAreaMm2(section);
+  const shapeKey = prefix ? `${prefix}SectionShape` : "sectionShape";
+  const areaKey = prefix ? `${prefix}SectionAreaMm2` : "sectionAreaMm2";
+  if (section.shape === "rectangular") {
+    const widthKey = prefix ? `${prefix}SectionWidthMm` : "sectionWidthMm";
+    const heightKey = prefix ? `${prefix}SectionHeightMm` : "sectionHeightMm";
+    const hydraulicKey = prefix ? `${prefix}HydraulicDiameterMm` : "hydraulicDiameterMm";
+    return {
+      [shapeKey]: "rectangular",
+      [widthKey]: section.widthMm,
+      [heightKey]: section.heightMm,
+      [hydraulicKey]: section.hydraulicDiameterMm,
+      [areaKey]: areaMm2,
+    };
+  }
+  const diameterKey = prefix ? `${prefix}SectionDiameterMm` : "sectionDiameterMm";
+  return {
+    [shapeKey]: "round",
+    [diameterKey]: section.diameterMm,
+    [areaKey]: areaMm2,
+  };
+}
+
+function resolveEngineeringAirConnectionFlowRateM3H(
+  fromEquipment: EngineeringEquipment,
+  toEquipment: EngineeringEquipment,
+  fallbackFlowRate: number | null
+): number | null {
+  const fromAirflowM3H = readEngineeringAirflowM3H(fromEquipment.parameters);
+  const toAirflowM3H = readEngineeringAirflowM3H(toEquipment.parameters);
+  const fromPositiveAirflowM3H = fromAirflowM3H != null && fromAirflowM3H > 0 ? fromAirflowM3H : null;
+  const toPositiveAirflowM3H = toAirflowM3H != null && toAirflowM3H > 0 ? toAirflowM3H : null;
+  if (fromPositiveAirflowM3H != null && toPositiveAirflowM3H != null) {
+    return Math.min(fromPositiveAirflowM3H, toPositiveAirflowM3H);
+  }
+  return fromPositiveAirflowM3H ?? toPositiveAirflowM3H ?? fallbackFlowRate;
+}
+
+function resolveEngineeringAirPipeSectionForConnection(
+  fromEquipment: EngineeringEquipment,
+  toEquipment: EngineeringEquipment
+): EngineeringAirPipeSection | null {
+  return resolvePreferredEngineeringAirPipeSection(
+    readEngineeringAirPipeSection(fromEquipment.parameters),
+    readEngineeringAirPipeSection(toEquipment.parameters)
+  );
+}
+
+function resolveEngineeringPipeValuesForConnection(
+  medium: EngineeringMedium,
+  fromEquipment: EngineeringEquipment,
+  toEquipment: EngineeringEquipment
+) {
+  const defaults = defaultPipeValuesForMedium(medium);
+  if (!isEngineeringAirMedium(medium)) {
+    return {
+      ...defaults,
+      metadata: {} as Record<string, unknown>,
+    };
+  }
+  const fromSection = readEngineeringAirPipeSection(fromEquipment.parameters);
+  const toSection = readEngineeringAirPipeSection(toEquipment.parameters);
+  const section = resolvePreferredEngineeringAirPipeSection(fromSection, toSection);
+  const fromSectionAreaMm2 = fromSection ? resolveEngineeringAirPipeSectionAreaMm2(fromSection) : null;
+  const toSectionAreaMm2 = toSection ? resolveEngineeringAirPipeSectionAreaMm2(toSection) : null;
+  return {
+    ...defaults,
+    diameter:
+      section?.shape === "rectangular"
+        ? section.hydraulicDiameterMm
+        : section?.shape === "round"
+          ? section.diameterMm
+          : defaults.diameter,
+    temperature:
+      resolveEngineeringAirPipeTemperatureC(medium, fromEquipment, toEquipment) ??
+      defaults.temperature,
+    flowRate: resolveEngineeringAirConnectionFlowRateM3H(fromEquipment, toEquipment, defaults.flowRate),
+    metadata: {
+      ...buildEngineeringAirPipeSectionMetadata(section),
+      ...buildEngineeringAirPipeSectionMetadata(fromSection, "source"),
+      ...buildEngineeringAirPipeSectionMetadata(toSection, "target"),
+      ...(fromSectionAreaMm2 != null && toSectionAreaMm2 != null && fromSectionAreaMm2 > 0 && toSectionAreaMm2 > 0
+        ? {
+            sectionTransitionRatio: Math.max(fromSectionAreaMm2, toSectionAreaMm2) / Math.min(fromSectionAreaMm2, toSectionAreaMm2),
+          }
+        : null),
+    },
+  };
+}
 
 const EQUIPMENT_PRESETS: Record<EngineeringEquipmentType, EquipmentPreset> = {
   heatExchanger: {
@@ -347,6 +609,196 @@ const EQUIPMENT_PRESETS: Record<EngineeringEquipmentType, EquipmentPreset> = {
     ],
     parameters: { nominalPowerW: 1000, designTemperatureC: 70 },
   },
+  airHandlingUnit: {
+    label: ENGINEERING_EQUIPMENT_LABELS.airHandlingUnit,
+    width: 2.8,
+    height: 1.4,
+    ports: [
+      { id: "exhaust-in", xNorm: -0.5, yNorm: 0.2, direction: "left", medium: "airExhaust" },
+      { id: "supply-out", xNorm: 0.5, yNorm: -0.2, direction: "right", medium: "airSupply" },
+      { id: "power", xNorm: 0, yNorm: -0.5, direction: "top", medium: "electric" },
+    ],
+    parameters: { airflowM3H: 1200, heatRecoveryEfficiency: 0.75, supplyTemperatureC: 18, pressurePa: 600, powerKW: 4 },
+  },
+  ductFan: {
+    label: ENGINEERING_EQUIPMENT_LABELS.ductFan,
+    width: 1.3,
+    height: 1,
+    ports: [
+      { id: "inlet", xNorm: -0.5, yNorm: 0, direction: "left", medium: "airSupply" },
+      { id: "outlet", xNorm: 0.5, yNorm: 0, direction: "right", medium: "airSupply" },
+      { id: "power", xNorm: 0, yNorm: -0.5, direction: "top", medium: "electric" },
+    ],
+    parameters: { airflowM3H: 1200, pressurePa: 450, powerKW: 1.1, airMedium: "airSupply" },
+  },
+  roofFan: {
+    label: ENGINEERING_EQUIPMENT_LABELS.roofFan,
+    width: 1.35,
+    height: 1.1,
+    ports: [
+      { id: "inlet", xNorm: -0.5, yNorm: 0, direction: "left", medium: "airExhaust" },
+      { id: "outlet", xNorm: 0.5, yNorm: 0, direction: "right", medium: "airExhaust" },
+      { id: "power", xNorm: 0, yNorm: -0.5, direction: "top", medium: "electric" },
+    ],
+    parameters: { airflowM3H: 1800, pressurePa: 550, powerKW: 1.5, airMedium: "airExhaust" },
+  },
+  airDamper: {
+    label: ENGINEERING_EQUIPMENT_LABELS.airDamper,
+    width: 1.2,
+    height: 0.8,
+    ports: [
+      { id: "inlet", xNorm: -0.5, yNorm: 0, direction: "left", medium: "airSupply" },
+      { id: "outlet", xNorm: 0.5, yNorm: 0, direction: "right", medium: "airSupply" },
+    ],
+    parameters: { sectionWidthMm: 600, sectionHeightMm: 300, state: "open", pressureDropPa: 20, airMedium: "airSupply" },
+  },
+  airCheckValve: {
+    label: ENGINEERING_EQUIPMENT_LABELS.airCheckValve,
+    width: 1.2,
+    height: 0.8,
+    ports: [
+      { id: "inlet", xNorm: -0.5, yNorm: 0, direction: "left", medium: "airSupply" },
+      { id: "outlet", xNorm: 0.5, yNorm: 0, direction: "right", medium: "airSupply" },
+    ],
+    parameters: { sectionWidthMm: 600, sectionHeightMm: 300, state: "open", pressureDropPa: 25, airMedium: "airSupply" },
+  },
+  fireDamper: {
+    label: ENGINEERING_EQUIPMENT_LABELS.fireDamper,
+    width: 1.2,
+    height: 0.8,
+    ports: [
+      { id: "inlet", xNorm: -0.5, yNorm: 0, direction: "left", medium: "airSupply" },
+      { id: "outlet", xNorm: 0.5, yNorm: 0, direction: "right", medium: "airSupply" },
+    ],
+    parameters: { sectionWidthMm: 600, sectionHeightMm: 300, state: "open", pressureDropPa: 30, airMedium: "airSupply" },
+  },
+  airFilter: {
+    label: ENGINEERING_EQUIPMENT_LABELS.airFilter,
+    width: 1.4,
+    height: 0.9,
+    ports: [
+      { id: "inlet", xNorm: -0.5, yNorm: 0, direction: "left", medium: "airSupply" },
+      { id: "outlet", xNorm: 0.5, yNorm: 0, direction: "right", medium: "airSupply" },
+    ],
+    parameters: {
+      sectionWidthMm: 600,
+      sectionHeightMm: 300,
+      pressureDropPa: 90,
+      contaminationPercent: 0,
+      airMedium: "airSupply",
+    },
+  },
+  airFlowRegulatorConst: {
+    label: ENGINEERING_EQUIPMENT_LABELS.airFlowRegulatorConst,
+    width: 1.35,
+    height: 0.85,
+    ports: [
+      { id: "inlet", xNorm: -0.5, yNorm: 0, direction: "left", medium: "airSupply" },
+      { id: "outlet", xNorm: 0.5, yNorm: 0, direction: "right", medium: "airSupply" },
+    ],
+    parameters: {
+      airflowM3H: 600,
+      sectionWidthMm: 400,
+      sectionHeightMm: 200,
+      pressureDropPa: 50,
+      airMedium: "airSupply",
+    },
+  },
+  airFlowRegulatorVar: {
+    label: ENGINEERING_EQUIPMENT_LABELS.airFlowRegulatorVar,
+    width: 1.35,
+    height: 0.85,
+    ports: [
+      { id: "inlet", xNorm: -0.5, yNorm: 0, direction: "left", medium: "airSupply" },
+      { id: "outlet", xNorm: 0.5, yNorm: 0, direction: "right", medium: "airSupply" },
+    ],
+    parameters: {
+      airflowM3H: 600,
+      sectionWidthMm: 400,
+      sectionHeightMm: 200,
+      pressureDropPa: 45,
+      damperPositionPercent: 100,
+      airMedium: "airSupply",
+    },
+  },
+  silencer: {
+    label: ENGINEERING_EQUIPMENT_LABELS.silencer,
+    width: 1.8,
+    height: 0.8,
+    ports: [
+      { id: "inlet", xNorm: -0.5, yNorm: 0, direction: "left", medium: "airSupply" },
+      { id: "outlet", xNorm: 0.5, yNorm: 0, direction: "right", medium: "airSupply" },
+    ],
+    parameters: { sectionWidthMm: 600, sectionHeightMm: 300, pressureDropPa: 45, airMedium: "airSupply" },
+  },
+  airHeater: {
+    label: ENGINEERING_EQUIPMENT_LABELS.airHeater,
+    width: 1.6,
+    height: 0.9,
+    ports: [
+      { id: "inlet", xNorm: -0.5, yNorm: 0, direction: "left", medium: "airSupply" },
+      { id: "outlet", xNorm: 0.5, yNorm: 0, direction: "right", medium: "airSupply" },
+    ],
+    parameters: { airflowM3H: 1200, powerKW: 18, supplyTemperatureC: 20, pressureDropPa: 80, airMedium: "airSupply" },
+  },
+  airCooler: {
+    label: ENGINEERING_EQUIPMENT_LABELS.airCooler,
+    width: 1.6,
+    height: 0.9,
+    ports: [
+      { id: "inlet", xNorm: -0.5, yNorm: 0, direction: "left", medium: "airSupply" },
+      { id: "outlet", xNorm: 0.5, yNorm: 0, direction: "right", medium: "airSupply" },
+    ],
+    parameters: { airflowM3H: 1200, coolingPowerKW: 12, supplyTemperatureC: 14, pressureDropPa: 75, airMedium: "airSupply" },
+  },
+  airHumidifier: {
+    label: ENGINEERING_EQUIPMENT_LABELS.airHumidifier,
+    width: 1.6,
+    height: 0.9,
+    ports: [
+      { id: "inlet", xNorm: -0.5, yNorm: 0, direction: "left", medium: "airSupply" },
+      { id: "outlet", xNorm: 0.5, yNorm: 0, direction: "right", medium: "airSupply" },
+    ],
+    parameters: {
+      airflowM3H: 1200,
+      humidificationCapacityKgH: 15,
+      powerKW: 3,
+      supplyTemperatureC: 19,
+      pressureDropPa: 65,
+      airMedium: "airSupply",
+    },
+  },
+  airDehumidifier: {
+    label: ENGINEERING_EQUIPMENT_LABELS.airDehumidifier,
+    width: 1.6,
+    height: 0.9,
+    ports: [
+      { id: "inlet", xNorm: -0.5, yNorm: 0, direction: "left", medium: "airSupply" },
+      { id: "outlet", xNorm: 0.5, yNorm: 0, direction: "right", medium: "airSupply" },
+    ],
+    parameters: {
+      airflowM3H: 1200,
+      moistureRemovalKgH: 8,
+      powerKW: 2.5,
+      supplyTemperatureC: 16,
+      pressureDropPa: 70,
+      airMedium: "airSupply",
+    },
+  },
+  supplyDiffuser: {
+    label: ENGINEERING_EQUIPMENT_LABELS.supplyDiffuser,
+    width: 0.8,
+    height: 0.8,
+    ports: [{ id: "supply", xNorm: 0, yNorm: 0.5, direction: "bottom", medium: "airSupply" }],
+    parameters: { airflowM3H: 300, supplyTemperatureC: 18, pressureDropPa: 35 },
+  },
+  exhaustGrille: {
+    label: ENGINEERING_EQUIPMENT_LABELS.exhaustGrille,
+    width: 0.95,
+    height: 0.7,
+    ports: [{ id: "exhaust", xNorm: 0, yNorm: 0.5, direction: "bottom", medium: "airExhaust" }],
+    parameters: { airflowM3H: 300, pressureDropPa: 25 },
+  },
   sensorFlow: {
     label: ENGINEERING_EQUIPMENT_LABELS.sensorFlow,
     width: 0.65,
@@ -381,6 +833,29 @@ export function buildEngineeringPorts(
   }));
 }
 
+function resolveInlineAirMedium(
+  type: EngineeringEquipmentType,
+  parameters: EngineeringEquipmentParameters
+): EngineeringMedium | null {
+  if (!(ENGINEERING_AIR_INLINE_TYPES as readonly EngineeringEquipmentType[]).includes(type)) {
+    return null;
+  }
+  return parameters.airMedium === "airExhaust" ? "airExhaust" : "airSupply";
+}
+
+function applyEquipmentPortMediumRules(equipment: EngineeringEquipment): EngineeringEquipment {
+  const overrideMedium = resolveInlineAirMedium(equipment.type, equipment.parameters);
+  if (!overrideMedium) {
+    return equipment;
+  }
+  return {
+    ...equipment,
+    ports: equipment.ports.map((port) =>
+      ENGINEERING_AIR_PORT_MEDIA.has(port.medium) ? { ...port, medium: overrideMedium } : port
+    ),
+  };
+}
+
 export function normalizeEngineeringRotation(rotation: number | null | undefined): number {
   const numeric = typeof rotation === "number" && Number.isFinite(rotation) ? rotation : 0;
   const normalized = ((Math.round(numeric / 90) * 90) % 360 + 360) % 360;
@@ -400,7 +875,7 @@ export function createEngineeringEquipmentInstance(
   } = {}
 ): EngineeringEquipment {
   const preset = getEngineeringEquipmentPreset(type);
-  return {
+  return applyEquipmentPortMediumRules({
     id: options.id ?? createId("eng-eqp"),
     type,
     name: options.name?.trim() || preset.label,
@@ -413,7 +888,7 @@ export function createEngineeringEquipmentInstance(
     parameters: { ...preset.parameters, ...(options.parameters ?? {}) },
     metadata: { ...(options.metadata ?? {}) },
     levelId: options.levelId ?? null,
-  };
+  });
 }
 
 export function overrideEquipmentPortMedium(
@@ -437,7 +912,7 @@ export function normalizeEngineeringEquipment(
   const providedPorts = Array.isArray(equipment.ports) ? equipment.ports : [];
   const providedPortMap = new Map(providedPorts.map((port) => [port.id, port] as const));
   const extraPorts = providedPorts.filter((port) => !basePorts.some((basePort) => basePort.id === port.id));
-  return {
+  return applyEquipmentPortMediumRules({
     id: equipment.id,
     type: equipment.type,
     name: typeof equipment.name === "string" && equipment.name.trim() ? equipment.name.trim() : preset.label,
@@ -466,7 +941,7 @@ export function normalizeEngineeringEquipment(
     parameters: { ...preset.parameters, ...(equipment.parameters ?? {}) },
     metadata: { ...(equipment.metadata ?? {}) },
     levelId: equipment.levelId ?? null,
-  };
+  });
 }
 
 export function getEngineeringPort(
@@ -576,6 +1051,10 @@ function defaultPipeValuesForMedium(medium: EngineeringMedium) {
       return { diameter: 40, insulation: 13, temperature: 10, flowRate: 4 };
     case "drain":
       return { diameter: 32, insulation: 0, temperature: null, flowRate: 2 };
+    case "airSupply":
+      return { diameter: 250, insulation: 25, temperature: null, flowRate: 1200 };
+    case "airExhaust":
+      return { diameter: 250, insulation: 10, temperature: null, flowRate: 1200 };
     case "electric":
       return { diameter: 10, insulation: 0, temperature: null, flowRate: null };
     case "signal":
@@ -607,7 +1086,7 @@ export function createEngineeringPipeConnection(input: {
   const endDirection = rotateEngineeringDirection(toPort.direction, input.toEquipment.rotation);
   const start = getEngineeringPortWorldPosition(input.fromEquipment, fromPort);
   const end = getEngineeringPortWorldPosition(input.toEquipment, toPort);
-  const defaults = defaultPipeValuesForMedium(medium);
+  const defaults = resolveEngineeringPipeValuesForConnection(medium, input.fromEquipment, input.toEquipment);
   return {
     id: input.id ?? createId("eng-pipe"),
     fromEquipmentId: input.fromEquipment.id,
@@ -620,7 +1099,7 @@ export function createEngineeringPipeConnection(input: {
     insulation: defaults.insulation,
     temperature: defaults.temperature,
     flowRate: defaults.flowRate,
-    metadata: { ...(input.metadata ?? {}) },
+    metadata: { ...(defaults.metadata ?? {}), ...(input.metadata ?? {}) },
     levelId: input.levelId ?? input.fromEquipment.levelId ?? input.toEquipment.levelId ?? null,
   };
 }

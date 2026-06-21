@@ -1,14 +1,15 @@
-import { useEffect, useRef, useState } from "react";
+﻿import { useEffect, useRef, useState } from "react";
 import type { EngineeringEquipmentType } from "../../../entities/engineering/types";
 import type { BuildTool } from "../build.store";
 import { ENGINEERING_EQUIPMENT_LABELS, EQUIPMENT_VARIANT_DEFAULT, EQUIPMENT_VARIANTS } from "../engineering2d/catalog";
 
-type LibTab = "valves" | "equipment" | "sensors";
+type LibTab = "valves" | "equipment" | "air" | "sensors";
 
 const TAB_LABELS: Record<LibTab, string> = {
-  valves: "Арматура",
-  equipment: "Оборудование",
-  sensors: "Датчики",
+  valves: "РђСЂРјР°С‚СѓСЂР°",
+  equipment: "РћР±РѕСЂСѓРґРѕРІР°РЅРёРµ",
+  air: "Р’РѕР·РґСѓС…",
+  sensors: "Р”Р°С‚С‡РёРєРё",
 };
 
 const VALVE_BUTTONS: Array<{ type: EngineeringEquipmentType; avokCode: string }> = [
@@ -30,10 +31,34 @@ const EQUIPMENT_BUTTONS: Array<{ type: EngineeringEquipmentType; avokCode: strin
   { type: "pump", avokCode: "3.6.02" },
   { type: "convector", avokCode: "3.1.04" },
   { type: "expansionTank", avokCode: "3.7.06" },
-  { type: "manifold", avokCode: "—" },
-  { type: "heatMeter", avokCode: "—" },
-  { type: "automationCabinet", avokCode: "—" },
+  { type: "manifold", avokCode: "вЂ”" },
+  { type: "heatMeter", avokCode: "вЂ”" },
+  { type: "automationCabinet", avokCode: "вЂ”" },
 ];
+
+const AIR_BUTTONS: Array<{ type: EngineeringEquipmentType; avokCode: string }> = [
+  { type: "airHandlingUnit", avokCode: "вЂ”" },
+  { type: "ductFan", avokCode: "вЂ”" },
+  { type: "roofFan", avokCode: "вЂ”" },
+  { type: "airFilter", avokCode: "вЂ”" },
+  { type: "airDamper", avokCode: "вЂ”" },
+  { type: "airCheckValve", avokCode: "—" },
+  { type: "fireDamper", avokCode: "вЂ”" },
+  { type: "silencer", avokCode: "вЂ”" },
+  { type: "airHeater", avokCode: "вЂ”" },
+  { type: "airCooler", avokCode: "вЂ”" },
+  { type: "airHumidifier", avokCode: "вЂ”" },
+  { type: "airDehumidifier", avokCode: "вЂ”" },
+  { type: "supplyDiffuser", avokCode: "вЂ”" },
+  { type: "exhaustGrille", avokCode: "вЂ”" },
+];
+
+AIR_BUTTONS.splice(
+  5,
+  0,
+  { type: "airFlowRegulatorConst", avokCode: "вЂ”" },
+  { type: "airFlowRegulatorVar", avokCode: "вЂ”" }
+);
 
 const SENSOR_BUTTONS: Array<{ type: EngineeringEquipmentType; avokCode: string }> = [
   { type: "sensorTemperature", avokCode: "5.1.02" },
@@ -41,6 +66,26 @@ const SENSOR_BUTTONS: Array<{ type: EngineeringEquipmentType; avokCode: string }
   { type: "sensorFlow", avokCode: "5.1.07" },
   { type: "sensorHumidity", avokCode: "5.1.09" },
 ];
+
+const AIR_GOST_REFERENCE: Partial<Record<EngineeringEquipmentType, string>> = {
+  airHandlingUnit: "Р“РћРЎРў 21.205-2016",
+  ductFan: "Р“РћРЎРў 21.205-2016, РїРѕР·. 20",
+  airFilter: "Р“РћРЎРў 21.205-2016, РїРѕР·. 23",
+  airDamper: "Р“РћРЎРў 21.205-2016, РїРѕР·. 24",
+  fireDamper: "Р“РћРЎРў 21.205-2016, РїРѕР·. 15",
+  silencer: "Р“РћРЎРў 21.205-2016, РїРѕР·. 27",
+  airHeater: "Р“РћРЎРў 21.205-2016, РїРѕР·. 2",
+  airCooler: "Р“РћРЎРў 21.205-2016, РїРѕР·. 3",
+  airHumidifier: "Р“РћРЎРў 21.205-2016",
+  airDehumidifier: "Р“РћРЎРў 21.205-2016",
+  supplyDiffuser: "Р“РћРЎРў 21.205-2016, С‚Р°Р±Р». 10, РїРѕР·. 1",
+  exhaustGrille: "Р“РћРЎРў 21.205-2016, С‚Р°Р±Р». 10, РїРѕР·. 2",
+};
+
+AIR_GOST_REFERENCE.airFlowRegulatorConst = "Р“РћРЎРў 21.205-2016, РїРѕР·. 17";
+AIR_GOST_REFERENCE.airFlowRegulatorVar = "Р“РћРЎРў 21.205-2016, РїРѕР·. 18";
+AIR_GOST_REFERENCE.roofFan = "Р“РћРЎРў 21.205-2016";
+AIR_GOST_REFERENCE.airCheckValve = "ГОСТ 21.205-2016";
 
 interface EngineeringLibraryPanelProps {
   currentTool: BuildTool;
@@ -53,6 +98,18 @@ interface EngineeringLibraryPanelProps {
 
 function SectionLabel({ children }: { children: string }) {
   return <p className="ui-engineering-lib__label">{children}</p>;
+}
+
+function buildEquipmentTitle(type: EngineeringEquipmentType, code: string): string {
+  const label = ENGINEERING_EQUIPMENT_LABELS[type];
+  const gostRef = AIR_GOST_REFERENCE[type];
+  if (gostRef) {
+    return `${label} В· ${gostRef}`;
+  }
+  if (code === "вЂ”" || code === "РІР‚вЂ”") {
+    return label;
+  }
+  return `${label} В· ${code}`;
 }
 
 function QuickActionButton({
@@ -168,7 +225,7 @@ function EquipmentListItem({
         {hasVariants ? (
           <button
             type="button"
-            aria-label={`Вариант: ${variantLabel ?? "не выбран"}`}
+            aria-label={`Р’Р°СЂРёР°РЅС‚: ${variantLabel ?? "РЅРµ РІС‹Р±СЂР°РЅ"}`}
             aria-expanded={dropdownOpen}
             onClick={(event) => {
               event.stopPropagation();
@@ -176,8 +233,8 @@ function EquipmentListItem({
             }}
             className={`ui-engineering-lib__variant-trigger ${active ? "ui-engineering-lib__variant-trigger--active" : ""}`}
           >
-            <span className="max-w-[5.5rem] truncate">{variantLabel ?? "Вариант"}</span>
-            <span aria-hidden="true">▾</span>
+            <span className="max-w-[5.5rem] truncate">{variantLabel ?? "Р’Р°СЂРёР°РЅС‚"}</span>
+            <span aria-hidden="true">в–ѕ</span>
           </button>
         ) : null}
       </div>
@@ -222,29 +279,35 @@ export function EngineeringLibraryPanel({
     currentTool === "engineeringEquipment" && selectedType === type;
 
   const currentButtons =
-    activeTab === "valves" ? VALVE_BUTTONS : activeTab === "sensors" ? SENSOR_BUTTONS : EQUIPMENT_BUTTONS;
+    activeTab === "valves"
+      ? VALVE_BUTTONS
+      : activeTab === "air"
+        ? AIR_BUTTONS
+        : activeTab === "sensors"
+          ? SENSOR_BUTTONS
+          : EQUIPMENT_BUTTONS;
 
   return (
     <div className="ui-engineering-lib">
       <section className="ui-engineering-lib__section">
-        <SectionLabel>Подключение</SectionLabel>
+        <SectionLabel>РџРѕРґРєР»СЋС‡РµРЅРёРµ</SectionLabel>
         <div className="ui-engineering-lib__actions">
           <QuickActionButton
-            label="Соединить трубой"
-            title="Инженерный трубопровод"
+            label="РЎРѕРµРґРёРЅРёС‚СЊ С‚СЂСѓР±РѕР№"
+            title="РРЅР¶РµРЅРµСЂРЅС‹Р№ С‚СЂСѓР±РѕРїСЂРѕРІРѕРґ"
             active={currentTool === "engineeringPipe"}
             onClick={onPickPipe}
           />
           <QuickActionButton
-            label="ИТП парал. ГВС + зав. отопление"
-            title="ИТП парал. ГВС + зав. отопление"
+            label="РРўРџ РїР°СЂР°Р». Р“Р’РЎ + Р·Р°РІ. РѕС‚РѕРїР»РµРЅРёРµ"
+            title="РРўРџ РїР°СЂР°Р». Р“Р’РЎ + Р·Р°РІ. РѕС‚РѕРїР»РµРЅРёРµ"
             onClick={onAddItpParallelDhw}
           />
         </div>
       </section>
 
       <section className="ui-engineering-lib__section">
-        <div className="ui-segmented-control flex w-full" role="tablist" aria-label="Категория оборудования">
+        <div className="ui-segmented-control flex w-full" role="tablist" aria-label="РљР°С‚РµРіРѕСЂРёСЏ РѕР±РѕСЂСѓРґРѕРІР°РЅРёСЏ">
           {(Object.entries(TAB_LABELS) as [LibTab, string][]).map(([id, label]) => (
             <button
               key={id}
@@ -269,14 +332,14 @@ export function EngineeringLibraryPanel({
             const variant = getVariant(button.type);
 
             return (
-              <EquipmentListItem
-                key={button.type}
-                equipmentType={button.type}
-                label={ENGINEERING_EQUIPMENT_LABELS[button.type]}
-                title={ENGINEERING_EQUIPMENT_LABELS[button.type]}
-                active={isEquipmentActive(button.type)}
-                hasVariants={hasVariants}
-                currentVariant={variant}
+                <EquipmentListItem
+                  key={button.type}
+                  equipmentType={button.type}
+                  label={ENGINEERING_EQUIPMENT_LABELS[button.type]}
+                  title={buildEquipmentTitle(button.type, button.avokCode)}
+                  active={isEquipmentActive(button.type)}
+                  hasVariants={hasVariants}
+                  currentVariant={variant}
                 onPickVariant={(nextVariant) => handlePickVariant(button.type, nextVariant)}
                 onClick={() => onPickEquipment(button.type, variant)}
               />
@@ -289,3 +352,4 @@ export function EngineeringLibraryPanel({
 }
 
 export default EngineeringLibraryPanel;
+

@@ -70,6 +70,8 @@ export const MEDIUM_PALETTE: Record<
   drain: { ink: "#5a4631", tint: "#e8ddcb", label: "Канализация/дренаж", short: "К", dash: DRAWING_DASH.drainage },
   electric: { ink: "#7c3aed", tint: "#ece1fb", label: "Электропитание", short: "Э" },
   signal: { ink: "#0f766e", tint: "#d4eee9", label: "Сигнал/КИП", short: "С", dash: DRAWING_DASH.signal },
+  airSupply: { ink: "#0f8f7f", tint: "#d6f1ec", label: "Приточный воздух", short: "П1" },
+  airExhaust: { ink: "#5f6b7a", tint: "#e4e8ed", label: "Вытяжной воздух", short: "В1", dash: DRAWING_DASH.hidden },
 };
 
 export const NETWORK_PIPE_PALETTE: Record<PipeSystemType, EngineeringMedium> = {
