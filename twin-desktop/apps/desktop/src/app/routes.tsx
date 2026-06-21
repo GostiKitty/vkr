@@ -93,6 +93,13 @@ export const routes: AppRoute[] = [
     title: "Настройки",
     component: lazyRoute(() => import("../features/settings/SettingsPage")),
   },
+  {
+    id: "studio",
+    path: "/studio",
+    title: "Студия",
+    component: lazyRoute(() => import("../features/twin/TwinPage")),
+    hiddenInNav: true,
+  },
 ];
 
 export function resolveRoute(pathname: string): AppRoute {

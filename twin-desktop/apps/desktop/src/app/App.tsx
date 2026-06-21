@@ -4,6 +4,7 @@ import { resolveRoute } from "./routes";
 import TopBar from "./TopBar";
 import DebugConsole from "../features/debug/DebugConsole";
 import FormulaDrawer from "../features/formulas/FormulaDrawer";
+import EngineConfigBanner from "./EngineConfigBanner";
 import ReportExportListener from "../features/reports/exports/ReportExportListener";
 import ProjectStateBridge from "./ProjectStateBridge";
 
@@ -27,6 +28,7 @@ export default function App() {
       <SourceBadgeIconFilters />
       <ProjectStateBridge />
       <TopBar currentPath={pathname} />
+      <EngineConfigBanner />
       <main
         className={
           isBuildRoute
