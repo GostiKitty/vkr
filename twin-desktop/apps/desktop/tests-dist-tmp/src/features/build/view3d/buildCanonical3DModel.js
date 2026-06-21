@@ -1,0 +1,608 @@
+import { polygonContainsPoint, validateRoomPolygon } from "../../../entities/geometry/geom";
+import { buildResolvedGeometryRenderModel, } from "../../../core/geometry/bimPipeline";
+export const DEBUG_CANONICAL_3D_ALIGNMENT = false;
+function logCanonicalAlignment(message, payload) {
+    if (DEBUG_CANONICAL_3D_ALIGNMENT) {
+        console.info("[canonical-3d-alignment]", message, payload);
+    }
+}
+function clonePolygon(points) {
+    return points.map((point) => ({ ...point }));
+}
+function computePolygonBounds(points) {
+    let minX = Number.POSITIVE_INFINITY;
+    let minY = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let maxY = Number.NEGATIVE_INFINITY;
+    points.forEach((point) => {
+        minX = Math.min(minX, point.x);
+        minY = Math.min(minY, point.y);
+        maxX = Math.max(maxX, point.x);
+        maxY = Math.max(maxY, point.y);
+    });
+    return { minX, minY, maxX, maxY };
+}
+function computePolygonCenter(points) {
+    const bounds = computePolygonBounds(points);
+    return {
+        x: (bounds.minX + bounds.maxX) * 0.5,
+        y: (bounds.minY + bounds.maxY) * 0.5,
+    };
+}
+function computePolygonArea(points) {
+    if (points.length < 3) {
+        return 0;
+    }
+    let area = 0;
+    for (let index = 0; index < points.length; index += 1) {
+        const current = points[index];
+        const next = points[(index + 1) % points.length];
+        area += current.x * next.y - next.x * current.y;
+    }
+    return Math.abs(area * 0.5);
+}
+function computePolygonBoundingIntersectionArea(a, b) {
+    const boundsA = computePolygonBounds(a);
+    const boundsB = computePolygonBounds(b);
+    const overlapX = Math.max(0, Math.min(boundsA.maxX, boundsB.maxX) - Math.max(boundsA.minX, boundsB.minX));
+    const overlapY = Math.max(0, Math.min(boundsA.maxY, boundsB.maxY) - Math.max(boundsA.minY, boundsB.minY));
+    return overlapX * overlapY;
+}
+function meanFiniteTemperature(values) {
+    const filtered = values.filter((value) => Number.isFinite(value));
+    if (!filtered.length) {
+        return null;
+    }
+    return filtered.reduce((sum, value) => sum + value, 0) / filtered.length;
+}
+function planToCanonicalScene(point, elevation_m) {
+    return {
+        x: point.x,
+        y: elevation_m,
+        z: point.y,
+    };
+}
+function buildCanonicalOpeningModel(wall, opening, levelElevation) {
+    const dx = wall.b.x - wall.a.x;
+    const dz = wall.b.y - wall.a.y;
+    const wallLength = Math.hypot(dx, dz);
+    if (wallLength < 1e-6) {
+        return null;
+    }
+    const direction = { x: dx / wallLength, y: dz / wallLength };
+    const centerOffset = opening.startOffsetM + opening.widthM * 0.5;
+    const point = {
+        x: wall.a.x + direction.x * centerOffset,
+        y: wall.a.y + direction.y * centerOffset,
+    };
+    const sill = opening.type === "window" ? opening.sillM ?? 0.9 : 0;
+    const center = planToCanonicalScene(point, levelElevation + sill + opening.heightM * 0.5);
+    const wallCenter = planToCanonicalScene(point, levelElevation + opening.heightM * 0.5);
+    return {
+        id: opening.id,
+        type: opening.type,
+        levelId: wall.levelId,
+        center,
+        wallCenter,
+        width_m: opening.widthM,
+        height_m: opening.heightM,
+        depth_m: Math.max(wall.thickness_m * (opening.type === "window" ? 0.4 : 0.55), opening.type === "window" ? 0.06 : 0.08),
+        rotationY_rad: -Math.atan2(dz, dx),
+        wallId: wall.id,
+    };
+}
+export function getCanonicalRoomTemperatureMap(thermalField, activeLevelId, roomIds) {
+    const roomTemperatures = new Map();
+    const warnings = [];
+    if (!thermalField) {
+        return { roomTemperatures, warnings };
+    }
+    const registerRoomTemperature = (roomId, levelId, temperature_C, source) => {
+        if (!roomId) {
+            warnings.push("Температурное значение пропущено: нет roomId.");
+            return;
+        }
+        if (activeLevelId && levelId !== activeLevelId) {
+            warnings.push(`Температура помещения ${roomId} пропущена: другой уровень.`);
+            return;
+        }
+        if (!Number.isFinite(temperature_C)) {
+            warnings.push(`Температура помещения ${roomId} пропущена: некорректное значение.`);
+            return;
+        }
+        if (!roomIds.has(roomId)) {
+            if (import.meta.env?.DEV) {
+                console.warn("[canonical-3d] Температура поля не сопоставлена с контуром 3D: roomId отсутствует в acceptedRoomGeometries / модели этажа.", { roomId, levelId });
+            }
+            warnings.push(`Температура помещения ${roomId} пропущена: помещение не входит в список комнат активного уровня для визуализации.`);
+            return;
+        }
+        if (roomTemperatures.has(roomId) && source === "thermalField.roomMap") {
+            return;
+        }
+        roomTemperatures.set(roomId, {
+            levelId,
+            temperature_C,
+            source,
+        });
+    };
+    thermalField.rooms.forEach((room) => {
+        registerRoomTemperature(room.roomId, room.levelId, room.baseTemperatureC, "thermalField.rooms");
+    });
+    thermalField.roomMap.forEach((room, roomId) => {
+        registerRoomTemperature(roomId, room.levelId, room.baseTemperatureC, "thermalField.roomMap");
+    });
+    return {
+        roomTemperatures,
+        warnings: [...new Set(warnings)],
+    };
+}
+export function summarizeCanonicalRoomTemperatures(surfaces, warnings) {
+    const colored = surfaces.filter((room) => Number.isFinite(room.temperature_C));
+    if (!colored.length) {
+        return {
+            min_C: 0,
+            max_C: 0,
+            average_C: 0,
+            coloredRoomCount: 0,
+            warnings: [...new Set([...warnings, "Температурное поле: нет данных по помещениям."])],
+        };
+    }
+    const values = colored.map((room) => room.temperature_C);
+    return {
+        min_C: Math.min(...values),
+        max_C: Math.max(...values),
+        average_C: values.reduce((sum, value) => sum + value, 0) / values.length,
+        coloredRoomCount: colored.length,
+        warnings: [...new Set(warnings)],
+    };
+}
+function isPolygonInsideShellBounds(points, shellBounds) {
+    if (!shellBounds || points.length < 3) {
+        return true;
+    }
+    const roomBounds = computePolygonBounds(points);
+    const shellArea = Math.max(shellBounds.size.x * shellBounds.size.y, 1);
+    const roomArea = computePolygonArea(points);
+    const marginX = Math.max(0.35, shellBounds.size.x * 0.05);
+    const marginY = Math.max(0.35, shellBounds.size.y * 0.05);
+    const extendsOutside = roomBounds.minX < shellBounds.minX - marginX ||
+        roomBounds.maxX > shellBounds.maxX + marginX ||
+        roomBounds.minY < shellBounds.minY - marginY ||
+        roomBounds.maxY > shellBounds.maxY + marginY;
+    if (extendsOutside) {
+        return false;
+    }
+    return roomArea <= shellArea * 1.08;
+}
+function polygonsRoughlyAlign(reference, candidate) {
+    if (reference.length < 3 || candidate.length < 3) {
+        return false;
+    }
+    const referenceArea = Math.max(computePolygonArea(reference), 1e-6);
+    const candidateArea = Math.max(computePolygonArea(candidate), 1e-6);
+    const areaRatio = Math.max(referenceArea, candidateArea) / Math.min(referenceArea, candidateArea);
+    if (areaRatio > 1.7) {
+        return false;
+    }
+    const referenceCenter = computePolygonCenter(reference);
+    const candidateCenter = computePolygonCenter(candidate);
+    const referenceBounds = computePolygonBounds(reference);
+    const diag = Math.hypot(referenceBounds.maxX - referenceBounds.minX, referenceBounds.maxY - referenceBounds.minY);
+    if (Math.hypot(referenceCenter.x - candidateCenter.x, referenceCenter.y - candidateCenter.y) > Math.max(0.8, diag * 0.42)) {
+        return false;
+    }
+    const overlap = computePolygonBoundingIntersectionArea(reference, candidate);
+    return overlap >= Math.min(referenceArea, candidateArea) * 0.28;
+}
+function collectLevelShellBounds(renderGeometry, levelId) {
+    const wallPoints = renderGeometry.walls
+        .filter((entry) => !levelId || entry.wall.levelId === levelId)
+        .flatMap((entry) => [entry.wall.a, entry.wall.b]);
+    const roofPoints = renderGeometry.roofs
+        .filter((roof) => !levelId || roof.levelId === levelId)
+        .flatMap((roof) => roof.boundary);
+    const slabPoints = renderGeometry.floorSlabs
+        .filter((slab) => !levelId || slab.levelId === levelId)
+        .flatMap((slab) => slab.boundary);
+    const allPoints = [...wallPoints, ...roofPoints, ...slabPoints];
+    if (!allPoints.length) {
+        return null;
+    }
+    const bounds = computePolygonBounds(allPoints);
+    return {
+        minX: bounds.minX,
+        minY: bounds.minY,
+        maxX: bounds.maxX,
+        maxY: bounds.maxY,
+        center: {
+            x: (bounds.minX + bounds.maxX) * 0.5,
+            y: (bounds.minY + bounds.maxY) * 0.5,
+        },
+        size: {
+            x: bounds.maxX - bounds.minX,
+            y: bounds.maxY - bounds.minY,
+        },
+    };
+}
+function collectLevelShellBoundary(renderGeometry, model, levelId) {
+    const candidates = [
+        ...renderGeometry.floorSlabs.filter((slab) => !levelId || slab.levelId === levelId).map((slab) => slab.boundary),
+        ...renderGeometry.roofs.filter((roof) => !levelId || roof.levelId === levelId).map((roof) => roof.boundary),
+        ...(model.floorSlabs ?? []).filter((slab) => !levelId || slab.levelId === levelId).map((slab) => slab.boundary),
+        ...(model.roofs ?? []).filter((roof) => !levelId || roof.levelId === levelId).map((roof) => roof.boundary),
+    ]
+        .filter((boundary) => boundary.length >= 3)
+        .sort((left, right) => computePolygonArea(right) - computePolygonArea(left));
+    return candidates.length ? clonePolygon(candidates[0]) : null;
+}
+function boundaryFitsShell(boundary, shellBounds, shellBoundary) {
+    if (!isPolygonInsideShellBounds(boundary, shellBounds)) {
+        return false;
+    }
+    if (!shellBoundary?.length) {
+        return true;
+    }
+    const center = computePolygonCenter(boundary);
+    return polygonContainsPoint(center, shellBoundary) || polygonsRoughlyAlign(shellBoundary, boundary);
+}
+/**
+ * Допускает помещения, у которых строгая проверка оболочки не прошла из‑за погрешностей контура,
+ * но центр и площадь явно лежат внутри габаритов уровня (типичный случай демо‑дома с контурами по осям стен).
+ */
+function boundaryFitsShellCentroidFallback(boundary, shellBounds, shellBoundary) {
+    if (!shellBounds || boundary.length < 3) {
+        return false;
+    }
+    const center = computePolygonCenter(boundary);
+    const { minX, maxX, minY, maxY } = computePolygonBounds(boundary);
+    const shellArea = Math.max(shellBounds.size.x * shellBounds.size.y, 1e-6);
+    const roomArea = computePolygonArea(boundary);
+    const centroidInsideAxes = center.x >= shellBounds.minX - 1e-3 &&
+        center.x <= shellBounds.maxX + 1e-3 &&
+        center.y >= shellBounds.minY - 1e-3 &&
+        center.y <= shellBounds.maxY + 1e-3;
+    const bboxMostlyInside = minX >= shellBounds.minX - 0.08 &&
+        maxX <= shellBounds.maxX + 0.08 &&
+        minY >= shellBounds.minY - 0.08 &&
+        maxY <= shellBounds.maxY + 0.08;
+    if (!centroidInsideAxes || !bboxMostlyInside || roomArea > shellArea * 1.12) {
+        return false;
+    }
+    if (!shellBoundary?.length) {
+        return true;
+    }
+    return polygonContainsPoint(center, shellBoundary) || polygonsRoughlyAlign(shellBoundary, boundary);
+}
+function cloneBoundaryIfValid(points) {
+    if (!points || points.length < 3) {
+        return null;
+    }
+    return clonePolygon(points);
+}
+export function buildCanonical3DModel(model, activeLevelId, options = {}) {
+    const renderGeometry = buildResolvedGeometryRenderModel(model, activeLevelId);
+    const levelMap = new Map(model.levels.map((level) => [level.id, level]));
+    const filterLevel = (items) => activeLevelId ? items.filter((item) => item.levelId === activeLevelId) : items;
+    const warnings = [];
+    const levelShellBounds = collectLevelShellBounds(renderGeometry, activeLevelId);
+    const levelShellBoundary = collectLevelShellBoundary(renderGeometry, model, activeLevelId);
+    const canonicalRoomVolumes = renderGeometry.roomVolumes;
+    const roomsById = new Map(model.rooms.map((room) => [room.id, room]));
+    const acceptedRoomGeometries = new Map();
+    canonicalRoomVolumes.forEach((roomVolume) => {
+        const levelElevation = levelMap.get(roomVolume.levelId)?.elevation_m ?? 0;
+        const renderBoundary = cloneBoundaryIfValid(roomVolume.polygon);
+        if (renderBoundary && boundaryFitsShell(renderBoundary, levelShellBounds, levelShellBoundary)) {
+            acceptedRoomGeometries.set(roomVolume.roomId, {
+                boundary: renderBoundary,
+                levelId: roomVolume.levelId,
+                elevation_m: levelElevation,
+                geometrySource: "renderGeometry",
+            });
+            return;
+        }
+        if (renderBoundary && boundaryFitsShellCentroidFallback(renderBoundary, levelShellBounds, levelShellBoundary)) {
+            acceptedRoomGeometries.set(roomVolume.roomId, {
+                boundary: renderBoundary,
+                levelId: roomVolume.levelId,
+                elevation_m: levelElevation,
+                geometrySource: "renderGeometry",
+            });
+            warnings.push(`Помещение ${roomVolume.roomId}: контур пола принят по ослабленной проверке (центр внутри габаритов уровня). Уточните полигон, если геометрия редактировалась вручную.`);
+            return;
+        }
+        if (renderBoundary) {
+            const levelElevation = levelMap.get(roomVolume.levelId)?.elevation_m ?? 0;
+            acceptedRoomGeometries.set(roomVolume.roomId, {
+                boundary: renderBoundary,
+                levelId: roomVolume.levelId,
+                elevation_m: levelElevation,
+                geometrySource: "renderGeometry",
+            });
+            if (!roomsById.has(roomVolume.roomId)) {
+                warnings.push(`Помещение ${roomVolume.roomId}: 3D-пол построен по автоконтуру стен (без привязки к оболочке уровня).`);
+            }
+        }
+    });
+    model.rooms.forEach((room) => {
+        if (activeLevelId && room.levelId !== activeLevelId) {
+            return;
+        }
+        if (acceptedRoomGeometries.has(room.id)) {
+            return;
+        }
+        const normalized = validateRoomPolygon(room.polygon).normalized ?? room.polygon;
+        const fromModel = cloneBoundaryIfValid(normalized);
+        if (!fromModel) {
+            warnings.push(`Помещение ${room.id}: некорректный полигон в модели, 3D-пол пропущен.`);
+            return;
+        }
+        const levelElevation = levelMap.get(room.levelId)?.elevation_m ?? 0;
+        if (boundaryFitsShell(fromModel, levelShellBounds, levelShellBoundary)) {
+            acceptedRoomGeometries.set(room.id, {
+                boundary: fromModel,
+                levelId: room.levelId,
+                elevation_m: levelElevation,
+                geometrySource: "modelRoom",
+            });
+            return;
+        }
+        if (boundaryFitsShellCentroidFallback(fromModel, levelShellBounds, levelShellBoundary)) {
+            acceptedRoomGeometries.set(room.id, {
+                boundary: fromModel,
+                levelId: room.levelId,
+                elevation_m: levelElevation,
+                geometrySource: "modelRoom",
+            });
+            warnings.push(`Помещение ${room.id}: для 3D использован полигон из модели с ослабленной проверкой габаритов уровня.`);
+        }
+    });
+    model.rooms.forEach((room) => {
+        if (activeLevelId && room.levelId !== activeLevelId) {
+            return;
+        }
+        if (acceptedRoomGeometries.has(room.id)) {
+            return;
+        }
+        const normalizedForShell = validateRoomPolygon(room.polygon).normalized ?? room.polygon;
+        const boundary = cloneBoundaryIfValid(normalizedForShell);
+        if (!boundary) {
+            warnings.push(`Помещение ${room.id}: некорректный полигон в модели, 3D-пол пропущен.`);
+            return;
+        }
+        const levelElevation = levelMap.get(room.levelId)?.elevation_m ?? 0;
+        acceptedRoomGeometries.set(room.id, {
+            boundary,
+            levelId: room.levelId,
+            elevation_m: levelElevation,
+            geometrySource: "modelRoom",
+        });
+        warnings.push(`Помещение ${room.id}: 3D-пол построен по контуру плана (без привязки к оболочке уровня).`);
+    });
+    const roomsOnActiveLevelIds = new Set(model.rooms.filter((room) => !activeLevelId || room.levelId === activeLevelId).map((room) => room.id));
+    const roomIds = new Set([...acceptedRoomGeometries.keys(), ...roomsOnActiveLevelIds]);
+    const temperatureMap = getCanonicalRoomTemperatureMap(options.thermalField, activeLevelId, roomIds);
+    const rooms = [...acceptedRoomGeometries.entries()].map(([roomId, geometry]) => {
+        const boundary = clonePolygon(geometry.boundary);
+        const center = computePolygonCenter(boundary);
+        const mapped = temperatureMap.roomTemperatures.get(roomId)?.temperature_C ?? null;
+        let temperature_C = Number.isFinite(mapped) ? mapped : null;
+        let temperatureFillReason;
+        if (temperature_C === null && options.thermalField) {
+            const levelMean = meanFiniteTemperature(options.thermalField.rooms.filter((entry) => entry.levelId === geometry.levelId).map((entry) => entry.baseTemperatureC));
+            const globalMean = meanFiniteTemperature(options.thermalField.rooms.map((entry) => entry.baseTemperatureC));
+            const filled = levelMean ?? globalMean ?? options.thermalField.outdoorTemperatureC;
+            temperature_C = Number.isFinite(filled) ? filled : 20;
+            temperatureFillReason =
+                levelMean !== null
+                    ? "Усреднено по этажу: нет значения в карте поля для этого помещения."
+                    : "Запасное значение по зданию или наружному воздуху.";
+        }
+        logCanonicalAlignment("room-floor", {
+            roomId,
+            levelId: geometry.levelId,
+            roomFloorCenter: center,
+            roomFloorBounds: computePolygonBounds(boundary),
+            shellBounds: levelShellBounds,
+            temperature_C: temperatureMap.roomTemperatures.get(roomId)?.temperature_C ?? temperature_C,
+        });
+        return {
+            id: roomId,
+            levelId: geometry.levelId,
+            boundary,
+            elevation_m: geometry.elevation_m,
+            temperature_C,
+            temperatureFillReason,
+            geometrySource: geometry.geometrySource,
+        };
+    });
+    const temperatureSurfaces = rooms
+        .filter((room) => Number.isFinite(room.temperature_C))
+        .map((room) => ({
+        id: `room:${room.id}`,
+        sourceType: "room",
+        roomId: room.id,
+        levelId: room.levelId,
+        boundary: clonePolygon(room.boundary),
+        elevation_m: room.elevation_m,
+        temperature_C: room.temperature_C,
+        geometrySource: room.geometrySource,
+        warning: room.temperatureFillReason,
+    }));
+    if (!temperatureSurfaces.length && options.thermalField) {
+        const levelsToCover = activeLevelId ? [activeLevelId] : [...new Set(model.levels.map((level) => level.id))];
+        let addedShell = false;
+        for (const levelId of levelsToCover) {
+            const boundary = collectLevelShellBoundary(renderGeometry, model, levelId);
+            if (!boundary?.length) {
+                continue;
+            }
+            const levelRooms = options.thermalField.rooms.filter((room) => room.levelId === levelId && Number.isFinite(room.baseTemperatureC));
+            if (!levelRooms.length) {
+                continue;
+            }
+            const averageTemperature = levelRooms.reduce((sum, room) => sum + room.baseTemperatureC, 0) / levelRooms.length;
+            temperatureSurfaces.push({
+                id: `shell:${levelId}`,
+                sourceType: "shell-fallback",
+                roomId: null,
+                levelId,
+                boundary: clonePolygon(boundary),
+                elevation_m: levelMap.get(levelId)?.elevation_m ?? 0,
+                temperature_C: averageTemperature,
+                geometrySource: "shell",
+                warning: "Температурное поле построено по укрупненной оболочке этажа.",
+            });
+            addedShell = true;
+        }
+        if (addedShell) {
+            warnings.push(activeLevelId
+                ? "Температурное поле построено по укрупненной оболочке этажа."
+                : "Температурное поле построено по укрупнённой оболочке этажей (режим «все уровни»).");
+        }
+    }
+    const walls = renderGeometry.walls
+        .filter((entry) => !activeLevelId || entry.wall.levelId === activeLevelId)
+        .map(({ wall }) => {
+        const boundary = options.thermalField?.boundaryByWallId.get(wall.id);
+        const resolveAirC = (roomId) => {
+            if (roomId == null) {
+                return null;
+            }
+            const fromMap = temperatureMap.roomTemperatures.get(roomId)?.temperature_C;
+            if (Number.isFinite(fromMap)) {
+                return fromMap;
+            }
+            const fromField = options.thermalField?.roomMap.get(roomId)?.baseTemperatureC;
+            return Number.isFinite(fromField) ? fromField : null;
+        };
+        const positiveRoomTemperature = resolveAirC(boundary?.positiveRoomId);
+        const negativeRoomTemperature = resolveAirC(boundary?.negativeRoomId);
+        const adjacentRoomId = boundary?.positiveRoomId && roomIds.has(boundary.positiveRoomId)
+            ? boundary.positiveRoomId
+            : boundary?.negativeRoomId && roomIds.has(boundary.negativeRoomId)
+                ? boundary.negativeRoomId
+                : boundary?.positiveRoomId ?? boundary?.negativeRoomId ?? null;
+        const adjacentRoomTemperature = resolveAirC(adjacentRoomId);
+        const wallTemperature = (() => {
+            if (boundary?.kind === "internal" && positiveRoomTemperature != null && negativeRoomTemperature != null) {
+                return (positiveRoomTemperature + negativeRoomTemperature) / 2;
+            }
+            if (positiveRoomTemperature != null) {
+                return positiveRoomTemperature;
+            }
+            if (negativeRoomTemperature != null) {
+                return negativeRoomTemperature;
+            }
+            return adjacentRoomTemperature;
+        })();
+        return {
+            id: wall.id,
+            levelId: wall.levelId,
+            start: { ...wall.a },
+            end: { ...wall.b },
+            elevation_m: levelMap.get(wall.levelId)?.elevation_m ?? 0,
+            height_m: wall.height_m,
+            thickness_m: wall.thickness_m,
+            temperature_C: Number.isFinite(wallTemperature) ? wallTemperature : null,
+            temperatureSource: boundary && Number.isFinite(wallTemperature)
+                ? "thermalField.boundaries"
+                : adjacentRoomTemperature !== null
+                    ? "room-temperature"
+                    : null,
+            adjacentRoomId,
+        };
+    });
+    const openings = renderGeometry.walls
+        .filter((entry) => !activeLevelId || entry.wall.levelId === activeLevelId)
+        .flatMap(({ wall, openings: wallOpenings }) => {
+        const levelElevation = levelMap.get(wall.levelId)?.elevation_m ?? 0;
+        return wallOpenings
+            .map((opening) => buildCanonicalOpeningModel(wall, opening, levelElevation))
+            .filter((opening) => Boolean(opening));
+    });
+    const roofs = filterLevel(renderGeometry.roofs).map((roof) => ({
+        id: roof.id,
+        levelId: roof.levelId,
+        boundary: clonePolygon(roof.boundary),
+        elevation_m: roof.elevationBase_m,
+        thickness_m: roof.thickness_m,
+        kind: (roof.kind ?? "flat"),
+        slope: roof.slope ? { ...roof.slope } : undefined,
+    }));
+    const slabs = filterLevel(renderGeometry.floorSlabs).map((slab) => ({
+        id: slab.id,
+        levelId: slab.levelId,
+        kind: slab.kind,
+        boundary: clonePolygon(slab.boundary),
+        elevation_m: slab.elevation_m,
+        thickness_m: slab.thickness_m,
+    }));
+    const pipes = filterLevel(model.pipes).map((pipe) => {
+        const levelElevation = levelMap.get(pipe.levelId)?.elevation_m ?? 0;
+        return {
+            id: pipe.id,
+            levelId: pipe.levelId,
+            path: pipe.path.map((point) => planToCanonicalScene(point, levelElevation + 0.22)),
+            diameter_m: Math.max(pipe.diameter_mm / 1000, 0.03),
+            colorRole: pipe.type === "heating_return" ? "return" : "supply",
+        };
+    });
+    const ducts = filterLevel(model.ducts).map((duct) => {
+        const levelElevation = levelMap.get(duct.levelId)?.elevation_m ?? 0;
+        return {
+            id: duct.id,
+            levelId: duct.levelId,
+            path: duct.path.map((point) => planToCanonicalScene(point, levelElevation + 2.3)),
+            width_m: Math.max(0.12, (duct.section.width_mm ?? duct.section.diameter_mm ?? 300) / 1000),
+            height_m: Math.max(0.08, (duct.section.height_mm ?? duct.section.diameter_mm ?? 220) / 1000),
+        };
+    });
+    const equipment = filterLevel(model.equipment).map((item) => {
+        const levelElevation = levelMap.get(item.levelId)?.elevation_m ?? 0;
+        const baseY = item.type === "radiator"
+            ? 0.28
+            : item.type === "boiler"
+                ? 0.5
+                : item.type === "ahu"
+                    ? 0.38
+                    : item.type === "diffuser"
+                        ? 2.72
+                        : item.type === "sensor"
+                            ? 1.6
+                            : 0.22;
+        return {
+            id: item.id,
+            levelId: item.levelId,
+            type: item.type,
+            position: planToCanonicalScene(item.position, levelElevation + baseY),
+        };
+    });
+    const sensors = filterLevel(model.sensors).map((sensor) => {
+        const levelElevation = levelMap.get(sensor.levelId)?.elevation_m ?? 0;
+        return {
+            id: sensor.id,
+            levelId: sensor.levelId,
+            position: planToCanonicalScene(sensor.position, levelElevation + 1.6),
+        };
+    });
+    const temperatureSummary = summarizeCanonicalRoomTemperatures(temperatureSurfaces, [...temperatureMap.warnings, ...warnings]);
+    return {
+        levelId: activeLevelId,
+        canonicalSource: "renderGeometry",
+        rooms,
+        temperatureSurfaces,
+        walls,
+        windows: openings.filter((opening) => opening.type === "window"),
+        doors: openings.filter((opening) => opening.type === "door"),
+        roofs,
+        slabs,
+        pipes,
+        ducts,
+        equipment,
+        sensors,
+        temperatureSummary,
+        warnings: [...new Set([...temperatureMap.warnings, ...warnings])],
+    };
+}
