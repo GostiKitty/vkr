@@ -11,6 +11,12 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import {
+  buildThermalConsistencyReport,
+  type CheckStatus,
+  type ConsistencyItem,
+  type ThermalConsistencyReport,
+} from "../../core/thermal/consistencyCheck";
 import { extractLossSharePercent } from "../../core/thermal/thermalSimulationExport";
 import {
   buildBuildingLossSeries,
@@ -21,6 +27,7 @@ import {
 import { getSp131CityClimate } from "../../norms/sp131_2025/climate";
 import { useTwinStore } from "../../entities/twin/twin.store";
 import { useWorkflowStore, type ScenarioRunSnapshot } from "../../entities/workflow/workflow.store";
+import { useBuildStore } from "../build/build.store";
 import {
   CollapsibleSection,
   MetricInfoTooltip,
@@ -64,12 +71,17 @@ const ROOM_VIEW_ITEMS: Array<{ id: RoomView; label: string }> = [
 export function MetricsResultsTab({ onRecalculate, onEditUncertainty }: MetricsResultsTabProps) {
   const selectedSpaceId = useTwinStore((state) => state.selectedSpaceId);
   const selectSpace = useTwinStore((state) => state.selectSpace);
+  const buildModel = useBuildStore((state) => state.model);
   const scenarioConfig = useWorkflowStore((state) => state.scenarioConfig);
   const scenarioRunHistory = useWorkflowStore((state) => state.scenarioRunHistory);
   const [roomView, setRoomView] = useState<RoomView>("stacked");
   const { chartResult, resultState, chartPreview, activeOptions } = useThermalChartResult();
 
   const lossShare = useMemo(() => (chartResult ? extractLossSharePercent(chartResult) : null), [chartResult]);
+  const consistencyReport = useMemo(
+    () => (chartResult ? buildThermalConsistencyReport(chartResult, activeOptions, buildModel, null) : null),
+    [activeOptions, buildModel, chartResult]
+  );
 
   if (resultState === "stale") {
     return (
@@ -167,6 +179,8 @@ export function MetricsResultsTab({ onRecalculate, onEditUncertainty }: MetricsR
           },
         ]}
       />
+
+      {consistencyReport ? <ThermalConsistencySummarySection report={consistencyReport} /> : null}
 
       {derived ? (
         <CollapsibleSection title="Дополнительные показатели и проверки">
@@ -771,6 +785,78 @@ function DerivedMetricTile({
   );
 }
 
+function ThermalConsistencySummarySection({ report }: { report: ThermalConsistencyReport }) {
+  const actionableChecks = report.invariants.filter((item) => item.status !== "INFO");
+  const passCount = report.invariants.filter((item) => item.status === "PASS").length;
+  const warnCount = report.invariants.filter((item) => item.status === "WARN").length;
+  const failCount = report.invariants.filter((item) => item.status === "FAIL").length;
+  const peakInvariant = report.invariants.find((item) => item.id === "INV-06") ?? null;
+  const energyDeltaPercent = Math.abs(report.energyIntegration.differencePercent);
+  const peakDeltaPercent = Math.abs(peakInvariant?.differencePercent ?? 0);
+  const keyIssues = report.invariants.filter((item) => item.status === "FAIL" || item.status === "WARN").slice(0, 3);
+  const checksSummary =
+    failCount > 0
+      ? `${failCount} fail`
+      : warnCount > 0
+        ? `${warnCount} warn`
+        : `${passCount} pass`;
+
+  return (
+    <CollapsibleSection
+      title="Проверка результата"
+      description="Согласованность timeline, summary и diagnostics для текущего RC-расчёта."
+    >
+      <section className="ui-panel-muted mt-3 space-y-3 rounded-2xl p-4" data-testid="thermal-consistency-summary">
+        <SummaryHighlightGrid
+          items={[
+            {
+              label: "Статус",
+              value: formatConsistencyStatus(report.overallStatus),
+              hint: checksSummary,
+              tone: consistencyTone(report.overallStatus),
+            },
+            {
+              label: "Энергия Δ",
+              value: formatPercentMagnitude(energyDeltaPercent),
+              hint: `${formatNumber(report.energyIntegration.recomputedEnergyKWh, { maximumFractionDigits: 2 })} vs ${formatNumber(report.energyIntegration.reportedSummaryEnergyKWh, { maximumFractionDigits: 2 })} кВт·ч`,
+              tone: energyDeltaPercent < 0.5 ? "success" : "warning",
+            },
+            {
+              label: "Пик Δ",
+              value: formatPercentMagnitude(peakDeltaPercent),
+              hint: "timeline vs summary",
+              tone: peakDeltaPercent < 0.5 ? "success" : "warning",
+            },
+            {
+              label: "Проверки",
+              value: `${passCount}/${actionableChecks.length}`,
+              hint: "PASS / все проверки",
+              tone: failCount > 0 ? "warning" : warnCount > 0 ? "info" : "success",
+            },
+          ]}
+        />
+
+        {keyIssues.length ? (
+          <div className="space-y-1 rounded-2xl border border-[color:var(--border-soft)] bg-[color:var(--surface-base)] px-4 py-3">
+            {keyIssues.map((item) => (
+              <p key={item.id} className="text-sm text-[color:var(--text-muted)]">
+                <span className="font-semibold text-[color:var(--text-base)]">{item.id}</span>
+                {": "}
+                {item.label}
+                {formatConsistencyIssueDelta(item)}
+              </p>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-[color:var(--text-muted)]">
+            Критичных расхождений между расчётом и показателями отчёта не найдено.
+          </p>
+        )}
+      </section>
+    </CollapsibleSection>
+  );
+}
+
 function SizingKpiTile({
   label,
   value,
@@ -794,6 +880,45 @@ function SizingKpiTile({
       </p>
     </div>
   );
+}
+
+function formatConsistencyStatus(status: CheckStatus): string {
+  switch (status) {
+    case "PASS":
+      return "OK";
+    case "WARN":
+      return "Проверить";
+    case "FAIL":
+      return "Расхождение";
+    default:
+      return "Инфо";
+  }
+}
+
+function consistencyTone(status: CheckStatus): "success" | "warning" | "info" | "neutral" {
+  switch (status) {
+    case "PASS":
+      return "success";
+    case "WARN":
+    case "FAIL":
+      return "warning";
+    default:
+      return "info";
+  }
+}
+
+function formatPercentMagnitude(value: number): string {
+  return `${formatNumber(value, { maximumFractionDigits: 2 })}%`;
+}
+
+function formatConsistencyIssueDelta(item: ConsistencyItem): string {
+  if (item.differencePercent !== undefined && Number.isFinite(item.differencePercent)) {
+    return ` (Δ ${formatPercentMagnitude(Math.abs(item.differencePercent))})`;
+  }
+  if (item.differenceAbs !== undefined && Number.isFinite(item.differenceAbs)) {
+    return ` (Δ ${formatNumber(Math.abs(item.differenceAbs), { maximumFractionDigits: 2 })}${item.unit ? ` ${item.unit}` : ""})`;
+  }
+  return "";
 }
 
 export default MetricsResultsTab;
