@@ -5,6 +5,7 @@ export const createEmptyBuildingModel = () => ({
     walls: [],
     roofs: [],
     floorSlabs: [],
+    stairs: [],
     doors: [],
     windows: [],
     pipes: [],

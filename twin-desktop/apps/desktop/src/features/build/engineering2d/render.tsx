@@ -3,10 +3,11 @@ import type {
   EngineeringEquipment,
   EngineeringEquipmentParameters,
   EngineeringEquipmentType,
+  EngineeringPipe,
   EngineeringPort,
   EngineeringPortDirection,
 } from "../../../entities/engineering/types";
-import { ENGINEERING_MEDIUM_STYLES } from "./catalog";
+import { buildEngineeringPorts, ENGINEERING_MEDIUM_STYLES, getEngineeringEquipmentPreset } from "./catalog";
 
 type RenderPalette = {
   stroke: string;
@@ -37,6 +38,13 @@ export interface SensorSymbolProps extends EngineeringSymbolProps {
 }
 
 type EngineeringSymbolRenderer = (props: EngineeringSymbolProps) => ReactNode;
+
+export type EngineeringSymbolSizeMode = "instance" | "schematic";
+
+const SCHEMATIC_SYMBOL_TARGET_BOX = {
+  width: 36,
+  height: 28,
+} as const;
 
 type ResolvedSymbolMetrics = {
   center: { x: number; y: number };
@@ -246,6 +254,91 @@ function labelGlyph(text: string, x: number, y: number, palette: RenderPalette, 
       {text}
     </text>
   );
+}
+
+export function resolveEngineeringEquipmentRenderSize(
+  type: EngineeringEquipmentType,
+  width: number,
+  height: number,
+  sizeMode: EngineeringSymbolSizeMode = "instance"
+) {
+  const resolvedWidth = Math.max(20, width);
+  const resolvedHeight = Math.max(18, height);
+  if (sizeMode !== "schematic") {
+    return { width: resolvedWidth, height: resolvedHeight };
+  }
+  const preset = getEngineeringEquipmentPreset(type);
+  const baseWidth = Math.max(0.4, preset.width);
+  const baseHeight = Math.max(0.4, preset.height);
+  const scale = Math.min(
+    SCHEMATIC_SYMBOL_TARGET_BOX.width / baseWidth,
+    SCHEMATIC_SYMBOL_TARGET_BOX.height / baseHeight
+  );
+  return {
+    width: Math.max(16, baseWidth * scale),
+    height: Math.max(16, baseHeight * scale),
+  };
+}
+
+export function resolveEngineeringEquipmentRenderRotation(
+  equipment: Pick<EngineeringEquipment, "id" | "type" | "rotation">,
+  pipes: EngineeringPipe[]
+) {
+  if (equipment.type !== "pump") {
+    return equipment.rotation;
+  }
+  const outgoing = pipes.find((pipe) => pipe.fromEquipmentId === equipment.id && pipe.points.length >= 2);
+  if (outgoing) {
+    const from = outgoing.points[0];
+    const to = outgoing.points[1];
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    if (Math.hypot(dx, dy) > 1e-6) {
+      return (Math.atan2(dy, dx) * 180) / Math.PI;
+    }
+  }
+  const incoming = pipes.find((pipe) => pipe.toEquipmentId === equipment.id && pipe.points.length >= 2);
+  if (incoming) {
+    const from = incoming.points[incoming.points.length - 2];
+    const to = incoming.points[incoming.points.length - 1];
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    if (Math.hypot(dx, dy) > 1e-6) {
+      return (Math.atan2(dy, dx) * 180) / Math.PI;
+    }
+  }
+  return equipment.rotation;
+}
+
+export function resolveEngineeringRenderedPortPosition(
+  equipment: Pick<EngineeringEquipment, "type" | "width" | "height" | "rotation">,
+  portId: string,
+  center: { x: number; y: number },
+  options: {
+    sizeMode?: EngineeringSymbolSizeMode;
+    rotation?: number;
+  } = {}
+) {
+  const size = resolveEngineeringEquipmentRenderSize(
+    equipment.type,
+    equipment.width,
+    equipment.height,
+    options.sizeMode
+  );
+  const port = buildEngineeringPorts(equipment.type, size.width, size.height).find((item) => item.id === portId);
+  if (!port) {
+    return null;
+  }
+  const rotationDeg = typeof options.rotation === "number" && Number.isFinite(options.rotation)
+    ? options.rotation
+    : equipment.rotation;
+  const radians = (rotationDeg * Math.PI) / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  return {
+    x: center.x + port.x * cos - port.y * sin,
+    y: center.y + port.x * sin + port.y * cos,
+  };
 }
 
 export function PumpSymbol(props: EngineeringSymbolProps) {
@@ -645,6 +738,266 @@ export function ConvectorSymbol(props: EngineeringSymbolProps) {
   });
 }
 
+export function AirHandlingUnitSymbol(props: EngineeringSymbolProps) {
+  return symbolFrame(props, 58, 28, ({ width, height, palette }) => {
+    const hw = width / 2;
+    const hh = height / 2;
+    const fanR = Math.min(width, height) * 0.18;
+    return (
+      <>
+        <rect x={-hw} y={-hh} width={width} height={height} rx={4} fill={palette.fill} />
+        <line x1={-width * 0.1} y1={-hh} x2={-width * 0.1} y2={hh} />
+        <line x1={width * 0.18} y1={-hh} x2={width * 0.18} y2={hh} />
+        <circle cx={-width * 0.28} cy={0} r={fanR} fill={palette.fill} />
+        <path
+          d={`M ${-width * 0.36} ${fanR * 0.45} L ${-width * 0.2} 0 L ${-width * 0.36} ${-fanR * 0.45} Z`}
+          fill={palette.accent}
+          stroke="none"
+        />
+        <path d={`M ${width * 0.02} ${-hh * 0.62} L ${width * 0.12} ${hh * 0.62}`} />
+        <path d={`M ${width * 0.12} ${-hh * 0.62} L ${width * 0.02} ${hh * 0.62}`} />
+        <path
+          d={`M ${width * 0.28} ${hh * 0.22} L ${width * 0.34} ${-hh * 0.02} L ${width * 0.4} ${hh * 0.22} L ${width * 0.46} ${-hh * 0.02}`}
+        />
+      </>
+    );
+  });
+}
+
+export function DuctFanSymbol(props: EngineeringSymbolProps) {
+  return symbolFrame(props, 30, 24, ({ width, height, palette }) => {
+    const hw = width / 2;
+    const radius = Math.min(width, height) * 0.34;
+    return (
+      <>
+        <rect x={-hw} y={-height * 0.36} width={width} height={height * 0.72} rx={height * 0.2} fill={palette.fill} />
+        <circle cx={0} cy={0} r={radius} fill={palette.fill} />
+        <path d={`M ${-radius * 0.78} ${radius * 0.42} L ${radius * 0.72} 0 L ${-radius * 0.78} ${-radius * 0.42} Z`} fill={palette.accent} stroke="none" />
+        <line x1={0} y1={-height * 0.36} x2={0} y2={-height * 0.62} />
+      </>
+    );
+  });
+}
+
+export function RoofFanSymbol(props: EngineeringSymbolProps) {
+  return symbolFrame(props, 30, 24, ({ width, height, palette }) => {
+    const radius = Math.min(width, height) * 0.32;
+    return (
+      <>
+        <rect x={-width * 0.42} y={-height * 0.18} width={width * 0.84} height={height * 0.36} rx={height * 0.12} fill={palette.fill} />
+        <circle cx={0} cy={0} r={radius} fill={palette.fill} />
+        <path d={`M ${-radius * 0.78} ${radius * 0.42} L ${radius * 0.72} 0 L ${-radius * 0.78} ${-radius * 0.42} Z`} fill={palette.accent} stroke="none" />
+        <path d={`M ${-width * 0.42} ${height * 0.34} L 0 ${height * 0.54} L ${width * 0.42} ${height * 0.34}`} />
+        <line x1={0} y1={-height * 0.18} x2={0} y2={-height * 0.46} />
+      </>
+    );
+  });
+}
+
+export function AirDamperSymbol(props: EngineeringSymbolProps) {
+  return symbolFrame(props, 28, 18, ({ width, height, palette }) => {
+    const hw = width / 2;
+    const hh = height / 2;
+    return (
+      <>
+        <rect x={-hw} y={-hh} width={width} height={height} rx={2} fill={palette.fill} />
+        <line x1={-hw * 0.72} y1={hh * 0.72} x2={hw * 0.72} y2={-hh * 0.72} />
+        <line x1={-hw * 0.2} y1={hh * 0.3} x2={hw * 0.2} y2={-hh * 0.3} />
+      </>
+    );
+  });
+}
+
+export function AirCheckValveSymbol(props: EngineeringSymbolProps) {
+  return symbolFrame(props, 30, 18, ({ width, height, palette }) => {
+    const hw = width / 2;
+    const hh = height / 2;
+    return (
+      <>
+        <rect x={-hw} y={-hh} width={width} height={height} rx={2} fill={palette.fill} />
+        <path d={`M ${-width * 0.22} ${-hh * 0.58} L ${width * 0.16} 0 L ${-width * 0.22} ${hh * 0.58} Z`} />
+        <line x1={width * 0.22} y1={-hh * 0.66} x2={width * 0.22} y2={hh * 0.66} />
+      </>
+    );
+  });
+}
+
+export function FireDamperSymbol(props: EngineeringSymbolProps) {
+  return symbolFrame(props, 30, 18, ({ width, height, palette }) => {
+    const hw = width / 2;
+    const hh = height / 2;
+    return (
+      <>
+        <rect x={-hw} y={-hh} width={width} height={height} rx={2} fill={palette.fill} />
+        <line x1={-hw * 0.76} y1={hh * 0.76} x2={hw * 0.76} y2={-hh * 0.76} />
+        <line x1={-hw * 0.76} y1={-hh * 0.76} x2={hw * 0.2} y2={hh * 0.2} />
+        <rect x={-width * 0.1} y={-height * 0.2} width={width * 0.2} height={height * 0.4} fill={palette.fill} />
+      </>
+    );
+  });
+}
+
+export function AirFilterSymbol(props: EngineeringSymbolProps) {
+  return symbolFrame(props, 32, 18, ({ width, height, palette }) => {
+    const hw = width / 2;
+    const hh = height / 2;
+    return (
+      <>
+        <rect x={-hw} y={-hh} width={width} height={height} rx={2} fill={palette.fill} />
+        {[-0.42, -0.14, 0.14, 0.42].map((offset) => (
+          <line
+            key={offset}
+            x1={width * (offset - 0.12)}
+            y1={hh * 0.78}
+            x2={width * (offset + 0.12)}
+            y2={-hh * 0.78}
+          />
+        ))}
+      </>
+    );
+  });
+}
+
+export function AirFlowRegulatorConstSymbol(props: EngineeringSymbolProps) {
+  return symbolFrame(props, 30, 18, ({ width, height, palette }) => {
+    const hw = width / 2;
+    const hh = height / 2;
+    return (
+      <>
+        <rect x={-hw} y={-hh} width={width} height={height} rx={2} fill={palette.fill} />
+        <line x1={-width * 0.18} y1={-hh * 0.72} x2={-width * 0.18} y2={hh * 0.72} />
+        <line x1={width * 0.18} y1={-hh * 0.72} x2={width * 0.18} y2={hh * 0.72} />
+        <line x1={-width * 0.3} y1={0} x2={width * 0.3} y2={0} />
+      </>
+    );
+  });
+}
+
+export function AirFlowRegulatorVarSymbol(props: EngineeringSymbolProps) {
+  return symbolFrame(props, 30, 18, ({ width, height, palette }) => {
+    const hw = width / 2;
+    const hh = height / 2;
+    return (
+      <>
+        <rect x={-hw} y={-hh} width={width} height={height} rx={2} fill={palette.fill} />
+        <line x1={-width * 0.18} y1={-hh * 0.72} x2={-width * 0.18} y2={hh * 0.72} />
+        <line x1={width * 0.18} y1={-hh * 0.72} x2={width * 0.18} y2={hh * 0.72} />
+        <line x1={-width * 0.3} y1={hh * 0.54} x2={width * 0.3} y2={-hh * 0.54} />
+      </>
+    );
+  });
+}
+
+export function SilencerSymbol(props: EngineeringSymbolProps) {
+  return symbolFrame(props, 34, 18, ({ width, height, palette }) => {
+    const hw = width / 2;
+    const hh = height / 2;
+    return (
+      <>
+        <rect x={-hw} y={-hh} width={width} height={height} rx={2} fill={palette.fill} />
+        {[-0.28, 0, 0.28].map((offset) => (
+          <line key={offset} x1={width * offset} y1={-hh * 0.8} x2={width * offset} y2={hh * 0.8} />
+        ))}
+      </>
+    );
+  });
+}
+
+export function AirHeaterSymbol(props: EngineeringSymbolProps) {
+  return symbolFrame(props, 32, 18, ({ width, height, palette }) => {
+    const hw = width / 2;
+    const hh = height / 2;
+    return (
+      <>
+        <rect x={-hw} y={-hh} width={width} height={height} rx={2} fill={palette.fill} />
+        <path
+          d={`M ${-width * 0.34} ${hh * 0.45} L ${-width * 0.18} ${-hh * 0.45} L 0 ${hh * 0.45} L ${width * 0.18} ${-hh * 0.45} L ${width * 0.34} ${hh * 0.45}`}
+        />
+      </>
+    );
+  });
+}
+
+export function AirCoolerSymbol(props: EngineeringSymbolProps) {
+  return symbolFrame(props, 32, 18, ({ width, height, palette }) => {
+    const hw = width / 2;
+    const hh = height / 2;
+    return (
+      <>
+        <rect x={-hw} y={-hh} width={width} height={height} rx={2} fill={palette.fill} />
+        <path
+          d={`M ${-width * 0.34} ${-hh * 0.46} L ${-width * 0.18} ${hh * 0.46} L 0 ${-hh * 0.46} L ${width * 0.18} ${hh * 0.46} L ${width * 0.34} ${-hh * 0.46}`}
+        />
+        <line x1={-width * 0.1} y1={-hh * 0.1} x2={width * 0.1} y2={hh * 0.1} />
+      </>
+    );
+  });
+}
+
+export function AirHumidifierSymbol(props: EngineeringSymbolProps) {
+  return symbolFrame(props, 32, 18, ({ width, height, palette }) => {
+    const hw = width / 2;
+    const hh = height / 2;
+    return (
+      <>
+        <rect x={-hw} y={-hh} width={width} height={height} rx={2} fill={palette.fill} />
+        <path
+          d={`M 0 ${-hh * 0.52} C ${width * 0.14} ${-hh * 0.18}, ${width * 0.2} ${hh * 0.08}, 0 ${hh * 0.42} C ${-width * 0.2} ${hh * 0.08}, ${-width * 0.14} ${-hh * 0.18}, 0 ${-hh * 0.52} Z`}
+        />
+        <line x1={-width * 0.3} y1={hh * 0.48} x2={width * 0.3} y2={hh * 0.48} />
+      </>
+    );
+  });
+}
+
+export function AirDehumidifierSymbol(props: EngineeringSymbolProps) {
+  return symbolFrame(props, 32, 18, ({ width, height, palette }) => {
+    const hw = width / 2;
+    const hh = height / 2;
+    return (
+      <>
+        <rect x={-hw} y={-hh} width={width} height={height} rx={2} fill={palette.fill} />
+        <path
+          d={`M 0 ${-hh * 0.5} C ${width * 0.12} ${-hh * 0.16}, ${width * 0.18} ${hh * 0.12}, 0 ${hh * 0.42} C ${-width * 0.18} ${hh * 0.12}, ${-width * 0.12} ${-hh * 0.16}, 0 ${-hh * 0.5} Z`}
+        />
+        <line x1={-width * 0.22} y1={-hh * 0.44} x2={width * 0.24} y2={hh * 0.34} />
+      </>
+    );
+  });
+}
+
+export function SupplyDiffuserSymbol(props: EngineeringSymbolProps) {
+  return symbolFrame(props, 20, 20, ({ width, height, palette }) => {
+    const hw = width / 2;
+    const hh = height / 2;
+    return (
+      <>
+        <rect x={-hw * 0.82} y={-hh * 0.82} width={width * 1.64} height={height * 1.64} rx={2} fill={palette.fill} />
+        <rect x={-hw * 0.24} y={-hh * 0.24} width={width * 0.48} height={height * 0.48} fill={palette.fill} />
+        <line x1={0} y1={-hh * 0.24} x2={0} y2={-hh * 0.72} />
+        <line x1={0} y1={hh * 0.24} x2={0} y2={hh * 0.72} />
+        <line x1={-hw * 0.24} y1={0} x2={-hw * 0.72} y2={0} />
+        <line x1={hw * 0.24} y1={0} x2={hw * 0.72} y2={0} />
+      </>
+    );
+  });
+}
+
+export function ExhaustGrilleSymbol(props: EngineeringSymbolProps) {
+  return symbolFrame(props, 24, 16, ({ width, height, palette }) => {
+    const hw = width / 2;
+    const hh = height / 2;
+    return (
+      <>
+        <rect x={-hw} y={-hh} width={width} height={height} rx={2} fill={palette.fill} />
+        {[-0.35, 0, 0.35].map((offset) => (
+          <line key={offset} x1={-hw * 0.72} y1={height * offset} x2={hw * 0.72} y2={height * offset} />
+        ))}
+      </>
+    );
+  });
+}
+
 const ENGINEERING_SYMBOL_RENDERERS: Record<EngineeringEquipmentType, EngineeringSymbolRenderer> = {
   pump: PumpSymbol,
   heatExchanger: HeatExchangerSymbol,
@@ -670,6 +1023,22 @@ const ENGINEERING_SYMBOL_RENDERERS: Record<EngineeringEquipmentType, Engineering
   convector: ConvectorSymbol,
   sensorFlow: (props) => SensorSymbol({ ...props, variant: "flow" }),
   sensorHumidity: (props) => SensorSymbol({ ...props, variant: "humidity" }),
+  airHandlingUnit: AirHandlingUnitSymbol,
+  ductFan: DuctFanSymbol,
+  roofFan: RoofFanSymbol,
+  airDamper: AirDamperSymbol,
+  airCheckValve: AirCheckValveSymbol,
+  fireDamper: FireDamperSymbol,
+  airFilter: AirFilterSymbol,
+  airFlowRegulatorConst: AirFlowRegulatorConstSymbol,
+  airFlowRegulatorVar: AirFlowRegulatorVarSymbol,
+  silencer: SilencerSymbol,
+  airHeater: AirHeaterSymbol,
+  airCooler: AirCoolerSymbol,
+  airHumidifier: AirHumidifierSymbol,
+  airDehumidifier: AirDehumidifierSymbol,
+  supplyDiffuser: SupplyDiffuserSymbol,
+  exhaustGrille: ExhaustGrilleSymbol,
 };
 
 export function getEngineeringSymbolRenderer(type: EngineeringEquipmentType): EngineeringSymbolRenderer {
@@ -689,14 +1058,21 @@ export function renderEngineeringEquipmentSymbol(
     showPorts?: boolean;
     scale?: number;
     portRadius?: number;
+    sizeMode?: EngineeringSymbolSizeMode;
   } = {}
 ) {
   const Renderer = getEngineeringSymbolRenderer(equipment.type);
+  const size = resolveEngineeringEquipmentRenderSize(
+    equipment.type,
+    equipment.width,
+    equipment.height,
+    options.sizeMode
+  );
   return Renderer({
     center,
     rotation: equipment.rotation,
-    width: Math.max(20, equipment.width),
-    height: Math.max(18, equipment.height),
+    width: size.width,
+    height: size.height,
     ports: equipment.ports,
     parameters: equipment.parameters,
     selected: options.selected,

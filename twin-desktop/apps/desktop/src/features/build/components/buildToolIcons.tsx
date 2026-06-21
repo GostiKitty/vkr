@@ -16,12 +16,15 @@ export type BuildToolIconName =
   | "engineeringPipe"
   | "duct"
   | "radiator"
+  | "fancoil"
+  | "ahu"
   | "boiler"
   | "pump"
   | "heatExchanger"
   | "elevator"
   | "expansionTank"
   | "dirtSeparator"
+  | "diffuser"
   | "filter"
   | "valve"
   | "checkValve"
@@ -58,7 +61,8 @@ export type BuildToolIconName =
   | "flowMeter"
   | "convector"
   | "sensorFlow"
-  | "sensorHumidity";
+  | "sensorHumidity"
+  | "fillet";
 
 export function BuildToolIcon({ name, className = "h-4 w-4" }: { name: BuildToolIconName; className?: string }) {
   const commonProps = {
@@ -208,6 +212,22 @@ export function BuildToolIcon({ name, className = "h-4 w-4" }: { name: BuildTool
           <path {...commonProps} d="M8 9v6M12 9v6M16 9v6" />
         </svg>
       );
+    case "fancoil":
+      return (
+        <svg viewBox="0 0 24 24" className={className} aria-hidden="true">
+          <rect {...commonProps} x="4.5" y="7" width="15" height="10" rx="1.8" />
+          <path {...commonProps} d="M7.5 12h4.5" />
+          <circle {...commonProps} cx="15" cy="12" r="2.4" />
+        </svg>
+      );
+    case "ahu":
+      return (
+        <svg viewBox="0 0 24 24" className={className} aria-hidden="true">
+          <rect {...commonProps} x="4" y="7" width="16" height="10" rx="1.8" />
+          <circle {...commonProps} cx="12" cy="12" r="3" />
+          <path {...commonProps} d="M9.9 9.9 14.1 14.1M14.1 9.9 9.9 14.1" />
+        </svg>
+      );
     case "boiler":
       return (
         <svg viewBox="0 0 24 24" className={className} aria-hidden="true">
@@ -254,6 +274,13 @@ export function BuildToolIcon({ name, className = "h-4 w-4" }: { name: BuildTool
         <svg viewBox="0 0 24 24" className={className} aria-hidden="true">
           <path {...commonProps} d="M12 5v11M8 9h8M8 15h8" />
           <path {...commonProps} d="M10 19h4" />
+        </svg>
+      );
+    case "diffuser":
+      return (
+        <svg viewBox="0 0 24 24" className={className} aria-hidden="true">
+          <rect {...commonProps} x="6" y="6" width="12" height="12" rx="1.4" />
+          <path {...commonProps} d="M8.8 8.8 15.2 15.2M15.2 8.8 8.8 15.2" />
         </svg>
       );
     case "filter":
@@ -542,6 +569,19 @@ export function BuildToolIcon({ name, className = "h-4 w-4" }: { name: BuildTool
           <circle {...commonProps} cx="12" cy="12" r="5.5" />
           {/* Капля воды */}
           <path {...commonProps} d="M12 9 C9.5 11.5 9.5 15 12 15 C14.5 15 14.5 11.5 12 9 Z" />
+        </svg>
+      );
+    case "fillet":
+      return (
+        <svg viewBox="0 0 24 24" className={className} aria-hidden="true">
+          {/* Две стороны угла */}
+          <path {...commonProps} d="M5 19 L5 9" />
+          <path {...commonProps} d="M5 9 L15 9" strokeDasharray="3 2" opacity="0.45" />
+          <path {...commonProps} d="M15 9 L19 9" />
+          {/* Дуга скругления */}
+          <path {...commonProps} d="M5 14 A 5 5 0 0 1 10 9" strokeWidth={2.2} />
+          {/* Маркер вершины */}
+          <circle cx="5" cy="9" r="2" fill="currentColor" opacity="0.35" stroke="none" />
         </svg>
       );
     default:

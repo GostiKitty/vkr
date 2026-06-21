@@ -40,8 +40,8 @@ export const DEFAULT_ENGINEERING_PLAN_LAYERS: EngineeringPlanLayerVisibility = {
   equipment: true,
   labels: true,
   arrows: true,
-  pipeLabels: true,
-  equipmentLabels: true,
+  pipeLabels: false,
+  equipmentLabels: false,
 };
 
 export const DEFAULT_VISIBLE_MEDIA: EngineeringMedium[] = [
@@ -52,6 +52,8 @@ export const DEFAULT_VISIBLE_MEDIA: EngineeringMedium[] = [
   "drain",
   "electric",
   "signal",
+  "airSupply",
+  "airExhaust",
 ];
 
 export interface EngineeringPlanViewHandle {

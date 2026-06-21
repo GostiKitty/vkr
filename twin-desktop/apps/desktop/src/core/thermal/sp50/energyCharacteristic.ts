@@ -111,8 +111,6 @@ export interface Sp50EnergyCharacteristicResult {
   };
 }
 
-const HOURS_PER_WEEK = 168;
-
 function deriveVentilationFlows(
   volume: number,
   tOutdoor: number,
@@ -184,15 +182,25 @@ export function computeSp50EnergyCharacteristic(input: Sp50EnergyCharacteristicI
       : { Lvent: null, Ginf: null, warnings: [] as string[] };
   placeholderWarnings.push(...flowWarnings);
 
+  /**
+   * Средняя кратность воздухообмена по СП 50.13330.2024 (формула 9.4):
+   * n_kpi = (L_ve·n_ve + G_inf·n_inf/γ) / (β_V·V_h), 1/ч.
+   * n_ve и n_inf — безразмерные коэффициенты расписания (0…1); деление на 168 не нужно,
+   * т.к. они уже являются долевыми, а L_ve и G_inf заданы в ч (м³/ч, кг/ч).
+   */
   const averageAirExchange =
     volume && averageAirDensity && Lvent !== null && Ginf !== null
-      ? ((Lvent * nVent) / HOURS_PER_WEEK + Ginf * nInf / (HOURS_PER_WEEK * averageAirDensity)) / (betaV * volume)
+      ? (Lvent * nVent + Ginf * nInf / averageAirDensity) / (betaV * volume)
       : null;
 
-  /** k_vent по СП 50: c·(L_vent·γ·n·(1−k_ef)+G_inf·n) / (168·V), c = 0,28 кВт·ч/(м³·К). */
+  /**
+   * Вентиляционная составляющая удельной характеристики теплозащиты, Вт/(м³·К):
+   * k_ve = c·(L_ve·γ·n_ve·(1−k_ef) + G_inf·n_inf) / V
+   * c = 0,28 Вт·ч/(кг·К) ≈ cp_воздуха; c·G[кг/ч] = G_W[Вт/К] → k_ve = G_W / V [Вт/(м³·К)].
+   */
   const kVent =
     volume && averageAirDensity && Lvent !== null && Ginf !== null
-      ? (c * (Lvent * averageAirDensity * nVent * (1 - kEf) + Ginf * nInf)) / (HOURS_PER_WEEK * volume)
+      ? (c * (Lvent * averageAirDensity * nVent * (1 - kEf) + Ginf * nInf)) / volume
       : null;
 
   const deltaT = tIndoor !== null && tOutdoor !== null ? tIndoor - tOutdoor : null;

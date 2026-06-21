@@ -5,10 +5,10 @@ export const DEFAULT_THERMAL_OPTIONS: ThermalSimulationOptions = {
   duration: "24h",
   timestepMinutes: 10,
   outdoor: {
-    baseC: -2,
-    amplitudeC: 9,
+    baseC: -7,
+    amplitudeC: 8,
     seasonalOffsetC: 0,
-    phaseShiftHours: -3,
+    phaseShiftHours: -9,
   },
   setpoints: {
     day: 21,
@@ -20,7 +20,7 @@ export const DEFAULT_THERMAL_OPTIONS: ThermalSimulationOptions = {
   },
   internalGains: {
     dayGain_W_m2: 5,
-    nightGain_W_m2: 1,
+    nightGain_W_m2: 2,
   },
   infiltrationACH: 0.5,
   infiltration: {
@@ -36,7 +36,7 @@ export const DEFAULT_THERMAL_OPTIONS: ThermalSimulationOptions = {
     pressureBased: {
       windSpeedMps: 4,
       windPressureCoefficient: 0.6,
-      stackHeightM: 6,
+      stackHeightM: null,
       mechanicalPressurePa: 0,
     },
   },

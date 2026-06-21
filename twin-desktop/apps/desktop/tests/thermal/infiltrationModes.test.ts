@@ -4,6 +4,7 @@ import { resolveBuildingInfiltration } from "../../src/core/thermal/infiltration
 import { buildThermalPhysicsModel } from "../../src/core/thermal/physics.js";
 import { runThermalSimulation } from "../../src/core/thermal/solver.js";
 import type { BuildingModel } from "../../src/entities/geometry/types.js";
+import { createEngineeringEquipmentInstance, createEngineeringPipeConnection } from "../../src/features/build/engineering2d/catalog.js";
 import { test, expectApproximatelyEqual } from "../testHarness.js";
 
 function buildSimpleBuilding(): BuildingModel {
@@ -222,6 +223,73 @@ test("heatRecoveryFactor affects only mechanical ventilation loss, not infiltrat
   if (!(roomWithRecovery.mechanicalVentilationLossW < roomNoRecovery.mechanicalVentilationLossW)) {
     throw new Error("Рекуперация должна уменьшать только потери на механическую вентиляцию.");
   }
+});
+
+test("engineering air terminals add room ventilation without double counting supply and exhaust", () => {
+  const building = buildSimpleBuilding();
+  const ahu = createEngineeringEquipmentInstance("airHandlingUnit", { x: -1.2, y: 2 }, {
+    levelId: "l1",
+    name: "ПВУ-1",
+    parameters: { airflowM3H: 900, supplyTemperatureC: 18 },
+  });
+  const diffuser = createEngineeringEquipmentInstance("supplyDiffuser", { x: 2, y: 2 }, {
+    levelId: "l1",
+    name: "П1",
+    parameters: { airflowM3H: 900 },
+  });
+  const grille = createEngineeringEquipmentInstance("exhaustGrille", { x: 3.2, y: 2 }, {
+    levelId: "l1",
+    name: "В1",
+    parameters: { airflowM3H: 900 },
+  });
+  const supplyBranch = createEngineeringPipeConnection({
+    fromEquipment: ahu,
+    fromPortId: "supply-out",
+    toEquipment: diffuser,
+    toPortId: "supply",
+    levelId: "l1",
+  });
+  const exhaustBranch = createEngineeringPipeConnection({
+    fromEquipment: grille,
+    fromPortId: "exhaust",
+    toEquipment: ahu,
+    toPortId: "exhaust-in",
+    levelId: "l1",
+  });
+  if (!supplyBranch || !exhaustBranch) {
+    throw new Error("Ожидались инженерные воздушные ветки.");
+  }
+  supplyBranch.flowRate = 900;
+  supplyBranch.temperature = 18;
+  exhaustBranch.flowRate = 900;
+  building.engineeringSystems = {
+    equipment: [ahu, diffuser, grille],
+    pipes: [supplyBranch, exhaustBranch],
+  };
+
+  const physics = buildThermalPhysicsModel(building, {
+    outdoorTemperatureC: -10,
+    setpointTemperatureC: 21,
+    infiltrationACH: 0,
+    ventilationACH: 0,
+    heatRecoveryFactor: 0,
+    fixedRoomTemperaturesC: { r1: 21 },
+  });
+  const room = physics.roomBalances.get("r1");
+  if (!room) {
+    throw new Error("Ожидался баланс по комнате r1.");
+  }
+
+  const expectedLossW = 1.204 * 1005 * (900 / 3600) * (21 - 18);
+  if (!(room.infiltrationLossW < 12)) {
+    throw new Error(`Expected only baseline infiltration floor loss, got ${room.infiltrationLossW}.`);
+  }
+  expectApproximatelyEqual(
+    room.mechanicalVentilationLossW,
+    expectedLossW,
+    2,
+    "Приток и вытяжка в одной комнате должны считаться без двойного счёта."
+  );
 });
 
 test("engineering analysis keeps infiltration and ventilation losses separate without double counting", () => {

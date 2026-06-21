@@ -35,6 +35,10 @@ export interface Room {
   levelId: string;
   polygon: Vec2[];
   source?: RoomSource;
+  /** Глобальный радиус скругления (устаревший). Используйте cornerRadii_m для точечного управления. */
+  cornerRadius_m?: number;
+  /** Радиусы скругления по вершинам: ключ — индекс вершины (строка), значение — радиус в м. */
+  cornerRadii_m?: Record<string, number>;
 }
 
 export interface EnvelopePresetMetadata {
@@ -63,6 +67,19 @@ export interface Wall {
 export interface WallLayer {
   materialId: string;
   thickness_m: number;
+}
+
+/**
+ * Скругление стыка стен (узла). Хранится на уровне модели, а не на комнате, чтобы
+ * переживать перегенерацию авто-комнат. Стык опознаётся по уровню + позиции.
+ */
+export interface WallFillet {
+  id: string;
+  levelId: string;
+  /** Позиция стыка (точка, где сходятся стены). */
+  point: Vec2;
+  /** Радиус скругления, м. */
+  radius_m: number;
 }
 
 export type ConstructionLayer = WallLayer;
@@ -256,6 +273,7 @@ export interface BuildingModel {
   roofs?: Roof[];
   floorSlabs?: FloorSlab[];
   stairs?: Stair[];
+  wallFillets?: WallFillet[];
   doors: Door[];
   windows: Window[];
   pipes: PipeNetwork[];
@@ -279,6 +297,7 @@ export const createEmptyBuildingModel = (): BuildingModel => ({
   roofs: [],
   floorSlabs: [],
   stairs: [],
+  wallFillets: [],
   doors: [],
   windows: [],
   pipes: [],

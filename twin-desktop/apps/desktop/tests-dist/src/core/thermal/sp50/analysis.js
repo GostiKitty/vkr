@@ -103,7 +103,8 @@ function resolveSourceData(model, defaultIndoorTemperatureC, defaultOutdoorTempe
             heatedVolumeM3,
             heatedAreaM2,
             buildingCategory: buildingMeta.buildingCategory ?? null,
-            storeys: buildingMeta.storeys ?? null,
+            storeys: buildingMeta.storeys ?? (model.levels.length > 0 ? model.levels.length : null),
+            buildingHeightM: model.levels.reduce((sum, l) => sum + l.height_m, 0) || null,
             humidityZone,
             moistureMode,
             operationCondition,
@@ -457,7 +458,25 @@ function buildTransientCheck(constructions, context) {
     const rho = getSolarAbsorptionCoefficient("mediumFacade") ?? 0.65;
     const requiredAmplitude = july !== null ? 2.5 - 0.1 * (july - 21) : null;
     const externalAmplitude = summerAmplitude !== null && summerAlpha !== null && radiation ? summerAmplitude + (0.5 * rho * (radiation.Imax_W_m2 - radiation.Iavg_W_m2)) / summerAlpha : null;
-    const internalAmplitude = externalAmplitude !== null && thermalInertia > 0 ? externalAmplitude / Math.max(thermalInertia, 1) : null;
+    // Коэффициент затухания ν по СП 50.13330.2024 Приложение Б (таблица Б.2, аппроксимация).
+    // ν(D): D≤1.5→1; D=2→1.2; D=3→2; D=4→3.2; D=5→5; D=7→8; выше — линейно.
+    const thermalAttenuationFactor = (D) => {
+        if (D <= 1.5)
+            return 1.0;
+        if (D <= 2.0)
+            return 1.0 + 0.4 * (D - 1.5) / 0.5;
+        if (D <= 3.0)
+            return 1.2 + 0.8 * (D - 2.0);
+        if (D <= 4.0)
+            return 2.0 + 1.2 * (D - 3.0);
+        if (D <= 5.0)
+            return 3.2 + 1.8 * (D - 4.0);
+        if (D <= 7.0)
+            return 5.0 + 1.5 * (D - 5.0);
+        return 8.0 + 1.0 * (D - 7.0);
+    };
+    const nu = thermalInertia > 0 ? thermalAttenuationFactor(thermalInertia) : null;
+    const internalAmplitude = externalAmplitude !== null && nu !== null ? externalAmplitude / nu : null;
     const complies = requiredAmplitude !== null && internalAmplitude !== null ? internalAmplitude <= requiredAmplitude : null;
     return {
         thermalInertia_D: thermalInertia || null,
@@ -474,7 +493,7 @@ function buildTransientCheck(constructions, context) {
 function buildAirPermeabilityCheck(constructions, context) {
     const indoorTemperature = context.sourceData.indoorTemperatureC;
     const outdoorTemperature = context.sourceData.outdoorDesignTemperatureC;
-    const height = context.buildingMeta.storeys ? context.buildingMeta.storeys * 3 : null;
+    const height = context.sourceData.buildingHeightM ?? (context.buildingMeta.storeys ? context.buildingMeta.storeys * 3 : null);
     // СП 50.13330.2024 разд. 8: ΔP использует январскую скорость ветра (СП 131, табл. Б.2), не летнюю.
     const wind = context.buildingMeta.climate?.winterWindSpeedM_s ??
         (context.buildingMeta.climate?.summerWindSpeedM_s != null

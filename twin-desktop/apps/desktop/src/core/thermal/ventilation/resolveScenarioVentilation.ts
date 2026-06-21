@@ -46,6 +46,17 @@ function resolveEnergyVentilation(model: BuildingModel) {
   return model.thermalProtection?.energyVentilation;
 }
 
+function readEngineeringParameterNumber(parameters: Record<string, unknown>, key: string): number | null {
+  const value = parameters[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function readEngineeringAirflowM3s(parameters: Record<string, unknown>): number {
+  const airflowM3H =
+    readEngineeringParameterNumber(parameters, "airflowM3H") ?? readEngineeringParameterNumber(parameters, "flowRateM3H");
+  return airflowM3H != null ? Math.max(0, airflowM3H) / 3600 : 0;
+}
+
 export function resolveInfiltrationACH(
   scenarioConfig: ScenarioConfig | null | undefined,
   scenario: ScenarioConfig,
@@ -63,16 +74,48 @@ export function resolveInfiltrationACH(
 }
 
 function sumMechanicalVentilationAirflowM3s(model: BuildingModel): number {
-  let totalM3s = 0;
-  model.equipment.forEach((item) => {
-    if (item.type === "ahu" || item.type === "diffuser") {
-      totalM3s += Math.max(0, item.params.designAirflow_m3_s ?? 0);
-    }
-  });
-  if (totalM3s > 0) {
-    return totalM3s;
-  }
-  return model.ducts.reduce((sum, duct) => sum + Math.max(0, duct.airflow_m3_s ?? 0), 0);
+  const simpleDiffuserFlowM3s = model.equipment.reduce(
+    (sum, item) => sum + (item.type === "diffuser" ? Math.max(0, item.params.designAirflow_m3_s ?? 0) : 0),
+    0
+  );
+  const simpleAhuFlowM3s = model.equipment.reduce(
+    (sum, item) => sum + (item.type === "ahu" ? Math.max(0, item.params.designAirflow_m3_s ?? 0) : 0),
+    0
+  );
+  const simpleDuctFlowM3s = model.ducts.reduce((sum, duct) => sum + Math.max(0, duct.airflow_m3_s ?? 0), 0);
+  const simpleFlowM3s = Math.max(simpleDiffuserFlowM3s, simpleAhuFlowM3s, simpleDuctFlowM3s);
+
+  const engineeringEquipment = model.engineeringSystems?.equipment ?? [];
+  const engineeringPipes = model.engineeringSystems?.pipes ?? [];
+  const engineeringSupplyTerminalFlowM3s = engineeringEquipment.reduce(
+    (sum, item) => sum + (item.type === "supplyDiffuser" ? readEngineeringAirflowM3s(item.parameters) : 0),
+    0
+  );
+  const engineeringExhaustTerminalFlowM3s = engineeringEquipment.reduce(
+    (sum, item) => sum + (item.type === "exhaustGrille" ? readEngineeringAirflowM3s(item.parameters) : 0),
+    0
+  );
+  const engineeringAhuFlowM3s = engineeringEquipment.reduce(
+    (sum, item) => sum + (item.type === "airHandlingUnit" ? readEngineeringAirflowM3s(item.parameters) : 0),
+    0
+  );
+  const engineeringSupplyPipeFlowM3s = engineeringPipes.reduce(
+    (sum, pipe) => sum + (pipe.medium === "airSupply" && pipe.flowRate != null ? Math.max(0, pipe.flowRate) / 3600 : 0),
+    0
+  );
+  const engineeringExhaustPipeFlowM3s = engineeringPipes.reduce(
+    (sum, pipe) => sum + (pipe.medium === "airExhaust" && pipe.flowRate != null ? Math.max(0, pipe.flowRate) / 3600 : 0),
+    0
+  );
+  const engineeringFlowM3s = Math.max(
+    engineeringSupplyTerminalFlowM3s,
+    engineeringExhaustTerminalFlowM3s,
+    engineeringAhuFlowM3s,
+    engineeringSupplyPipeFlowM3s,
+    engineeringExhaustPipeFlowM3s
+  );
+
+  return simpleFlowM3s + engineeringFlowM3s;
 }
 
 function computeVentilationACHFromBuilding(model: BuildingModel): { value: number; source: VentilationInputSource } | null {
@@ -148,8 +191,17 @@ function computeHeatRecoveryFromBuilding(
     .filter((item) => item.type === "ahu")
     .map((item) => item.params.efficiency)
     .filter((efficiency): efficiency is number => efficiency != null && Number.isFinite(efficiency) && efficiency > 0 && efficiency <= 1);
-  if (ahuEfficiencies.length) {
-    const average = ahuEfficiencies.reduce((sum, efficiency) => sum + efficiency, 0) / ahuEfficiencies.length;
+  const engineeringAhuEfficiencies = (model.engineeringSystems?.equipment ?? [])
+    .filter((item) => item.type === "airHandlingUnit")
+    .map(
+      (item) =>
+        readEngineeringParameterNumber(item.parameters, "heatRecoveryEfficiency") ??
+        readEngineeringParameterNumber(item.parameters, "efficiency")
+    )
+    .filter((efficiency): efficiency is number => efficiency != null && Number.isFinite(efficiency) && efficiency > 0 && efficiency <= 1);
+  const allEfficiencies = [...ahuEfficiencies, ...engineeringAhuEfficiencies];
+  if (allEfficiencies.length) {
+    const average = allEfficiencies.reduce((sum, efficiency) => sum + efficiency, 0) / allEfficiencies.length;
     return { value: clampHeatRecoveryFactor(average), source: "calculated" };
   }
 
@@ -223,7 +275,10 @@ export function resolveMechanicalVentilationEnabled(
     return { value: fallback, source: "fallback", explicit: false };
   }
 
-  return { value: computed.value, source: computed.source, explicit: false };
+  if (computed.value) {
+    return { value: true, source: computed.source, explicit: false };
+  }
+  return { value: fallback, source: "fallback", explicit: false };
 }
 
 const LEGACY_STACK_HEIGHT_M = 6;

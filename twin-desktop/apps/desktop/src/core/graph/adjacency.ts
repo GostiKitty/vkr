@@ -1,5 +1,6 @@
 import { angleBetween, midpoint, polygonCentroid, polygonContainsPoint, segmentLength } from "../../entities/geometry/geom";
 import type { BuildingModel, Room, Vec2, Wall } from "../../entities/geometry/types";
+import { computeWallJoinData } from "../../features/build/view3d/wallJoins";
 
 export type Orientation = "N" | "E" | "S" | "W";
 
@@ -49,9 +50,21 @@ export function buildAdjacencyGraph(model: BuildingModel): AdjacencyResult {
     outdoorEdges: [],
   };
 
+  // Скругления стыков укорачивают стены и добавляют дугу — учитываем в длине стены.
+  const joinData = computeWallJoinData({
+    walls: model.walls,
+    levels: model.levels,
+    wallFillets: model.wallFillets,
+  });
+  const filletLengthDelta = (wallId: string): number => {
+    const trim = joinData.filletTrims.get(wallId);
+    const arc = joinData.filletArcs.get(wallId);
+    return -(trim?.start ?? 0) - (trim?.end ?? 0) + (arc?.start ?? 0) + (arc?.end ?? 0);
+  };
+
   for (const wall of model.walls) {
     const assignment = detectRoomsForWall(wall, model.rooms);
-    const length = segmentLength(wall.a, wall.b);
+    const length = Math.max(0.05, segmentLength(wall.a, wall.b) + filletLengthDelta(wall.id));
     const area = length * wall.height_m;
     if (assignment.length === 2) {
       const [roomA, roomB] = assignment;

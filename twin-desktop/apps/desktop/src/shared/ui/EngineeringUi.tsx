@@ -160,6 +160,7 @@ export function ThermalFieldLegend({
   warnings,
   gradientCss,
   condensationMode,
+  thresholds,
 }: {
   title?: string;
   minC: number;
@@ -174,6 +175,8 @@ export function ThermalFieldLegend({
   gradientCss?: string;
   /** If true, switches to green→red condensation risk palette labels */
   condensationMode?: boolean;
+  /** Vertical tick marks on the colorbar at specific temperatures */
+  thresholds?: Array<{ value_C: number; label?: string; color?: string }>;
 }) {
   const resolvedGradient =
     gradientCss ??
@@ -192,12 +195,24 @@ export function ThermalFieldLegend({
       {/* Title row */}
       <p className="mb-1.5 font-semibold text-[color:var(--text-base)]">{title}</p>
 
-      {/* Colorbar */}
+      {/* Colorbar with optional threshold ticks */}
       <div
-        className="h-2.5 w-full max-w-[220px] rounded-full shadow-inner"
+        className="relative h-2.5 w-full max-w-[220px] rounded-full shadow-inner overflow-hidden"
         style={{ background: resolvedGradient }}
         title={`${minLabel} → ${maxLabel}`}
-      />
+      >
+        {thresholds?.map((t) => {
+          const pos = Math.max(0, Math.min(1, (t.value_C - minC) / Math.max(maxC - minC, 1e-6)));
+          return (
+            <div
+              key={t.value_C}
+              className="absolute inset-y-0 w-[2px]"
+              style={{ left: `${pos * 100}%`, background: t.color ?? "rgba(255,255,255,0.88)" }}
+              title={t.label ?? `${t.value_C} °C`}
+            />
+          );
+        })}
+      </div>
 
       {/* Min / [avg] / max row */}
       <div className="mt-1 flex max-w-[220px] items-center justify-between font-medium tabular-nums text-[color:var(--text-base)]">

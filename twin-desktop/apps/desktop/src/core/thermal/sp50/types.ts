@@ -21,6 +21,7 @@ export interface Sp50SourceData {
   heatedAreaM2: number | null;
   buildingCategory: Sp50BuildingCategory | null;
   storeys: number | null;
+  buildingHeightM: number | null;
   humidityZone: Sp50HumidityZone | null;
   moistureMode: Sp50MoistureMode | null;
   operationCondition: Sp50OperationCondition | null;

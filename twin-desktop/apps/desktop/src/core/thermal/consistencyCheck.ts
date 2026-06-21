@@ -112,7 +112,7 @@ export interface EnergyIntegrationCheck {
   durationHours: number;
   minTotalPowerKW: number;
   maxTotalPowerKW: number;
-  /** Recomputed energy from timeline by trapezoidal integration, kWh. */
+  /** Recomputed energy from timeline using the same left-point convention as solver metrics, kWh. */
   recomputedEnergyKWh: number;
   reportedSummaryEnergyKWh: number;
   differenceKWh: number;
@@ -214,9 +214,10 @@ function recomputeEnergyFromTimeline(result: ThermalSimulationResult): {
     const dtSeconds = dtHours * 3600;
     dts.push(dtSeconds);
 
-    // Use the power at step i (start of interval convention)
+    // Solver metrics integrate the state snapshot at the start of each interval.
+    const intervalPoint = tl[i - 1];
     let stepPowerW = 0;
-    const roomsEntry = tl[i].rooms;
+    const roomsEntry = intervalPoint.rooms;
     for (const roomId of Object.keys(roomsEntry)) {
       stepPowerW += Math.max(0, roomsEntry[roomId].heatingPowerW ?? 0);
     }

@@ -1,4 +1,5 @@
 import { polygonArea, segmentLength } from "../../../entities/geometry/geom";
+import { roundedContourPoints } from "../../../core/geometry/fillets";
 import type {
   BuildingModel,
   Sp50EnvelopeFragmentInput,
@@ -102,9 +103,25 @@ export function syncThermalProtectionEnvelope(model: BuildingModel): BuildingMod
     (model.thermalProtection?.envelope ?? []).map((fragment) => [fragment.id, fragment])
   );
   const envelope: Sp50EnvelopeFragmentInput[] = [];
+  const wallFillets = model.wallFillets ?? [];
+  const roundedRoomArea = (room: BuildingModel["rooms"][number]): number => {
+    if (!wallFillets.length) {
+      return Math.abs(polygonArea(room.polygon));
+    }
+    const radiusForIndex = (index: number): number => {
+      const vertex = room.polygon[index];
+      const match = wallFillets.find(
+        (fillet) =>
+          fillet.levelId === room.levelId &&
+          Math.hypot(fillet.point.x - vertex.x, fillet.point.y - vertex.y) <= 0.3
+      );
+      return match?.radius_m ?? 0;
+    };
+    return Math.abs(polygonArea(roundedContourPoints(room.polygon, radiusForIndex, 6)));
+  };
   const heatedAreaM2 =
     model.thermalProtection?.heatedAreaM2 ??
-    model.rooms.reduce((sum, room) => sum + Math.abs(polygonArea(room.polygon)), 0);
+    model.rooms.reduce((sum, room) => sum + roundedRoomArea(room), 0);
   const averageHeight =
     model.levels.reduce((sum, level) => sum + level.height_m, 0) / Math.max(model.levels.length, 1);
   const heatedVolumeM3 = model.thermalProtection?.heatedVolumeM3 ?? heatedAreaM2 * averageHeight;

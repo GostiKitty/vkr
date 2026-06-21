@@ -6,6 +6,25 @@ import {
 } from "../engineering2d/catalog";
 
 const ROTATION_OPTIONS = ["0", "90", "180", "270"].map((value) => ({ value, label: `${value}°` }));
+const VALVE_STATE_OPTIONS = [
+  { value: "open", label: "Открыт" },
+  { value: "closed", label: "Закрыт" },
+  { value: "regulating", label: "Регулируемый" },
+];
+const FIRE_DAMPER_STATE_OPTIONS = [
+  { value: "open", label: "Открыт" },
+  { value: "closed", label: "Закрыт" },
+];
+const FLOW_METER_VARIANT_OPTIONS = [
+  { value: "electromagnetic", label: "Электромагнитный" },
+  { value: "ultrasonic", label: "Ультразвуковой" },
+  { value: "turbine", label: "Турбинный" },
+  { value: "vortex", label: "Вихревой" },
+];
+const AIR_MEDIUM_OPTIONS = [
+  { value: "airSupply", label: "Приток" },
+  { value: "airExhaust", label: "Вытяжка" },
+];
 
 interface EngineeringEquipmentFormProps {
   equipment: EngineeringEquipment;
@@ -16,6 +35,18 @@ interface EngineeringPipeFormProps {
   model: BuildingModel;
   pipe: EngineeringPipe;
   onUpdateEngineeringPipe: (pipeId: string, patch: Partial<EngineeringPipe>) => void;
+}
+
+function buildAirMediumEquipmentPatch(
+  equipment: EngineeringEquipment,
+  airMedium: "airSupply" | "airExhaust"
+): Partial<EngineeringEquipment> {
+  return {
+    parameters: { ...equipment.parameters, airMedium },
+    ports: equipment.ports.map((port) =>
+      port.medium === "airSupply" || port.medium === "airExhaust" ? { ...port, medium: airMedium } : port
+    ),
+  };
 }
 
 export function EngineeringEquipmentForm({
@@ -115,7 +146,23 @@ function EngineeringEquipmentParameterFields({
         </div>
       );
     case "valve":
+    case "gateValve":
+    case "ballValve":
+    case "checkValve":
+    case "threeWayValve":
+      return (
+        <div className="grid grid-cols-2 gap-2">
+          <NumberField label="Диаметр, мм" value={toNumber(equipment.parameters.diameterMm)} step={1} onChange={(value) => onPatch({ diameterMm: value })} />
+          <SelectField
+            label="Состояние"
+            value={String(equipment.parameters.state ?? "open")}
+            options={VALVE_STATE_OPTIONS}
+            onChange={(value) => onPatch({ state: value })}
+          />
+        </div>
+      );
     case "controlValve":
+    case "balancingValve":
       return (
         <div className="grid grid-cols-2 gap-2">
           <NumberField label="Диаметр, мм" value={toNumber(equipment.parameters.diameterMm)} step={1} onChange={(value) => onPatch({ diameterMm: value })} />
@@ -123,11 +170,7 @@ function EngineeringEquipmentParameterFields({
           <SelectField
             label="Состояние"
             value={String(equipment.parameters.state ?? "open")}
-            options={[
-              { value: "open", label: "Открыт" },
-              { value: "closed", label: "Закрыт" },
-              { value: "regulating", label: "Регулируемый" },
-            ]}
+            options={VALVE_STATE_OPTIONS}
             onChange={(value) => onPatch({ state: value })}
           />
         </div>
@@ -147,6 +190,13 @@ function EngineeringEquipmentParameterFields({
           <NumberField label="Давление, бар" value={toNumber(equipment.parameters.pressureBar)} step={0.1} onChange={(value) => onPatch({ pressureBar: value })} />
         </div>
       );
+    case "manifold":
+      return (
+        <div className="grid grid-cols-2 gap-2">
+          <NumberField label="Диаметр, мм" value={toNumber(equipment.parameters.diameterMm)} step={1} onChange={(value) => onPatch({ diameterMm: value })} />
+          <NumberField label="Отводов" value={toNumber(equipment.parameters.branchCount)} step={1} onChange={(value) => onPatch({ branchCount: value })} />
+        </div>
+      );
     case "heatMeter":
       return (
         <div className="grid grid-cols-2 gap-2">
@@ -156,6 +206,298 @@ function EngineeringEquipmentParameterFields({
           <NumberField label="Тепловая мощность, кВт" value={toNumber(equipment.parameters.heatPowerKW)} step={0.5} onChange={(value) => onPatch({ heatPowerKW: value })} />
         </div>
       );
+    case "pressureRegulator":
+      return (
+        <div className="grid grid-cols-2 gap-2">
+          <NumberField label="Диаметр, мм" value={toNumber(equipment.parameters.diameterMm)} step={1} onChange={(value) => onPatch({ diameterMm: value })} />
+          <NumberField label="Настройка, кПа" value={toNumber(equipment.parameters.setpointKPa)} step={0.5} onChange={(value) => onPatch({ setpointKPa: value })} />
+        </div>
+      );
+    case "safetyValve":
+      return (
+        <div className="grid grid-cols-2 gap-2">
+          <NumberField label="Диаметр, мм" value={toNumber(equipment.parameters.diameterMm)} step={1} onChange={(value) => onPatch({ diameterMm: value })} />
+          <NumberField label="Давление срабатывания, бар" value={toNumber(equipment.parameters.setpressureBar)} step={0.1} onChange={(value) => onPatch({ setpressureBar: value })} />
+        </div>
+      );
+    case "thermostaticValve":
+      return (
+        <div className="grid grid-cols-2 gap-2">
+          <NumberField label="Диаметр, мм" value={toNumber(equipment.parameters.diameterMm)} step={1} onChange={(value) => onPatch({ diameterMm: value })} />
+          <NumberField label="Уставка, °C" value={toNumber(equipment.parameters.setpointC)} step={0.5} onChange={(value) => onPatch({ setpointC: value })} />
+        </div>
+      );
+    case "flowMeter":
+      return (
+        <div className="grid grid-cols-2 gap-2">
+          <NumberField label="Диаметр, мм" value={toNumber(equipment.parameters.diameterMm)} step={1} onChange={(value) => onPatch({ diameterMm: value })} />
+          <NumberField label="Расход, м³/ч" value={toNumber(equipment.parameters.flowRateM3H)} step={0.1} onChange={(value) => onPatch({ flowRateM3H: value })} />
+          <SelectField
+            label="Тип"
+            value={String(equipment.parameters.variant ?? "electromagnetic")}
+            options={FLOW_METER_VARIANT_OPTIONS}
+            onChange={(value) => onPatch({ variant: value })}
+          />
+        </div>
+      );
+    case "convector":
+      return (
+        <div className="grid grid-cols-2 gap-2">
+          <NumberField label="Мощность, Вт" value={toNumber(equipment.parameters.nominalPowerW)} step={50} onChange={(value) => onPatch({ nominalPowerW: value })} />
+          <NumberField label="Температура, °C" value={toNumber(equipment.parameters.designTemperatureC)} step={0.5} onChange={(value) => onPatch({ designTemperatureC: value })} />
+          <NumberField label="Расход, м³/ч" value={toNumber(equipment.parameters.flowRateM3H)} step={0.1} onChange={(value) => onPatch({ flowRateM3H: value })} />
+        </div>
+      );
+    case "airHandlingUnit":
+      return (
+        <div className="grid grid-cols-2 gap-2">
+          <NumberField label="Расход воздуха, м³/ч" value={toNumber(equipment.parameters.airflowM3H)} step={10} onChange={(value) => onPatch({ airflowM3H: value })} />
+          <NumberField label="Рекуперация" value={toNumber(equipment.parameters.heatRecoveryEfficiency)} step={0.01} onChange={(value) => onPatch({ heatRecoveryEfficiency: value })} />
+          <NumberField label="Температура притока, °C" value={toNumber(equipment.parameters.supplyTemperatureC)} step={0.5} onChange={(value) => onPatch({ supplyTemperatureC: value })} />
+          <NumberField label="Расп. давление, Па" value={toNumber(equipment.parameters.pressurePa)} step={10} onChange={(value) => onPatch({ pressurePa: value })} />
+          <NumberField label="Мощность, кВт" value={toNumber(equipment.parameters.powerKW)} step={0.1} onChange={(value) => onPatch({ powerKW: value })} />
+        </div>
+      );
+    case "ductFan":
+      return (
+        <div className="grid grid-cols-2 gap-2">
+          <NumberField label="Расход воздуха, м³/ч" value={toNumber(equipment.parameters.airflowM3H)} step={10} onChange={(value) => onPatch({ airflowM3H: value })} />
+          <NumberField label="Давление, Па" value={toNumber(equipment.parameters.pressurePa)} step={10} onChange={(value) => onPatch({ pressurePa: value })} />
+          <NumberField label="Мощность, кВт" value={toNumber(equipment.parameters.powerKW)} step={0.1} onChange={(value) => onPatch({ powerKW: value })} />
+          <SelectField
+            label="Среда"
+            value={String(equipment.parameters.airMedium ?? "airSupply")}
+            options={AIR_MEDIUM_OPTIONS}
+            onChange={(value) => onUpdateEquipment(equipment.id, buildAirMediumEquipmentPatch(equipment, value as "airSupply" | "airExhaust"))}
+          />
+        </div>
+      );
+    case "roofFan":
+      return (
+        <div className="grid grid-cols-2 gap-2">
+          <NumberField label="Р Р°СЃС…РѕРґ РІРѕР·РґСѓС…Р°, РјВі/С‡" value={toNumber(equipment.parameters.airflowM3H)} step={10} onChange={(value) => onPatch({ airflowM3H: value })} />
+          <NumberField label="Р”Р°РІР»РµРЅРёРµ, РџР°" value={toNumber(equipment.parameters.pressurePa)} step={10} onChange={(value) => onPatch({ pressurePa: value })} />
+          <NumberField label="РњРѕС‰РЅРѕСЃС‚СЊ, РєР’С‚" value={toNumber(equipment.parameters.powerKW)} step={0.1} onChange={(value) => onPatch({ powerKW: value })} />
+          <SelectField
+            label="РЎСЂРµРґР°"
+            value={String(equipment.parameters.airMedium ?? "airExhaust")}
+            options={AIR_MEDIUM_OPTIONS}
+            onChange={(value) => onUpdateEquipment(equipment.id, buildAirMediumEquipmentPatch(equipment, value as "airSupply" | "airExhaust"))}
+          />
+        </div>
+      );
+    case "airDamper":
+      return (
+        <div className="grid grid-cols-2 gap-2">
+          <NumberField label="Ширина, мм" value={toNumber(equipment.parameters.sectionWidthMm)} step={10} onChange={(value) => onPatch({ sectionWidthMm: value })} />
+          <NumberField label="Высота, мм" value={toNumber(equipment.parameters.sectionHeightMm)} step={10} onChange={(value) => onPatch({ sectionHeightMm: value })} />
+          <SelectField
+            label="Состояние"
+            value={String(equipment.parameters.state ?? "open")}
+            options={VALVE_STATE_OPTIONS}
+            onChange={(value) => onPatch({ state: value })}
+          />
+          <NumberField label="Потери давления, Па" value={toNumber(equipment.parameters.pressureDropPa)} step={5} onChange={(value) => onPatch({ pressureDropPa: value })} />
+          <SelectField
+            label="Среда"
+            value={String(equipment.parameters.airMedium ?? "airSupply")}
+            options={AIR_MEDIUM_OPTIONS}
+            onChange={(value) => onUpdateEquipment(equipment.id, buildAirMediumEquipmentPatch(equipment, value as "airSupply" | "airExhaust"))}
+          />
+        </div>
+      );
+    case "airCheckValve":
+      return (
+        <div className="grid grid-cols-2 gap-2">
+          <NumberField label="РЁРёСЂРёРЅР°, РјРј" value={toNumber(equipment.parameters.sectionWidthMm)} step={10} onChange={(value) => onPatch({ sectionWidthMm: value })} />
+          <NumberField label="Р’С‹СЃРѕС‚Р°, РјРј" value={toNumber(equipment.parameters.sectionHeightMm)} step={10} onChange={(value) => onPatch({ sectionHeightMm: value })} />
+          <SelectField
+            label="РЎРѕСЃС‚РѕСЏРЅРёРµ"
+            value={String(equipment.parameters.state ?? "open")}
+            options={FIRE_DAMPER_STATE_OPTIONS}
+            onChange={(value) => onPatch({ state: value })}
+          />
+          <NumberField label="РџРѕС‚РµСЂРё РґР°РІР»РµРЅРёСЏ, РџР°" value={toNumber(equipment.parameters.pressureDropPa)} step={5} onChange={(value) => onPatch({ pressureDropPa: value })} />
+          <SelectField
+            label="РЎСЂРµРґР°"
+            value={String(equipment.parameters.airMedium ?? "airSupply")}
+            options={AIR_MEDIUM_OPTIONS}
+            onChange={(value) => onUpdateEquipment(equipment.id, buildAirMediumEquipmentPatch(equipment, value as "airSupply" | "airExhaust"))}
+          />
+        </div>
+      );
+    case "fireDamper":
+      return (
+        <div className="grid grid-cols-2 gap-2">
+          <NumberField label="Ширина, мм" value={toNumber(equipment.parameters.sectionWidthMm)} step={10} onChange={(value) => onPatch({ sectionWidthMm: value })} />
+          <NumberField label="Высота, мм" value={toNumber(equipment.parameters.sectionHeightMm)} step={10} onChange={(value) => onPatch({ sectionHeightMm: value })} />
+          <SelectField
+            label="Состояние"
+            value={String(equipment.parameters.state ?? "open")}
+            options={FIRE_DAMPER_STATE_OPTIONS}
+            onChange={(value) => onPatch({ state: value })}
+          />
+          <NumberField label="Потери давления, Па" value={toNumber(equipment.parameters.pressureDropPa)} step={5} onChange={(value) => onPatch({ pressureDropPa: value })} />
+          <SelectField
+            label="Среда"
+            value={String(equipment.parameters.airMedium ?? "airSupply")}
+            options={AIR_MEDIUM_OPTIONS}
+            onChange={(value) => onUpdateEquipment(equipment.id, buildAirMediumEquipmentPatch(equipment, value as "airSupply" | "airExhaust"))}
+          />
+        </div>
+      );
+    case "airFilter":
+      return (
+        <div className="grid grid-cols-2 gap-2">
+          <NumberField label="Ширина, мм" value={toNumber(equipment.parameters.sectionWidthMm)} step={10} onChange={(value) => onPatch({ sectionWidthMm: value })} />
+          <NumberField label="Высота, мм" value={toNumber(equipment.parameters.sectionHeightMm)} step={10} onChange={(value) => onPatch({ sectionHeightMm: value })} />
+          <NumberField label="Потери давления, Па" value={toNumber(equipment.parameters.pressureDropPa)} step={5} onChange={(value) => onPatch({ pressureDropPa: value })} />
+          <NumberField label="Загрязнение, %" value={toNumber(equipment.parameters.contaminationPercent)} step={5} onChange={(value) => onPatch({ contaminationPercent: value })} />
+          <SelectField
+            label="Среда"
+            value={String(equipment.parameters.airMedium ?? "airSupply")}
+            options={AIR_MEDIUM_OPTIONS}
+            onChange={(value) => onUpdateEquipment(equipment.id, buildAirMediumEquipmentPatch(equipment, value as "airSupply" | "airExhaust"))}
+          />
+        </div>
+      );
+    case "airFlowRegulatorConst":
+      return (
+        <div className="grid grid-cols-2 gap-2">
+          <NumberField label="Ширина, мм" value={toNumber(equipment.parameters.sectionWidthMm)} step={10} onChange={(value) => onPatch({ sectionWidthMm: value })} />
+          <NumberField label="Высота, мм" value={toNumber(equipment.parameters.sectionHeightMm)} step={10} onChange={(value) => onPatch({ sectionHeightMm: value })} />
+          <NumberField label="Расход воздуха, м³/ч" value={toNumber(equipment.parameters.airflowM3H)} step={10} onChange={(value) => onPatch({ airflowM3H: value })} />
+          <NumberField label="Потери давления, Па" value={toNumber(equipment.parameters.pressureDropPa)} step={5} onChange={(value) => onPatch({ pressureDropPa: value })} />
+          <SelectField
+            label="Среда"
+            value={String(equipment.parameters.airMedium ?? "airSupply")}
+            options={AIR_MEDIUM_OPTIONS}
+            onChange={(value) => onUpdateEquipment(equipment.id, buildAirMediumEquipmentPatch(equipment, value as "airSupply" | "airExhaust"))}
+          />
+        </div>
+      );
+    case "airFlowRegulatorVar":
+      return (
+        <div className="grid grid-cols-2 gap-2">
+          <NumberField label="Ширина, мм" value={toNumber(equipment.parameters.sectionWidthMm)} step={10} onChange={(value) => onPatch({ sectionWidthMm: value })} />
+          <NumberField label="Высота, мм" value={toNumber(equipment.parameters.sectionHeightMm)} step={10} onChange={(value) => onPatch({ sectionHeightMm: value })} />
+          <NumberField label="Расход воздуха, м³/ч" value={toNumber(equipment.parameters.airflowM3H)} step={10} onChange={(value) => onPatch({ airflowM3H: value })} />
+          <NumberField label="Положение, %" value={toNumber(equipment.parameters.damperPositionPercent)} step={5} onChange={(value) => onPatch({ damperPositionPercent: value })} />
+          <NumberField label="Потери давления, Па" value={toNumber(equipment.parameters.pressureDropPa)} step={5} onChange={(value) => onPatch({ pressureDropPa: value })} />
+          <SelectField
+            label="Среда"
+            value={String(equipment.parameters.airMedium ?? "airSupply")}
+            options={AIR_MEDIUM_OPTIONS}
+            onChange={(value) => onUpdateEquipment(equipment.id, buildAirMediumEquipmentPatch(equipment, value as "airSupply" | "airExhaust"))}
+          />
+        </div>
+      );
+    case "silencer":
+      return (
+        <div className="grid grid-cols-2 gap-2">
+          <NumberField label="Ширина, мм" value={toNumber(equipment.parameters.sectionWidthMm)} step={10} onChange={(value) => onPatch({ sectionWidthMm: value })} />
+          <NumberField label="Высота, мм" value={toNumber(equipment.parameters.sectionHeightMm)} step={10} onChange={(value) => onPatch({ sectionHeightMm: value })} />
+          <NumberField label="Потери давления, Па" value={toNumber(equipment.parameters.pressureDropPa)} step={5} onChange={(value) => onPatch({ pressureDropPa: value })} />
+          <SelectField
+            label="Среда"
+            value={String(equipment.parameters.airMedium ?? "airSupply")}
+            options={AIR_MEDIUM_OPTIONS}
+            onChange={(value) => onUpdateEquipment(equipment.id, buildAirMediumEquipmentPatch(equipment, value as "airSupply" | "airExhaust"))}
+          />
+        </div>
+      );
+    case "airHeater":
+      return (
+        <div className="grid grid-cols-2 gap-2">
+          <NumberField label="Расход воздуха, м³/ч" value={toNumber(equipment.parameters.airflowM3H)} step={10} onChange={(value) => onPatch({ airflowM3H: value })} />
+          <NumberField label="Мощность, кВт" value={toNumber(equipment.parameters.powerKW)} step={0.1} onChange={(value) => onPatch({ powerKW: value })} />
+          <NumberField label="Температура притока, °C" value={toNumber(equipment.parameters.supplyTemperatureC)} step={0.5} onChange={(value) => onPatch({ supplyTemperatureC: value })} />
+          <NumberField label="Потери давления, Па" value={toNumber(equipment.parameters.pressureDropPa)} step={5} onChange={(value) => onPatch({ pressureDropPa: value })} />
+          <SelectField
+            label="Среда"
+            value={String(equipment.parameters.airMedium ?? "airSupply")}
+            options={AIR_MEDIUM_OPTIONS}
+            onChange={(value) => onUpdateEquipment(equipment.id, buildAirMediumEquipmentPatch(equipment, value as "airSupply" | "airExhaust"))}
+          />
+        </div>
+      );
+    case "airCooler":
+      return (
+        <div className="grid grid-cols-2 gap-2">
+          <NumberField label="Расход воздуха, м³/ч" value={toNumber(equipment.parameters.airflowM3H)} step={10} onChange={(value) => onPatch({ airflowM3H: value })} />
+          <NumberField label="Холодопроизводительность, кВт" value={toNumber(equipment.parameters.coolingPowerKW)} step={0.1} onChange={(value) => onPatch({ coolingPowerKW: value })} />
+          <NumberField label="Температура притока, °C" value={toNumber(equipment.parameters.supplyTemperatureC)} step={0.5} onChange={(value) => onPatch({ supplyTemperatureC: value })} />
+          <NumberField label="Потери давления, Па" value={toNumber(equipment.parameters.pressureDropPa)} step={5} onChange={(value) => onPatch({ pressureDropPa: value })} />
+          <SelectField
+            label="Среда"
+            value={String(equipment.parameters.airMedium ?? "airSupply")}
+            options={AIR_MEDIUM_OPTIONS}
+            onChange={(value) => onUpdateEquipment(equipment.id, buildAirMediumEquipmentPatch(equipment, value as "airSupply" | "airExhaust"))}
+          />
+        </div>
+      );
+    case "airHumidifier":
+      return (
+        <div className="grid grid-cols-2 gap-2">
+          <NumberField label="Расход воздуха, м³/ч" value={toNumber(equipment.parameters.airflowM3H)} step={10} onChange={(value) => onPatch({ airflowM3H: value })} />
+          <NumberField label="Производительность, кг/ч" value={toNumber(equipment.parameters.humidificationCapacityKgH)} step={0.5} onChange={(value) => onPatch({ humidificationCapacityKgH: value })} />
+          <NumberField label="Мощность, кВт" value={toNumber(equipment.parameters.powerKW)} step={0.1} onChange={(value) => onPatch({ powerKW: value })} />
+          <NumberField label="Температура притока, °C" value={toNumber(equipment.parameters.supplyTemperatureC)} step={0.5} onChange={(value) => onPatch({ supplyTemperatureC: value })} />
+          <NumberField label="Потери давления, Па" value={toNumber(equipment.parameters.pressureDropPa)} step={5} onChange={(value) => onPatch({ pressureDropPa: value })} />
+          <SelectField
+            label="Среда"
+            value={String(equipment.parameters.airMedium ?? "airSupply")}
+            options={AIR_MEDIUM_OPTIONS}
+            onChange={(value) => onUpdateEquipment(equipment.id, buildAirMediumEquipmentPatch(equipment, value as "airSupply" | "airExhaust"))}
+          />
+        </div>
+      );
+    case "airDehumidifier":
+      return (
+        <div className="grid grid-cols-2 gap-2">
+          <NumberField label="Расход воздуха, м³/ч" value={toNumber(equipment.parameters.airflowM3H)} step={10} onChange={(value) => onPatch({ airflowM3H: value })} />
+          <NumberField label="Осушение, кг/ч" value={toNumber(equipment.parameters.moistureRemovalKgH)} step={0.5} onChange={(value) => onPatch({ moistureRemovalKgH: value })} />
+          <NumberField label="Мощность, кВт" value={toNumber(equipment.parameters.powerKW)} step={0.1} onChange={(value) => onPatch({ powerKW: value })} />
+          <NumberField label="Температура притока, °C" value={toNumber(equipment.parameters.supplyTemperatureC)} step={0.5} onChange={(value) => onPatch({ supplyTemperatureC: value })} />
+          <NumberField label="Потери давления, Па" value={toNumber(equipment.parameters.pressureDropPa)} step={5} onChange={(value) => onPatch({ pressureDropPa: value })} />
+          <SelectField
+            label="Среда"
+            value={String(equipment.parameters.airMedium ?? "airSupply")}
+            options={AIR_MEDIUM_OPTIONS}
+            onChange={(value) => onUpdateEquipment(equipment.id, buildAirMediumEquipmentPatch(equipment, value as "airSupply" | "airExhaust"))}
+          />
+        </div>
+      );
+    case "supplyDiffuser":
+      return (
+        <div className="grid grid-cols-2 gap-2">
+          <NumberField label="Расход воздуха, м³/ч" value={toNumber(equipment.parameters.airflowM3H)} step={10} onChange={(value) => onPatch({ airflowM3H: value })} />
+          <NumberField label="Температура притока, °C" value={toNumber(equipment.parameters.supplyTemperatureC)} step={0.5} onChange={(value) => onPatch({ supplyTemperatureC: value })} />
+          <NumberField label="Потери давления, Па" value={toNumber(equipment.parameters.pressureDropPa)} step={5} onChange={(value) => onPatch({ pressureDropPa: value })} />
+        </div>
+      );
+    case "exhaustGrille":
+      return (
+        <div className="grid grid-cols-2 gap-2">
+          <NumberField label="Расход воздуха, м³/ч" value={toNumber(equipment.parameters.airflowM3H)} step={10} onChange={(value) => onPatch({ airflowM3H: value })} />
+          <NumberField label="Потери давления, Па" value={toNumber(equipment.parameters.pressureDropPa)} step={5} onChange={(value) => onPatch({ pressureDropPa: value })} />
+        </div>
+      );
+    case "automationCabinet":
+      return (
+        <div className="grid grid-cols-2 gap-2">
+          <NumberField label="Напряжение, В" value={toNumber(equipment.parameters.voltageV)} step={1} onChange={(value) => onPatch({ voltageV: value })} />
+          <NumberField label="Каналы" value={toNumber(equipment.parameters.signalChannels)} step={1} onChange={(value) => onPatch({ signalChannels: value })} />
+        </div>
+      );
+    case "sensorTemperature":
+      return <NumberField label="Температура, °C" value={toNumber(equipment.parameters.measuredValueC)} step={0.1} onChange={(value) => onPatch({ measuredValueC: value })} />;
+    case "sensorPressure":
+      return <NumberField label="Давление, бар" value={toNumber(equipment.parameters.measuredValueBar)} step={0.1} onChange={(value) => onPatch({ measuredValueBar: value })} />;
+    case "sensorFlow":
+      return <NumberField label="Расход, м³/ч" value={toNumber(equipment.parameters.flowRateM3H)} step={0.1} onChange={(value) => onPatch({ flowRateM3H: value })} />;
+    case "sensorHumidity":
+      return <NumberField label="Влажность, %" value={toNumber(equipment.parameters.relativeHumidityPercent)} step={1} onChange={(value) => onPatch({ relativeHumidityPercent: value })} />;
     default:
       return null;
   }

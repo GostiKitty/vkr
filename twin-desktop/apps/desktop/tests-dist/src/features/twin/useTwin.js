@@ -3,7 +3,9 @@ import { useTwinStore } from "../../entities/twin/twin.store";
 import { fetchTwin } from "./twin.api";
 import { buildSpaceInstances, buildThermalGraph, simulateThermalGraph } from "./twin.engine";
 import { useEngineSettingsStore } from "../../entities/settings/engine.store";
+import { isWebProductionRuntime } from "../../shared/runtime/webProduction";
 const RECONNECT_DELAY_MS = 5000;
+const WEB_ENGINE_UNAVAILABLE_MESSAGE = "Серверный проект недоступен в web-демо. Откройте демо-проект в конструкторе или запустите desktop-версию с локальным движком.";
 export function useTwin(projectId, projectKind) {
     const twin = useTwinStore((state) => state.twin);
     const selectedSpaceId = useTwinStore((state) => state.selectedSpaceId);
@@ -46,7 +48,14 @@ export function useTwin(projectId, projectKind) {
         }
         if (!engineBase) {
             setLoading(false);
-            setError("Движок не настроен. Укажите URL в разделе «Настройки».");
+            setError(isWebProductionRuntime()
+                ? WEB_ENGINE_UNAVAILABLE_MESSAGE
+                : "Движок не настроен. Укажите URL в разделе «Настройки».");
+            return;
+        }
+        if (isWebProductionRuntime()) {
+            setLoading(false);
+            setError(WEB_ENGINE_UNAVAILABLE_MESSAGE);
             return;
         }
         const safeProjectId = normalizedProjectId;

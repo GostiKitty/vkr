@@ -18,6 +18,9 @@ import type {
   Wall,
   Window,
 } from "../../../entities/geometry/types";
+import { listWallJoints, type WallJoint } from "../auto/wallFillets";
+import { computeWallJoinData, type WallCornerPatchInput } from "../view3d/wallJoins";
+import { arcPolyline } from "../../../core/geometry/fillets";
 import type {
   EngineeringEquipment,
   EngineeringEquipmentType,
@@ -131,7 +134,12 @@ import {
   normalizeEngineeringRotation,
   rotateEngineeringDirection,
 } from "../engineering2d/catalog";
-import { renderEngineeringEquipmentSymbol } from "../engineering2d/render";
+import {
+  renderEngineeringEquipmentSymbol,
+  resolveEngineeringEquipmentRenderRotation,
+  resolveEngineeringEquipmentRenderSize,
+  resolveEngineeringRenderedPortPosition,
+} from "../engineering2d/render";
 import {
   applyEnvelopePresetToDoor,
   applyEnvelopePresetToFloorSlab,
@@ -181,6 +189,7 @@ interface Canvas2DProps {
   onUpdateRoom: (roomId: string, patch: Partial<Room>) => void;
   onSetWalls: (walls: Wall[]) => void;
   onUpdateWall: (wallId: string, patch: Partial<Wall>) => void;
+  onSetWallFillet: (levelId: string, point: Vec2, radius: number) => void;
   onAddRoof: (roof: Roof) => void;
   onUpdateRoof: (roofId: string, patch: Partial<Roof>) => void;
   onAddFloorSlab: (slab: FloorSlab) => void;
@@ -226,6 +235,7 @@ type DragState =
   | { type: "move-engineering-equipment"; id: string; origin: Vec2; start: Vec2 }
   | { type: "move-room"; roomId: string; origin: Vec2[]; start: Vec2 }
   | { type: "move-wall"; wallId: string; originA: Vec2; originB: Vec2; start: Vec2 }
+  | { type: "move-boundary"; kind: "roof" | "slab" | "stair"; id: string; origin: Vec2[]; start: Vec2 }
   | { type: "move-network"; kind: "pipe" | "duct"; id: string; origin: Vec2[]; start: Vec2 }
   | { type: "select-area"; start: Vec2; end: Vec2 }
   | { type: "erase-area"; start: Vec2; end: Vec2 }
@@ -712,9 +722,13 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
       onUpdateRoom,
       onSetWalls,
       onUpdateWall,
+      onSetWallFillet,
       onAddRoof,
+      onUpdateRoof,
       onAddFloorSlab,
+      onUpdateFloorSlab,
       onAddStair,
+      onUpdateStair,
       onAddDoor,
       onUpdateDoor,
       onAddWindow,
@@ -790,7 +804,17 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
       fromPortId: string;
     } | null>(null);
     const [engineeringEquipmentDraft, setEngineeringEquipmentDraft] = useState<{ id: string; x: number; y: number } | null>(null);
+    const [boundaryDraft, setBoundaryDraft] = useState<{ kind: "roof" | "slab" | "stair"; id: string; boundary: Vec2[] } | null>(null);
+    const [filletPopup, setFilletPopup] = useState<{
+      point: Vec2;
+      screenX: number;
+      screenY: number;
+      value: string;
+    } | null>(null);
+    const [hoveredFilletJoint, setHoveredFilletJoint] = useState<Vec2 | null>(null);
+    const filletInputRef = useRef<HTMLInputElement | null>(null);
     const [hoveredEngineeringEquipmentId, setHoveredEngineeringEquipmentId] = useState<string | null>(null);
+    const [hoveredBoundarySelection, setHoveredBoundarySelection] = useState<Extract<NonNullable<Selection>, { kind: "roof" | "slab" | "stair" }> | null>(null);
     const [pointerWorld, setPointerWorld] = useState<Vec2 | null>(null);
     const [rectStart, setRectStart] = useState<Vec2 | null>(null);
     const [rectPreview, setRectPreview] = useState<Vec2 | null>(null);
@@ -900,15 +924,27 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
       }
       return result;
     }, [model.walls, activeLevelId, wallDraft, multiMoveDelta, multiSelection]);
-    const roofs = useMemo(() => (model.roofs ?? []).filter((roof) => roof.levelId === activeLevelId), [activeLevelId, model.roofs]);
-    const floorSlabs = useMemo(
-      () => (model.floorSlabs ?? []).filter((slab) => slab.levelId === activeLevelId),
-      [activeLevelId, model.floorSlabs]
-    );
-    const stairs = useMemo(
-      () => (model.stairs ?? []).filter((stair) => stair.levelId === activeLevelId),
-      [activeLevelId, model.stairs]
-    );
+    const roofs = useMemo(() => {
+      const filtered = (model.roofs ?? []).filter((roof) => roof.levelId === activeLevelId);
+      if (boundaryDraft?.kind === "roof") {
+        return filtered.map((roof) => roof.id === boundaryDraft.id ? { ...roof, boundary: boundaryDraft.boundary } : roof);
+      }
+      return filtered;
+    }, [activeLevelId, model.roofs, boundaryDraft]);
+    const floorSlabs = useMemo(() => {
+      const filtered = (model.floorSlabs ?? []).filter((slab) => slab.levelId === activeLevelId);
+      if (boundaryDraft?.kind === "slab") {
+        return filtered.map((slab) => slab.id === boundaryDraft.id ? { ...slab, boundary: boundaryDraft.boundary } : slab);
+      }
+      return filtered;
+    }, [activeLevelId, model.floorSlabs, boundaryDraft]);
+    const stairs = useMemo(() => {
+      const filtered = (model.stairs ?? []).filter((stair) => stair.levelId === activeLevelId);
+      if (boundaryDraft?.kind === "stair") {
+        return filtered.map((stair) => stair.id === boundaryDraft.id ? { ...stair, boundary: boundaryDraft.boundary } : stair);
+      }
+      return filtered;
+    }, [activeLevelId, model.stairs, boundaryDraft]);
     const contextRooms = useMemo(
       () =>
         contextLevels.flatMap(({ level, relation }) =>
@@ -1166,6 +1202,55 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
           : pipe
       );
     }, [activeLevelId, model.engineeringSystems?.pipes, multiMoveDelta, multiSelection]);
+    const engineeringEquipmentById = useMemo(
+      () => new Map(engineeringEquipment.map((item) => [item.id, item] as const)),
+      [engineeringEquipment]
+    );
+    const engineeringEquipmentRenderRotationById = useMemo(() => {
+      const rotationById = new Map<string, number>();
+      engineeringEquipment.forEach((item) => {
+        rotationById.set(item.id, resolveEngineeringEquipmentRenderRotation(item, engineeringPipes));
+      });
+      return rotationById;
+    }, [engineeringEquipment, engineeringPipes]);
+    const resolveEngineeringDisplayedScreenPort = useCallback(
+      (equipmentId: string, portId: string) => {
+        const equipment = engineeringEquipmentById.get(equipmentId);
+        if (!equipment) {
+          return null;
+        }
+        const port = getEngineeringPort(equipment, portId);
+        if (!port) {
+          return null;
+        }
+        if (!engineeringOverlayActive) {
+          return worldToScreen(getEngineeringPortWorldPosition(equipment, port));
+        }
+        return (
+          resolveEngineeringRenderedPortPosition(
+            {
+              type: equipment.type,
+              width: equipment.width * view.zoom,
+              height: equipment.height * view.zoom,
+              rotation: engineeringEquipmentRenderRotationById.get(equipment.id) ?? equipment.rotation,
+            },
+            portId,
+            worldToScreen({ x: equipment.x, y: equipment.y }),
+            {
+              sizeMode: "schematic",
+              rotation: engineeringEquipmentRenderRotationById.get(equipment.id) ?? equipment.rotation,
+            }
+          ) ?? worldToScreen(getEngineeringPortWorldPosition(equipment, port))
+        );
+      },
+      [
+        engineeringEquipmentById,
+        engineeringEquipmentRenderRotationById,
+        engineeringOverlayActive,
+        view.zoom,
+        worldToScreen,
+      ]
+    );
     const hoveredEngineeringPort = useMemo(() => {
       if (!pointerWorld) {
         return null;
@@ -1404,6 +1489,15 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
         const endpointSnap = snapToPoint(point, endpoints, ENDPOINT_SNAP_TOLERANCE);
         if (distance(endpointSnap, point) > 1e-6) {
           return endpointSnap;
+        }
+        // Привязка к середине стены
+        const midpoints = [
+          ...walls.map((wall) => midpoint(wall.a, wall.b)),
+          ...belowLevelWalls.map((wall) => midpoint(wall.a, wall.b)),
+        ];
+        const midSnap = snapToPoint(point, midpoints, ENDPOINT_SNAP_TOLERANCE);
+        if (distance(midSnap, point) > 1e-6) {
+          return midSnap;
         }
         const currentSegment = snapToSegment(point, walls, ENDPOINT_SNAP_TOLERANCE);
         const belowSegment = snapToSegment(point, belowLevelWalls, ENDPOINT_SNAP_TOLERANCE);
@@ -1740,6 +1834,7 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
           setWallDraft(null);
           setNetworkDraft(null);
           setObjectDraft(null);
+          setBoundaryDraft(null);
           setEngineeringEquipmentDraft(null);
           setEngineeringPipeDraft(null);
           setOpeningDraft(null);
@@ -1979,6 +2074,7 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
       setOpeningDraft(null);
       setHoverLoopId(null);
       setHoveredEngineeringEquipmentId(null);
+      setHoveredBoundarySelection(null);
       setMultiMoveDelta(null);
       areaDragInputRef.current = null;
     }, [tool, activeLevelId]);
@@ -2009,6 +2105,101 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
     useLayoutEffect(() => {
       screenToWorldRef.current = screenToWorld;
     }, [screenToWorld]);
+
+    // Сбрасываем fillet-состояние при смене инструмента
+    useEffect(() => {
+      if (tool !== "fillet") {
+        setFilletPopup(null);
+        setHoveredFilletJoint(null);
+      }
+    }, [tool]);
+
+    // Фокус на input при открытии попапа
+    useEffect(() => {
+      if (filletPopup && filletInputRef.current) {
+        filletInputRef.current.focus();
+        filletInputRef.current.select();
+      }
+    }, [filletPopup]);
+
+    // Стыки стен текущего уровня (узлы) — для инструмента «Скругление».
+    // Только чистые угловые стыки ровно из 2 стен: на T/X-стыках скругление оставляет щели.
+    const wallJoints = useMemo<WallJoint[]>(
+      () => listWallJoints({ walls }).filter((joint) => joint.arms.length === 2),
+      [walls]
+    );
+
+    // Данные скруглений стыков (углы-дуги + подрезка стен) — общий резолвер для 2D/3D/расчёта.
+    const wallJoinData = useMemo(
+      () => computeWallJoinData({ walls, levels: model.levels, wallFillets: model.wallFillets }),
+      [walls, model.levels, model.wallFillets]
+    );
+
+    // Ближайший стык стен под курсором (world-координаты).
+    const findFilletJoint = useCallback(
+      (worldPt: Vec2): Vec2 | null => {
+        let best: Vec2 | null = null;
+        let bestDistance = 0.45;
+        wallJoints.forEach((joint) => {
+          const d = Math.hypot(joint.point.x - worldPt.x, joint.point.y - worldPt.y);
+          if (d <= bestDistance) {
+            bestDistance = d;
+            best = joint.point;
+          }
+        });
+        return best;
+      },
+      [wallJoints]
+    );
+
+    // Текущий радиус скругления на стыке (если задан).
+    const filletRadiusAt = useCallback(
+      (point: Vec2): number => {
+        const match = (model.wallFillets ?? []).find(
+          (fillet) =>
+            fillet.levelId === activeLevelId &&
+            Math.hypot(fillet.point.x - point.x, fillet.point.y - point.y) <= 0.3
+        );
+        return match?.radius_m ?? 0;
+      },
+      [model.wallFillets, activeLevelId]
+    );
+
+    // Применяет радиус скругления к стыку стен.
+    const applyFilletRadius = useCallback(
+      (point: Vec2, radiusM: number) => {
+        if (activeLevelId) {
+          onSetWallFillet(activeLevelId, point, radiusM);
+        }
+        setFilletPopup(null);
+        setHoveredFilletJoint(null);
+      },
+      [activeLevelId, onSetWallFillet]
+    );
+
+    // Накладывает радиусы скруглений стыков на вершины помещения, чтобы заливка
+    // повторяла скруглённые углы стен.
+    const resolveRoomFillets = useCallback(
+      (room: Room): Room => {
+        const fillets = (model.wallFillets ?? []).filter((fillet) => fillet.levelId === room.levelId);
+        if (!fillets.length) {
+          return room;
+        }
+        const radii: Record<string, number> = { ...(room.cornerRadii_m ?? {}) };
+        let changed = false;
+        room.polygon.forEach((vertex, index) => {
+          const match = fillets.find(
+            (fillet) => Math.hypot(fillet.point.x - vertex.x, fillet.point.y - vertex.y) <= 0.3
+          );
+          if (match) {
+            radii[index.toString()] = match.radius_m;
+            changed = true;
+          }
+        });
+        return changed ? { ...room, cornerRadii_m: radii } : room;
+      },
+      [model.wallFillets]
+    );
 
     useEffect(() => {
       const el = containerRef.current;
@@ -2188,6 +2379,24 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
       const worldPoint = resolveWallLengthPoint(resolvePointerPoint(rawPoint, tool));
       setPointerWorld(worldPoint);
 
+      // ── Инструмент «Скругление» (клик по стыку стен) ──────────────────────
+      if (tool === "fillet" && event.button === 0) {
+        const joint = findFilletJoint(worldPoint);
+        if (!joint) {
+          return;
+        }
+        const screenPos = worldToScreen(joint);
+        const existing = filletRadiusAt(joint);
+        setFilletPopup({
+          point: joint,
+          screenX: screenPos.x,
+          screenY: screenPos.y,
+          value: existing > 0 ? existing.toFixed(2) : "0.30",
+        });
+        return;
+      }
+      // ─────────────────────────────────────────────────────────────────────
+
       if (tool === "roomRect" || tool === "roof" || tool === "slab" || tool === "stair") {
         if (!rectStart) {
           setRectStart(worldPoint);
@@ -2256,8 +2465,8 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
         }
         return;
       }
-      if (tool === "select") {
-        const openingHandle = hitOpeningHandle(worldPoint);
+      if (tool === "select" || tool === "move") {
+        const openingHandle = tool === "move" ? null : hitOpeningHandle(worldPoint);
         if (openingHandle) {
           const source =
             openingHandle.openingKind === "door"
@@ -2265,6 +2474,7 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
               : windows.find((window) => window.id === openingHandle.openingId);
           const wall = source ? findWallForOpening(source) : null;
           if (source && wall) {
+            areaDragInputRef.current = "pointer";
             setDragState(openingHandle);
             setOpeningDraft({
               id: source.id,
@@ -2303,6 +2513,27 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
           onRemoveSelection(target);
           return;
         }
+        // Специфичные объекты — drag ВСЕГДА перемещает, не запускает marquee
+        if (target?.kind === "door" || target?.kind === "window") {
+          const source =
+            target.kind === "door"
+              ? doors.find((door) => door.id === target.id)
+              : windows.find((window) => window.id === target.id);
+          const wall = source ? findWallForOpening(source) : null;
+          if (source && wall) {
+            areaDragInputRef.current = "pointer";
+            setDragState({ type: "opening", openingKind: target.kind, openingId: source.id });
+            setOpeningDraft({
+              id: source.id,
+              kind: target.kind,
+              wallId: wall.id,
+              width: source.width_m,
+              offset: anchorToOffset(source.anchor, wall),
+            });
+            onSelectionChange(target);
+            return;
+          }
+        }
         if (target && event.button === 0) {
           const inMulti = multiSelection.length > 0 && multiSelection.some((s) => s.kind === target.kind && s.id === target.id);
           if (inMulti) {
@@ -2315,25 +2546,6 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
           areaDragInputRef.current = "pointer";
           setDragState({ type: "select-area", start: rawPoint, end: rawPoint });
           return;
-        }
-        if (target?.kind === "door" || target?.kind === "window") {
-          const source =
-            target.kind === "door"
-              ? doors.find((door) => door.id === target.id)
-              : windows.find((window) => window.id === target.id);
-          const wall = source ? findWallForOpening(source) : null;
-          if (source && wall) {
-            setDragState({ type: "opening", openingKind: target.kind, openingId: source.id });
-            setOpeningDraft({
-              id: source.id,
-              kind: target.kind,
-              wallId: wall.id,
-              width: source.width_m,
-              offset: anchorToOffset(source.anchor, wall),
-            });
-            onSelectionChange(target);
-            return;
-          }
         }
         if (target?.kind === "equipment") {
           const item = equipment.find((entry) => entry.id === target.id);
@@ -2392,6 +2604,20 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
               start: worldPoint,
             });
             setWallDraft({ wallId: wall.id, a: { ...wall.a }, b: { ...wall.b } });
+            onSelectionChange(target);
+            return;
+          }
+        }
+        if (target?.kind === "roof" || target?.kind === "slab" || target?.kind === "stair") {
+          const kind = target.kind;
+          const src =
+            kind === "roof" ? roofs.find((r) => r.id === target.id) :
+            kind === "slab" ? floorSlabs.find((s) => s.id === target.id) :
+            stairs.find((s) => s.id === target.id);
+          if (src) {
+            const origin = src.boundary.map((p) => ({ ...p }));
+            setBoundaryDraft({ kind, id: src.id, boundary: origin });
+            setDragState({ type: "move-boundary", kind, id: src.id, origin, start: worldPoint });
             onSelectionChange(target);
             return;
           }
@@ -2472,9 +2698,19 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
         const hoveredLoop = getLoopAtPoint(previewPoint);
         setHoverLoopId(hoveredLoop?.id ?? null);
       }
+      if (!isPanning && !dragState && tool === "fillet") {
+        setHoveredFilletJoint(findFilletJoint(previewPoint));
+      }
       if (!isPanning && !dragState) {
         const hoveredSelection = hitTest(previewPoint);
         setHoveredEngineeringEquipmentId(hoveredSelection?.kind === "engineeringEquipment" ? hoveredSelection.id : null);
+        setHoveredBoundarySelection(
+          (tool === "select" || tool === "move") &&
+            hoveredSelection &&
+            (hoveredSelection.kind === "roof" || hoveredSelection.kind === "slab" || hoveredSelection.kind === "stair")
+            ? hoveredSelection
+            : null
+        );
         if (
           hoveredSelection &&
           (hoveredSelection.kind === "pipe" ||
@@ -2545,7 +2781,10 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
         if (!wall) {
           return;
         }
-        const projection = projectPointOnWall(previewPoint, wall);
+        // Используем сырую позицию курсора — без snap к концам и сетке,
+        // чтобы дверь/окно плавно следовали за мышью вдоль стены.
+        const rawWorldPoint = screenToWorld(getEventPoint(event));
+        const projection = projectPointOnWall(rawWorldPoint, wall);
         if (!projection) {
           return;
         }
@@ -2595,6 +2834,14 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
         const delta = { x: snapped.x - dragState.start.x, y: snapped.y - dragState.start.y };
         const nextPath = dragState.origin.map((point) => ({ x: point.x + delta.x, y: point.y + delta.y }));
         setNetworkDraft({ kind: dragState.kind, id: dragState.id, path: nextPath });
+      }
+      if (dragState.type === "move-boundary") {
+        const delta = { x: snapped.x - dragState.start.x, y: snapped.y - dragState.start.y };
+        setBoundaryDraft({
+          kind: dragState.kind,
+          id: dragState.id,
+          boundary: dragState.origin.map((p) => ({ x: p.x + delta.x, y: p.y + delta.y })),
+        });
       }
     };
 
@@ -2860,6 +3107,13 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
           y: engineeringEquipmentDraft.y,
         });
       }
+      if (dragState?.type === "move-boundary" && boundaryDraft) {
+        const { kind, id, boundary } = boundaryDraft;
+        if (kind === "roof") onUpdateRoof(id, { boundary });
+        else if (kind === "slab") onUpdateFloorSlab(id, { boundary });
+        else onUpdateStair?.(id, { boundary });
+        setBoundaryDraft(null);
+      }
       if (dragState?.type === "move-network" && networkDraft) {
         const normalizedPath = validateNetworkPath(networkDraft.kind, networkDraft.path, dragState.id);
         if (!normalizedPath) {
@@ -2907,6 +3161,7 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
         handlePointerUp(event);
       }
       setHoverLoopId(null);
+      setHoveredBoundarySelection(null);
       setHoveredEngineeringEquipmentId(null);
       setNetworkHoverCard(null);
     };
@@ -3736,6 +3991,24 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
       const from = linearDraft.points[linearDraft.points.length - 1];
       return Math.hypot(pointerWorld.x - from.x, pointerWorld.y - from.y);
     }, [linearDraft, pointerWorld, tool]);
+    const interactiveBoundaryHover = useMemo(() => {
+      if (dragState) {
+        return dragState.type === "move-boundary" ? ({ kind: dragState.kind, id: dragState.id } as const) : null;
+      }
+      if (tool !== "select" && tool !== "move") {
+        return null;
+      }
+      return hoveredBoundarySelection;
+    }, [dragState, hoveredBoundarySelection, tool]);
+    const canvasCursor = useMemo(() => {
+      if (dragState?.type === "move-boundary" || isPanning) {
+        return "grabbing";
+      }
+      if (interactiveBoundaryHover) {
+        return "grab";
+      }
+      return undefined;
+    }, [dragState, interactiveBoundaryHover, isPanning]);
 
     return (
       <div className="flex h-full min-h-0 min-w-0 max-w-full w-full flex-col overflow-hidden bg-[color:var(--surface-elevated)]">
@@ -3759,8 +4032,67 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
           style={{
             backgroundImage: gridStyle.image,
             backgroundSize: gridStyle.size,
+            cursor: canvasCursor,
           }}
         >
+          {/* Попап скругления угла */}
+          {filletPopup && (
+            <div
+              className="pointer-events-auto absolute z-40 w-52 rounded-2xl border border-[color:var(--border-base)] bg-[color:var(--surface-elevated)] p-3 shadow-xl"
+              style={{
+                left: Math.min(filletPopup.screenX + 14, (size.width || 400) - 220),
+                top: Math.max(8, filletPopup.screenY - 56),
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">
+                Радиус скругления
+              </p>
+              <div className="flex items-center gap-2">
+                <input
+                  ref={filletInputRef}
+                  type="number"
+                  min={0}
+                  max={5}
+                  step={0.05}
+                  value={filletPopup.value}
+                  onChange={(e) =>
+                    setFilletPopup((prev) => prev ? { ...prev, value: e.target.value } : null)
+                  }
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      const r = parseFloat(filletPopup.value);
+                      if (Number.isFinite(r) && r >= 0) applyFilletRadius(filletPopup.point, r);
+                    }
+                    if (e.key === "Escape") {
+                      setFilletPopup(null);
+                    }
+                  }}
+                  className="flex-1 rounded-xl border border-[color:var(--border-base)] bg-[color:var(--surface-base)] px-2.5 py-1.5 text-sm font-semibold text-[color:var(--text-base)] focus:outline-none focus:ring-1 focus:ring-[color:var(--accent-base)]"
+                />
+                <span className="shrink-0 text-sm text-[color:var(--text-muted)]">м</span>
+              </div>
+              <div className="mt-2.5 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setFilletPopup(null); }}
+                  className="flex-1 rounded-xl border border-[color:var(--border-base)] py-1.5 text-xs font-semibold text-[color:var(--text-muted)] hover:bg-[color:var(--surface-muted)]"
+                >
+                  Отмена
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const r = parseFloat(filletPopup.value);
+                    if (Number.isFinite(r) && r >= 0) applyFilletRadius(filletPopup.point, r);
+                  }}
+                  className="flex-1 rounded-xl bg-[color:var(--accent-base)] py-1.5 text-xs font-semibold text-white hover:bg-[color:var(--accent-hover)]"
+                >
+                  Применить
+                </button>
+              </div>
+            </div>
+          )}
           <div className="pointer-events-none absolute inset-0 z-20 flex min-h-0 flex-col justify-between gap-3 p-3">
             <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
               <div className="flex min-w-0 flex-1 flex-wrap items-start gap-3">
@@ -3990,6 +4322,7 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
             viewBox={`0 0 ${size.width} ${size.height}`}
             preserveAspectRatio="xMidYMid meet"
             className="block h-full w-full max-w-full"
+            style={{ cursor: canvasCursor }}
           >
             <g>
               {guides.vertical != null && (
@@ -4045,6 +4378,7 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
                   points={slab.boundary}
                   worldToScreen={worldToScreen}
                   selected={isSelected("slab", slab.id)}
+                  hovered={interactiveBoundaryHover?.kind === "slab" && interactiveBoundaryHover.id === slab.id}
                   label={slab.name}
                   fill={
                     transientSourceMatches(transientFrame, "slab", slab.id) && transientBadge
@@ -4063,6 +4397,7 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
                   points={roof.boundary}
                   worldToScreen={worldToScreen}
                   selected={isSelected("roof", roof.id)}
+                  hovered={interactiveBoundaryHover?.kind === "roof" && interactiveBoundaryHover.id === roof.id}
                   label={roof.name}
                   fill={
                     transientSourceMatches(transientFrame, "roof", roof.id) && transientBadge
@@ -4084,12 +4419,13 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
                   stair={stair}
                   worldToScreen={worldToScreen}
                   selected={isSelected("stair", stair.id)}
+                  hovered={interactiveBoundaryHover?.kind === "stair" && interactiveBoundaryHover.id === stair.id}
                 />
               ))}
               {rooms.map((room) => (
                 <RoomPolygon
                   key={room.id}
-                  room={room}
+                  room={resolveRoomFillets(room)}
                   worldToScreen={worldToScreen}
                   screenToWorld={screenToWorld}
                   scale={view.zoom}
@@ -4101,6 +4437,36 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
                   exportMode={exportMode}
                 />
               ))}
+              {/* Fillet: подсветка стыков стен */}
+              {tool === "fillet" && wallJoints.map((joint, index) => {
+                const s = worldToScreen(joint.point);
+                const radius = filletRadiusAt(joint.point);
+                const hasR = radius > 0;
+                const isHover = hoveredFilletJoint
+                  ? Math.hypot(hoveredFilletJoint.x - joint.point.x, hoveredFilletJoint.y - joint.point.y) <= 0.05
+                  : false;
+                return (
+                  <g key={`fillet-joint-${index}`} pointerEvents="none">
+                    {isHover ? (
+                      <circle cx={s.x} cy={s.y} r={11} fill="none" stroke="#3d82fa" strokeWidth={2} opacity={0.9} />
+                    ) : null}
+                    <circle
+                      cx={s.x}
+                      cy={s.y}
+                      r={hasR ? 6 : 4}
+                      fill={hasR ? "#f59e0b" : "#3d82fa"}
+                      fillOpacity={hasR ? 0.9 : 0.45}
+                      stroke={hasR ? "#d97706" : "#3d82fa"}
+                      strokeWidth={1.5}
+                    />
+                    {hasR ? (
+                      <text x={s.x} y={s.y - 10} textAnchor="middle" fill="#b45309" fontSize={10} fontWeight={700}>
+                        {`R ${radius.toFixed(2)}`}
+                      </text>
+                    ) : null}
+                  </g>
+                );
+              })}
               {levelLoops.map((loop) => (
                 <LoopOverlay
                   key={loop.id}
@@ -4174,6 +4540,7 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
                   selected={isSelected("wall", wall.id)}
                   schematicMode={engineeringOverlayActive}
                   exportMode={exportMode}
+                  filletTrim={wallJoinData.filletTrims.get(wall.id)}
                   transientHighlight={
                     transientSourceMatches(transientFrame, "wall", wall.id) && transientBadge
                       ? {
@@ -4185,6 +4552,35 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
                   }
                 />
               ))}
+              {/* Скруглённые углы стыков стен — кольцевая лента-дуга */}
+              {wallJoinData.corners.map((corner, index) =>
+                corner.rounded ? (
+                  <WallFilletBand
+                    key={`wall-fillet-${index}`}
+                    corner={corner}
+                    worldToScreen={worldToScreen}
+                    selected={false}
+                    schematicMode={engineeringOverlayActive}
+                  />
+                ) : null
+              )}
+              {(tool === "wall" || tool === "room" || tool === "roomRect" || tool === "slab" || tool === "roof" || tool === "stair") &&
+                walls.map((wall) => {
+                  const mp = worldToScreen(midpoint(wall.a, wall.b));
+                  const s = 4;
+                  return (
+                    <polygon
+                      key={`mp-${wall.id}`}
+                      points={`${mp.x},${mp.y - s} ${mp.x + s},${mp.y} ${mp.x},${mp.y + s} ${mp.x - s},${mp.y}`}
+                      fill="#f8fafc"
+                      stroke="#64748b"
+                      strokeWidth={1}
+                      opacity={0.75}
+                      pointerEvents="none"
+                    />
+                  );
+                })
+              }
               {openingPreview && (
                 <g pointerEvents="none" opacity={0.65}>
                   {(() => {
@@ -4467,6 +4863,16 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
                   ))}
               {engineeringPipes.map((pipe) => {
                 const screenPoints = pipe.points.map((point) => worldToScreen(point));
+                if (screenPoints.length >= 2) {
+                  const fromScreenPort = resolveEngineeringDisplayedScreenPort(pipe.fromEquipmentId, pipe.fromPortId);
+                  const toScreenPort = resolveEngineeringDisplayedScreenPort(pipe.toEquipmentId, pipe.toPortId);
+                  if (fromScreenPort) {
+                    screenPoints[0] = fromScreenPort;
+                  }
+                  if (toScreenPort) {
+                    screenPoints[screenPoints.length - 1] = toScreenPort;
+                  }
+                }
                 const style = ENGINEERING_MEDIUM_STYLES[pipe.medium];
                 const selectedPipe = isSelected("engineeringPipe", pipe.id);
                 const labelPoint = pipe.points[Math.max(0, Math.floor(pipe.points.length / 2))] ?? pipe.points[0];
@@ -4521,12 +4927,26 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
                       ? ENGINEERING_MEDIUM_STYLES[engineeringPipePreview.fromPort.medium].stroke
                       : "#dc2626";
                     const dashArray = engineeringPipePreview.compatible ? "8 5" : "4 4";
+                    const previewPoints = engineeringPipePreview.points.map((point) => worldToScreen(point));
+                    const previewStart = resolveEngineeringDisplayedScreenPort(
+                      engineeringPipePreview.fromEquipment.id,
+                      engineeringPipePreview.fromPort.id
+                    );
+                    if (previewStart) {
+                      previewPoints[0] = previewStart;
+                    }
+                    if (engineeringPipePreview.targetPort) {
+                      const previewEnd = resolveEngineeringDisplayedScreenPort(
+                        engineeringPipePreview.targetPort.equipment.id,
+                        engineeringPipePreview.targetPort.port.id
+                      );
+                      if (previewEnd) {
+                        previewPoints[previewPoints.length - 1] = previewEnd;
+                      }
+                    }
                     return (
                       <polyline
-                        points={engineeringPipePreview.points.map((point) => {
-                          const screen = worldToScreen(point);
-                          return `${screen.x},${screen.y}`;
-                        }).join(" ")}
+                        points={previewPoints.map((point) => `${point.x},${point.y}`).join(" ")}
                         fill="none"
                         stroke={stroke}
                         strokeWidth={3}
@@ -4542,60 +4962,41 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
                 const center = worldToScreen({ x: item.x, y: item.y });
                 const selectedEquipment = isSelected("engineeringEquipment", item.id);
                 const hoveredEquipment = hoveredEngineeringEquipmentId === item.id;
-                const pumpFlowRotation =
-                  item.type === "pump"
-                    ? (() => {
-                        const outgoing = engineeringPipes.find(
-                          (pipe) => pipe.fromEquipmentId === item.id && pipe.points.length >= 2
-                        );
-                        if (outgoing) {
-                          const from = outgoing.points[0];
-                          const to = outgoing.points[1];
-                          const dx = to.x - from.x;
-                          const dy = to.y - from.y;
-                          if (Math.hypot(dx, dy) > 1e-6) {
-                            return (Math.atan2(dy, dx) * 180) / Math.PI;
-                          }
-                        }
-                        const incoming = engineeringPipes.find(
-                          (pipe) => pipe.toEquipmentId === item.id && pipe.points.length >= 2
-                        );
-                        if (incoming) {
-                          const from = incoming.points[incoming.points.length - 2];
-                          const to = incoming.points[incoming.points.length - 1];
-                          const dx = to.x - from.x;
-                          const dy = to.y - from.y;
-                          if (Math.hypot(dx, dy) > 1e-6) {
-                            return (Math.atan2(dy, dx) * 180) / Math.PI;
-                          }
-                        }
-                        return item.rotation;
-                      })()
-                    : item.rotation;
+                const pumpFlowRotation = engineeringEquipmentRenderRotationById.get(item.id) ?? item.rotation;
                 const showPorts =
                   !exportMode &&
                   (selectedEquipment ||
                     hoveredEquipment ||
                     tool === "engineeringPipe" ||
                     engineeringPipeDraft?.fromEquipmentId === item.id);
+                const symbolSize = resolveEngineeringEquipmentRenderSize(
+                  item.type,
+                  item.width * view.zoom,
+                  item.height * view.zoom,
+                  engineeringOverlayActive ? "schematic" : "instance"
+                );
                 return (
                   <g key={item.id}>
                     {renderEngineeringEquipmentSymbol(
                       {
                         type: item.type,
                         rotation: pumpFlowRotation,
-                        width: item.width * view.zoom,
-                        height: item.height * view.zoom,
+                        width: symbolSize.width,
+                        height: symbolSize.height,
                         parameters: item.parameters,
                       },
                       center,
-                      { selected: selectedEquipment, hovered: hoveredEquipment }
+                      {
+                        selected: selectedEquipment,
+                        hovered: hoveredEquipment,
+                        sizeMode: engineeringOverlayActive ? "schematic" : "instance",
+                      }
                     )}
                     {!exportMode && item.name ? (
                       <g pointerEvents="none">
                         <rect
                           x={center.x - 52}
-                          y={center.y + Math.max(16, (item.height * view.zoom) / 2 + 10)}
+                          y={center.y + Math.max(16, symbolSize.height / 2 + 10)}
                           width={104}
                           height={18}
                           rx={9}
@@ -4604,7 +5005,7 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
                         />
                         <text
                           x={center.x}
-                          y={center.y + Math.max(28, (item.height * view.zoom) / 2 + 22)}
+                          y={center.y + Math.max(28, symbolSize.height / 2 + 22)}
                           textAnchor="middle"
                           className="fill-[color:var(--text-base)] text-[10px] font-semibold"
                         >
@@ -4614,8 +5015,9 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
                     ) : null}
                     {showPorts
                       ? item.ports.map((port) => {
-                          const worldPort = getEngineeringPortWorldPosition(item, port);
-                          const screenPort = worldToScreen(worldPort);
+                          const screenPort =
+                            resolveEngineeringDisplayedScreenPort(item.id, port.id) ??
+                            worldToScreen(getEngineeringPortWorldPosition(item, port));
                           const style = ENGINEERING_MEDIUM_STYLES[port.medium];
                           const activePort =
                             engineeringPipeDraft?.fromEquipmentId === item.id && engineeringPipeDraft.fromPortId === port.id;
@@ -4645,15 +5047,21 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
                       levelId: activeLevelId,
                       parameters: engineeringEquipmentVariant ? { variant: engineeringEquipmentVariant } : undefined,
                     });
+                    const previewSize = resolveEngineeringEquipmentRenderSize(
+                      preview.type,
+                      preview.width * view.zoom,
+                      preview.height * view.zoom,
+                      engineeringOverlayActive ? "schematic" : "instance"
+                    );
                     return renderEngineeringEquipmentSymbol(
                       {
                         type: preview.type,
                         rotation: preview.rotation,
-                        width: preview.width * view.zoom,
-                        height: preview.height * view.zoom,
+                        width: previewSize.width,
+                        height: previewSize.height,
                       },
                       worldToScreen(pointerWorld),
-                      { preview: true }
+                      { preview: true, sizeMode: engineeringOverlayActive ? "schematic" : "instance" }
                     );
                   })()}
                   <text
@@ -4994,6 +5402,7 @@ const PlanSurfacePolygon = ({
   points,
   worldToScreen,
   selected,
+  hovered = false,
   label,
   fill,
   stroke,
@@ -5006,6 +5415,7 @@ const PlanSurfacePolygon = ({
   points: Vec2[];
   worldToScreen: (point: Vec2) => Vec2;
   selected: boolean;
+  hovered?: boolean;
   label: string;
   fill: string;
   stroke: string;
@@ -5027,6 +5437,7 @@ const PlanSurfacePolygon = ({
   const patternId = `surface-hatch-${label.replace(/\s+/g, "-")}-${Math.round(centroid.x)}-${Math.round(centroid.y)}`;
   const arrowLength = 28;
   const angleRad = arrow ? (arrow.directionDeg * Math.PI) / 180 : 0;
+  const outline = selected || hovered ? "#0f172a" : stroke;
   const arrowEnd = arrow
     ? {
         x: centroid.x + Math.cos(angleRad) * arrowLength,
@@ -5045,18 +5456,18 @@ const PlanSurfacePolygon = ({
       <polygon
         points={pointsAttr.join(" ")}
         fill={hatch ? `url(#${patternId})` : fill}
-        stroke={selected ? "#0f172a" : stroke}
-        strokeWidth={selected ? 2.4 : 1.6}
+        stroke={outline}
+        strokeWidth={selected ? 2.4 : hovered ? 2.1 : 1.6}
         strokeDasharray={strokeDasharray}
-        opacity={selected ? 0.95 : 0.9}
+        opacity={selected ? 0.95 : hovered ? 0.94 : 0.9}
       />
-      {!hatch ? <polygon points={pointsAttr.join(" ")} fill={fill} opacity={selected ? 0.9 : 0.72} stroke="none" /> : null}
+      {!hatch ? <polygon points={pointsAttr.join(" ")} fill={fill} opacity={selected ? 0.9 : hovered ? 0.8 : 0.72} stroke="none" /> : null}
       {arrow && arrowEnd ? (
         <>
-          <line x1={centroid.x} y1={centroid.y} x2={arrowEnd.x} y2={arrowEnd.y} stroke={selected ? "#0f172a" : stroke} strokeWidth={1.8} />
+          <line x1={centroid.x} y1={centroid.y} x2={arrowEnd.x} y2={arrowEnd.y} stroke={outline} strokeWidth={1.8} />
           <polygon
             points={`${arrowEnd.x},${arrowEnd.y} ${arrowEnd.x - 8 * Math.cos(angleRad - 0.45)},${arrowEnd.y - 8 * Math.sin(angleRad - 0.45)} ${arrowEnd.x - 8 * Math.cos(angleRad + 0.45)},${arrowEnd.y - 8 * Math.sin(angleRad + 0.45)}`}
-            fill={selected ? "#0f172a" : stroke}
+            fill={outline}
           />
         </>
       ) : null}
@@ -5084,10 +5495,12 @@ const PlanStair = ({
   stair,
   worldToScreen,
   selected,
+  hovered = false,
 }: {
   stair: Stair;
   worldToScreen: (point: Vec2) => Vec2;
   selected: boolean;
+  hovered?: boolean;
 }) => {
   if (stair.boundary.length < 4) return null;
 
@@ -5101,8 +5514,8 @@ const PlanStair = ({
   const w = maxX - minX;
   const h = maxY - minY;
   const n = Math.max(2, stair.stepCount);
-  const stroke = selected ? "#0f172a" : "#16a34a";
-  const fill = selected ? "rgba(22,163,74,0.22)" : "rgba(22,163,74,0.08)";
+  const stroke = selected || hovered ? "#0f172a" : "#16a34a";
+  const fill = selected ? "rgba(22,163,74,0.22)" : hovered ? "rgba(22,163,74,0.14)" : "rgba(22,163,74,0.08)";
   const pointsAttr = pts.map((p) => `${p.x},${p.y}`).join(" ");
 
   // Ступени перпендикулярны направлению движения:
@@ -5132,7 +5545,7 @@ const PlanStair = ({
 
   return (
     <g>
-      <polygon points={pointsAttr} fill={fill} stroke={stroke} strokeWidth={selected ? 2 : 1.5} />
+      <polygon points={pointsAttr} fill={fill} stroke={stroke} strokeWidth={selected ? 2 : hovered ? 1.8 : 1.5} />
       {stepLines}
       <line x1={ax} y1={ay} x2={aex} y2={aey} stroke={stroke} strokeWidth={1.6} />
       <polygon
@@ -5160,6 +5573,46 @@ const PlanStair = ({
 
 const ROOM_LABEL_STROKE_WIDTH = 1.35;
 
+/**
+ * SVG-path с скруглёнными углами полигона в экранных координатах.
+ * getRadiusPx(i) — радиус в пикселях для вершины i (0 = острый угол).
+ * sweep определяется знаком cross-product: CCW→0, CW→1.
+ */
+function buildRoundedScreenPath(screenPts: Vec2[], getRadiusPx: (i: number) => number): string {
+  const n = screenPts.length;
+  if (n < 3) return `M ${screenPts.map((p) => `${p.x},${p.y}`).join(" L ")} Z`;
+  const parts: string[] = [];
+  for (let i = 0; i < n; i++) {
+    const radiusPx = getRadiusPx(i);
+    const prev = screenPts[(i - 1 + n) % n];
+    const cur = screenPts[i];
+    const next = screenPts[(i + 1) % n];
+    const dpx = prev.x - cur.x;
+    const dpy = prev.y - cur.y;
+    const dpLen = Math.hypot(dpx, dpy);
+    const dnx = next.x - cur.x;
+    const dny = next.y - cur.y;
+    const dnLen = Math.hypot(dnx, dny);
+    if (radiusPx < 0.5 || dpLen < 1e-6 || dnLen < 1e-6) {
+      if (i === 0) parts.push(`M ${cur.x.toFixed(2)},${cur.y.toFixed(2)}`);
+      else parts.push(`L ${cur.x.toFixed(2)},${cur.y.toFixed(2)}`);
+      continue;
+    }
+    const r = Math.min(radiusPx, dpLen * 0.5, dnLen * 0.5);
+    const ex = cur.x + (dpx / dpLen) * r;
+    const ey = cur.y + (dpy / dpLen) * r;
+    const qx = cur.x + (dnx / dnLen) * r;
+    const qy = cur.y + (dny / dnLen) * r;
+    const cross = (dpx / dpLen) * (dny / dnLen) - (dpy / dpLen) * (dnx / dnLen);
+    const sweep = cross > 0 ? 0 : 1;
+    if (i === 0) parts.push(`M ${ex.toFixed(2)},${ey.toFixed(2)}`);
+    else parts.push(`L ${ex.toFixed(2)},${ey.toFixed(2)}`);
+    parts.push(`A ${r.toFixed(2)},${r.toFixed(2)} 0 0 ${sweep} ${qx.toFixed(2)},${qy.toFixed(2)}`);
+  }
+  parts.push("Z");
+  return parts.join(" ");
+}
+
 const RoomPolygon = ({
   room,
   worldToScreen,
@@ -5184,10 +5637,16 @@ const RoomPolygon = ({
   schematicMode?: boolean;
   exportMode?: boolean;
 }) => {
-  const pointsAttr = room.polygon.map((point) => {
-    const screen = worldToScreen(point);
-    return `${screen.x},${screen.y}`;
-  });
+  const screenPts = room.polygon.map((point) => worldToScreen(point));
+  const pointsAttr = screenPts.map((s) => `${s.x},${s.y}`);
+  const getRadiusPx = (i: number) => {
+    const r = room.cornerRadii_m?.[i.toString()] ?? room.cornerRadius_m ?? 0;
+    return r > 0 ? r * scale : 0;
+  };
+  const hasAnyRadius = room.cornerRadii_m
+    ? Object.values(room.cornerRadii_m).some((r) => r > 0)
+    : (room.cornerRadius_m ?? 0) > 0;
+  const roundedPath = hasAnyRadius ? buildRoundedScreenPath(screenPts, getRadiusPx) : null;
   const editable = room.source !== "auto";
   const area = Math.abs(polygonArea(room.polygon));
   const labelLayout = resolvePlanLabelLayout(room, obstacles, scale, worldToScreen, screenToWorld, compactLabels, exportMode);
@@ -5196,15 +5655,19 @@ const RoomPolygon = ({
   const labelTextBottom = placement ? placement.box.y + 14 + Math.max(0, labelLayout.labelLines.length - 1) * 12 : 0;
   const areaY = placement ? Math.max(placement.box.y + placement.box.height - 6, labelTextBottom + 12) : 0;
   const areaFitsWithoutOverlap = placement ? areaY <= placement.box.y + placement.box.height - 2 : false;
+  const shapeProps = {
+    fill: selected ? "rgba(59,130,246,0.3)" : schematicMode ? "rgba(248,250,252,0.34)" : "rgba(15,23,42,0.08)",
+    stroke: selected ? "#2563eb" : schematicMode ? "#cbd5e1" : "#94a3b8",
+    strokeWidth: selected ? 2.5 : 1.5,
+  };
   return (
     <g data-layer="room-label">
       <title>{labelLayout.title}</title>
-      <polygon
-        points={pointsAttr.join(" ")}
-        fill={selected ? "rgba(59,130,246,0.3)" : schematicMode ? "rgba(248,250,252,0.34)" : "rgba(15,23,42,0.08)"}
-        stroke={selected ? "#2563eb" : schematicMode ? "#cbd5e1" : "#94a3b8"}
-        strokeWidth={selected ? 2.5 : 1.5}
-      />
+      {roundedPath ? (
+        <path d={roundedPath} {...shapeProps} />
+      ) : (
+        <polygon points={pointsAttr.join(" ")} {...shapeProps} />
+      )}
       {showLabel && labelLayout.compact ? (
         <rect
           x={placement!.box.x}
@@ -5418,6 +5881,7 @@ const WallSegment = ({
   transientHighlight,
   schematicMode = false,
   exportMode = false,
+  filletTrim,
 }: {
   wall: Wall;
   walls: Wall[];
@@ -5426,8 +5890,10 @@ const WallSegment = ({
   transientHighlight?: { color: string; badgeText: string; unstable: boolean } | null;
   schematicMode?: boolean;
   exportMode?: boolean;
+  /** Подрезка концов стены от скруглений стыков (start — у точки a, end — у точки b). */
+  filletTrim?: { start: number; end: number };
 }) => {
-  const polygon = getWallPolygon(wall, walls);
+  const polygon = getWallPolygon(wall, walls, filletTrim);
   if (!polygon.length) {
     return null;
   }
@@ -5487,10 +5953,42 @@ const WallSegment = ({
   );
 };
 
+const WallFilletBand = ({
+  corner,
+  worldToScreen,
+  selected,
+  schematicMode = false,
+}: {
+  corner: WallCornerPatchInput;
+  worldToScreen: (point: Vec2) => Vec2;
+  selected: boolean;
+  schematicMode?: boolean;
+}) => {
+  const rounded = corner.rounded;
+  if (!rounded) {
+    return null;
+  }
+  const half = corner.thickness / 2;
+  const outerRadius = rounded.radius + half;
+  const innerRadius = Math.max(0.001, rounded.radius - half);
+  const segments = Math.max(4, Math.ceil((rounded.turnAngle / Math.PI) * 24));
+  const outer = arcPolyline(rounded.center, outerRadius, rounded.startAngle, rounded.signedSweep, segments);
+  const inner = arcPolyline(rounded.center, innerRadius, rounded.startAngle, rounded.signedSweep, segments).reverse();
+  const path =
+    [...outer, ...inner]
+      .map((point, i) => {
+        const screen = worldToScreen(point);
+        return `${i === 0 ? "M" : "L"} ${screen.x.toFixed(2)},${screen.y.toFixed(2)}`;
+      })
+      .join(" ") + " Z";
+  const fill = selected ? "#1e293b" : schematicMode ? "#111827" : "#0f172a";
+  return <path d={path} fill={fill} stroke={fill} strokeWidth={1} strokeLinejoin="round" />;
+};
+
 const WALL_JOIN_TOLERANCE = 1e-4;
 const WALL_MITER_LIMIT = 3.5;
 
-const getWallPolygon = (wall: Wall, walls: Wall[]): Vec2[] => {
+const getWallPolygon = (wall: Wall, walls: Wall[], filletTrim?: { start: number; end: number }): Vec2[] => {
   const thickness = wall.thickness_m ?? WALL_DEFAULTS.thickness;
   const dir = normalizeVec({ x: wall.b.x - wall.a.x, y: wall.b.y - wall.a.y });
   if (!dir) {
@@ -5498,10 +5996,22 @@ const getWallPolygon = (wall: Wall, walls: Wall[]): Vec2[] => {
   }
   const normal = { x: -dir.y, y: dir.x };
   const half = thickness / 2;
-  const startPlus = resolveWallJoinPoint(wall, walls, wall.a, wall.b, normal, half, 1);
-  const endPlus = resolveWallJoinPoint(wall, walls, wall.b, wall.a, normal, half, 1);
-  const endMinus = resolveWallJoinPoint(wall, walls, wall.b, wall.a, normal, half, -1);
-  const startMinus = resolveWallJoinPoint(wall, walls, wall.a, wall.b, normal, half, -1);
+  const startTrim = filletTrim?.start ?? 0;
+  const endTrim = filletTrim?.end ?? 0;
+  // Скруглённый конец обрезается перпендикулярно стене в точке касания дуги;
+  // обычный стык по-прежнему соединяется митрой.
+  const trimmedStart = (sign: 1 | -1): Vec2 => ({
+    x: wall.a.x + dir.x * startTrim + normal.x * half * sign,
+    y: wall.a.y + dir.y * startTrim + normal.y * half * sign,
+  });
+  const trimmedEnd = (sign: 1 | -1): Vec2 => ({
+    x: wall.b.x - dir.x * endTrim + normal.x * half * sign,
+    y: wall.b.y - dir.y * endTrim + normal.y * half * sign,
+  });
+  const startPlus = startTrim > 0 ? trimmedStart(1) : resolveWallJoinPoint(wall, walls, wall.a, wall.b, normal, half, 1);
+  const endPlus = endTrim > 0 ? trimmedEnd(1) : resolveWallJoinPoint(wall, walls, wall.b, wall.a, normal, half, 1);
+  const endMinus = endTrim > 0 ? trimmedEnd(-1) : resolveWallJoinPoint(wall, walls, wall.b, wall.a, normal, half, -1);
+  const startMinus = startTrim > 0 ? trimmedStart(-1) : resolveWallJoinPoint(wall, walls, wall.a, wall.b, normal, half, -1);
   return [
     startPlus,
     endPlus,

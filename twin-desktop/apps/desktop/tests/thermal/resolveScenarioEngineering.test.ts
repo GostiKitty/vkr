@@ -121,3 +121,67 @@ test("engineering: 2D engineering systems and pipe flow enrich scenario inputs",
   assert.equal(resolved.pipeLengthM?.value, 8);
   assert.equal(resolved.pipeInsulated.value, true);
 });
+
+test("engineering: convectors sum installed power and passive devices do not pollute emitter label", () => {
+  const model = createEmptyBuildingModel();
+  model.engineeringSystems = {
+    equipment: [
+      {
+        id: "conv-1",
+        type: "convector",
+        name: "Конвектор 1",
+        x: 1,
+        y: 1,
+        width: 1.4,
+        height: 0.85,
+        rotation: 0,
+        ports: [],
+        parameters: {
+          nominalPowerW: 700,
+          designTemperatureC: 70,
+        },
+        metadata: {},
+        levelId: "l1",
+      },
+      {
+        id: "conv-2",
+        type: "convector",
+        name: "Конвектор 2",
+        x: 2,
+        y: 1,
+        width: 1.4,
+        height: 0.85,
+        rotation: 0,
+        ports: [],
+        parameters: {
+          nominalPowerW: 1100,
+          designTemperatureC: 70,
+        },
+        metadata: {},
+        levelId: "l1",
+      },
+      {
+        id: "valve-1",
+        type: "ballValve",
+        name: "Кран",
+        x: 3,
+        y: 1,
+        width: 0.9,
+        height: 0.9,
+        rotation: 0,
+        ports: [],
+        parameters: {
+          diameterMm: 20,
+          state: "open",
+        },
+        metadata: {},
+        levelId: "l1",
+      },
+    ],
+    pipes: [],
+  };
+
+  const summary = summarizeModelEngineering(model);
+  assert.equal(summary.installedPowerW, 1800);
+  assert.equal(summary.emitterLabel, "convector");
+});

@@ -308,6 +308,29 @@ function buildRoomSamplePoints(room, detailScale) {
     }
     return unique;
 }
+function readEngineeringParameterNumber(params, key) {
+    const value = params?.[key];
+    return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+function readEngineeringAirflowM3s(params) {
+    const airflowM3H = readEngineeringParameterNumber(params, "airflowM3H") ??
+        readEngineeringParameterNumber(params, "designAirflowM3H");
+    if (airflowM3H != null) {
+        return Math.max(0, airflowM3H) / 3600;
+    }
+    const airflowM3S = readEngineeringParameterNumber(params, "airflowM3S") ??
+        readEngineeringParameterNumber(params, "designAirflowM3S");
+    return airflowM3S != null ? Math.max(0, airflowM3S) : 0;
+}
+function resolveEngineeringEquipmentPowerW(params) {
+    const nominalPowerW = readEngineeringParameterNumber(params, "nominalPowerW");
+    if (nominalPowerW != null) {
+        return Math.max(0, nominalPowerW);
+    }
+    const powerKW = readEngineeringParameterNumber(params, "powerKW") ??
+        readEngineeringParameterNumber(params, "heatPowerKW");
+    return powerKW != null ? Math.max(0, powerKW * 1000) : null;
+}
 function buildHeatSources(model, rooms, physics) {
     const sources = [];
     model.equipment.forEach((item) => {
@@ -389,6 +412,102 @@ function buildHeatSources(model, rooms, physics) {
             levelId: item.levelId,
             roomId: room?.roomId ?? item.roomId,
             position: { ...item.position },
+            powerW,
+            amplitudeC,
+            decayM,
+            spreadM,
+        });
+    });
+    (model.engineeringSystems?.equipment ?? []).forEach((item) => {
+        if (!item.levelId) {
+            return;
+        }
+        const position = { x: item.x, y: item.y };
+        const room = resolveRoomAtPoint(rooms, item.levelId, position);
+        const roomArea = room?.areaM2 ?? 16;
+        let powerW = 0;
+        let amplitudeC = 0;
+        let decayM = 1.1;
+        let spreadM = 1.7;
+        let kind = "equipment";
+        switch (item.type) {
+            case "convector": {
+                powerW = resolveEngineeringEquipmentPowerW(item.parameters) ?? 1000;
+                amplitudeC = clamp((powerW / Math.max(220, roomArea * 28)) * 1.08, 0.9, 6.8);
+                decayM = clamp(Math.sqrt(roomArea) * 0.24, 0.7, 2.6);
+                spreadM = decayM * 1.75;
+                kind = "radiator";
+                break;
+            }
+            case "pump": {
+                const electricalPowerW = resolveEngineeringEquipmentPowerW(item.parameters) ?? 120;
+                powerW = Math.max(35, electricalPowerW * 0.35);
+                amplitudeC = clamp(powerW / Math.max(520, roomArea * 90), 0.05, 1.05);
+                decayM = clamp(Math.sqrt(roomArea) * 0.16, 0.45, 1.6);
+                spreadM = decayM * 1.35;
+                break;
+            }
+            case "automationCabinet": {
+                const voltageV = readEngineeringParameterNumber(item.parameters, "voltageV") ?? 380;
+                const channels = readEngineeringParameterNumber(item.parameters, "signalChannels") ?? 8;
+                powerW = clamp(voltageV * 0.08 + channels * 5, 20, 240);
+                amplitudeC = clamp(powerW / Math.max(600, roomArea * 110), 0.04, 0.65);
+                decayM = clamp(Math.sqrt(roomArea) * 0.14, 0.4, 1.4);
+                spreadM = decayM * 1.25;
+                break;
+            }
+            case "airHandlingUnit": {
+                const electricalPowerW = resolveEngineeringEquipmentPowerW(item.parameters) ?? 4000;
+                powerW = Math.max(120, electricalPowerW * 0.28);
+                amplitudeC = clamp(powerW / Math.max(520, roomArea * 84), 0.08, 1.2);
+                decayM = clamp(Math.sqrt(roomArea) * 0.18, 0.45, 1.8);
+                spreadM = decayM * 1.45;
+                break;
+            }
+            case "ductFan": {
+                const electricalPowerW = resolveEngineeringEquipmentPowerW(item.parameters) ?? 1100;
+                powerW = Math.max(60, electricalPowerW * 0.55);
+                amplitudeC = clamp(powerW / Math.max(520, roomArea * 88), 0.07, 1.1);
+                decayM = clamp(Math.sqrt(roomArea) * 0.17, 0.45, 1.7);
+                spreadM = decayM * 1.35;
+                break;
+            }
+            case "airHeater": {
+                powerW = resolveEngineeringEquipmentPowerW(item.parameters) ?? 18000;
+                amplitudeC = clamp((powerW / Math.max(240, roomArea * 26)) * 0.82, 0.8, 6.2);
+                decayM = clamp(Math.sqrt(roomArea) * 0.22, 0.6, 2.3);
+                spreadM = decayM * 1.55;
+                break;
+            }
+            case "supplyDiffuser": {
+                if (!room) {
+                    return;
+                }
+                const airflowM3S = readEngineeringAirflowM3s(item.parameters);
+                const supplyTemperatureC = readEngineeringParameterNumber(item.parameters, "supplyTemperatureC");
+                const roomTemperatureC = room.baseTemperatureC;
+                const deltaT = supplyTemperatureC != null ? supplyTemperatureC - roomTemperatureC : 0;
+                if (airflowM3S <= 0 || deltaT <= 0.2) {
+                    return;
+                }
+                powerW = 1.204 * 1005 * airflowM3S * deltaT;
+                amplitudeC = clamp((powerW / Math.max(260, roomArea * 36)) * 0.48, 0.2, 2.4);
+                decayM = clamp(Math.sqrt(roomArea) * 0.2, 0.45, 1.9);
+                spreadM = decayM * 1.3;
+                break;
+            }
+            default:
+                return;
+        }
+        if (powerW <= 0 || amplitudeC <= 0) {
+            return;
+        }
+        sources.push({
+            id: item.id,
+            kind,
+            levelId: item.levelId,
+            roomId: room?.roomId ?? null,
+            position,
             powerW,
             amplitudeC,
             decayM,
@@ -518,11 +637,16 @@ function computeLocalTemperatureEffect(field, room, point) {
     const floorEdgeCooling = 0.18 * Math.exp(-distanceToPolygonEdges(room.polygon, point) / 0.9);
     return sourceGain + wallInfluence - perimeterCooling - floorEdgeCooling;
 }
+/**
+ * Амплитуда охлаждения воздуха у внешней стены, °C.
+ * conductiveFactor ≈ R_si × U = 0.13 × U — физически верный коэффициент падения
+ * температуры на внутреннем поверхностном сопротивлении (СП 50, Rsi = 1/αi ≈ 0.13 м²К/Вт).
+ * openingBoost не применяем здесь — он учтён в computeLocalTemperatureEffect.
+ */
 function computeExternalCoolingAmplitude(roomTemperatureC, outdoorTemperatureC, boundary) {
     const delta = Math.max(0, roomTemperatureC - outdoorTemperatureC);
-    const conductiveFactor = clamp(boundary.effectiveU_W_m2K * 0.14, 0.1, 0.56);
-    const openingBoost = 1 + (boundary.windowAreaM2 * 1.8 + boundary.doorAreaM2 * 1.1) / Math.max(0.5, boundary.opaqueAreaM2 + boundary.windowAreaM2 + boundary.doorAreaM2);
-    return delta * conductiveFactor * openingBoost;
+    const conductiveFactor = clamp(boundary.effectiveU_W_m2K * 0.13, 0.02, 0.42);
+    return delta * conductiveFactor;
 }
 function resolveRoomAtPoint(rooms, levelId, point) {
     return rooms.find((room) => room.levelId === levelId && polygonContainsPoint(point, room.polygon)) ?? null;

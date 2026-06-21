@@ -16,6 +16,8 @@ const SYSTEM_PREFIX: Record<string, string> = {
   drain: "К1",
   electric: "Э",
   signal: "С",
+  airSupply: "П1",
+  airExhaust: "В1",
 };
 
 export function buildPipeLabel(pipe: EngineeringPipe): PipeLabelInfo {

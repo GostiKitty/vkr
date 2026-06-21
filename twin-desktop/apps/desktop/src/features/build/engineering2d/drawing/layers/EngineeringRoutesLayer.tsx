@@ -2,6 +2,7 @@ import React, { useMemo } from "react";
 import type { BuildingModel } from "../../../../../entities/geometry/types";
 import type {
   EngineeringMedium,
+  EngineeringEquipment,
   EngineeringPipe,
   EngineeringPipePoint,
 } from "../../../../../entities/engineering/types";
@@ -10,6 +11,7 @@ import { getPipeStrokeStyle } from "../engineeringLineStyles";
 import { distributeFlowArrows } from "../flowArrows";
 import { offsetPolyline, pickPipeLabelSegment, normalizeLabelAngle, type PlanProjection } from "../geometry";
 import { buildPipeLabel } from "../pipeLabels";
+import { resolveEngineeringEquipmentRenderRotation, resolveEngineeringRenderedPortPosition } from "../../render";
 
 interface EngineeringRoutesLayerProps {
   model: BuildingModel;
@@ -29,6 +31,32 @@ function polylineD(points: EngineeringPipePoint[]): string {
   return points
     .map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`)
     .join(" ");
+}
+
+function resolveProjectedEquipmentPort(
+  equipment: EngineeringEquipment | undefined,
+  portId: string,
+  projection: PlanProjection,
+  rotationById: Map<string, number>
+) {
+  if (!equipment) {
+    return null;
+  }
+  const renderRotation = rotationById.get(equipment.id) ?? equipment.rotation;
+  return resolveEngineeringRenderedPortPosition(
+    {
+      type: equipment.type,
+      width: equipment.width * projection.scale,
+      height: equipment.height * projection.scale,
+      rotation: renderRotation,
+    },
+    portId,
+    projection.project({ x: equipment.x, y: equipment.y }),
+    {
+      sizeMode: "schematic",
+      rotation: renderRotation,
+    }
+  );
 }
 
 /**
@@ -66,19 +94,63 @@ const EngineeringRoutesLayer: React.FC<EngineeringRoutesLayerProps> = ({
   showArrows,
   showLabels,
 }) => {
+  const allEquipment = model.engineeringSystems?.equipment ?? [];
   const allPipes = model.engineeringSystems?.pipes ?? [];
+  const equipment = useMemo(
+    () => allEquipment.filter((eq) => activeLevelId == null || eq.levelId === activeLevelId),
+    [activeLevelId, allEquipment]
+  );
+  const levelPipes = useMemo(
+    () => allPipes.filter((pipe) => activeLevelId == null || pipe.levelId === activeLevelId),
+    [activeLevelId, allPipes]
+  );
   const pipes = useMemo(
     () =>
-      allPipes.filter(
+      levelPipes.filter(
         (pipe) =>
-          (activeLevelId == null || pipe.levelId === activeLevelId) &&
           visibleMedia.has(pipe.medium) &&
           pipe.points.length >= 2
       ),
-    [allPipes, activeLevelId, visibleMedia]
+    [levelPipes, visibleMedia]
   );
+  const equipmentById = useMemo(() => new Map(equipment.map((eq) => [eq.id, eq])), [equipment]);
+  const equipmentRenderRotationById = useMemo(() => {
+    const rotationById = new Map<string, number>();
+    equipment.forEach((eq) => {
+      rotationById.set(eq.id, resolveEngineeringEquipmentRenderRotation(eq, levelPipes));
+    });
+    return rotationById;
+  }, [equipment, levelPipes]);
 
   const offsetsById = useMemo(() => pairOffset(pipes), [pipes]);
+  const projectedPointsById = useMemo(() => {
+    const pointsById = new Map<string, EngineeringPipePoint[]>();
+    pipes.forEach((pipe) => {
+      const offset = offsetsById.get(pipe.id) ?? 0;
+      const offsetPoints = offset !== 0 ? offsetPolyline(pipe.points, offset) : pipe.points;
+      const projected = projectPoints(offsetPoints, projection);
+      const fromPoint = resolveProjectedEquipmentPort(
+        equipmentById.get(pipe.fromEquipmentId),
+        pipe.fromPortId,
+        projection,
+        equipmentRenderRotationById
+      );
+      const toPoint = resolveProjectedEquipmentPort(
+        equipmentById.get(pipe.toEquipmentId),
+        pipe.toPortId,
+        projection,
+        equipmentRenderRotationById
+      );
+      if (fromPoint && projected[0]) {
+        projected[0] = fromPoint;
+      }
+      if (toPoint && projected[projected.length - 1]) {
+        projected[projected.length - 1] = toPoint;
+      }
+      pointsById.set(pipe.id, projected);
+    });
+    return pointsById;
+  }, [equipmentById, equipmentRenderRotationById, offsetsById, pipes, projection]);
 
   return (
     <g data-layer="engineering-routes">
@@ -86,9 +158,7 @@ const EngineeringRoutesLayer: React.FC<EngineeringRoutesLayerProps> = ({
       <g data-sublayer="halo" fill="none" strokeLinecap="round" strokeLinejoin="round">
         {pipes.map((pipe) => {
           const style = getPipeStrokeStyle(pipe.medium, pipe.diameter);
-          const offset = offsetsById.get(pipe.id) ?? 0;
-          const offsetPoints = offset !== 0 ? offsetPolyline(pipe.points, offset) : pipe.points;
-          const projected = projectPoints(offsetPoints, projection);
+          const projected = projectedPointsById.get(pipe.id) ?? [];
           return (
             <path
               key={`halo-${pipe.id}`}
@@ -105,9 +175,7 @@ const EngineeringRoutesLayer: React.FC<EngineeringRoutesLayerProps> = ({
       <g data-sublayer="lines" fill="none" strokeLinecap="round" strokeLinejoin="round">
         {pipes.map((pipe) => {
           const style = getPipeStrokeStyle(pipe.medium, pipe.diameter);
-          const offset = offsetsById.get(pipe.id) ?? 0;
-          const offsetPoints = offset !== 0 ? offsetPolyline(pipe.points, offset) : pipe.points;
-          const projected = projectPoints(offsetPoints, projection);
+          const projected = projectedPointsById.get(pipe.id) ?? [];
           return (
             <path
               key={`line-${pipe.id}`}
@@ -125,10 +193,8 @@ const EngineeringRoutesLayer: React.FC<EngineeringRoutesLayerProps> = ({
         <g data-sublayer="arrows">
           {pipes.map((pipe) => {
             const palette = MEDIUM_PALETTE[pipe.medium];
-            const offset = offsetsById.get(pipe.id) ?? 0;
-            const offsetPoints = offset !== 0 ? offsetPolyline(pipe.points, offset) : pipe.points;
-            const projected = projectPoints(offsetPoints, projection);
-            const reverse = pipe.medium === "return" || pipe.medium === "drain";
+            const projected = projectedPointsById.get(pipe.id) ?? [];
+            const reverse = pipe.medium === "return" || pipe.medium === "drain" || pipe.medium === "airExhaust";
             const arrows = distributeFlowArrows(projected, 130, { reverse });
             return arrows.map((marker, idx) => (
               <g key={`arrow-${pipe.id}-${idx}`} transform={`translate(${marker.cx} ${marker.cy}) rotate(${marker.angleDeg})`}>
@@ -149,9 +215,7 @@ const EngineeringRoutesLayer: React.FC<EngineeringRoutesLayerProps> = ({
       {showLabels ? (
         <g data-sublayer="pipe-labels">
           {pipes.map((pipe) => {
-            const offset = offsetsById.get(pipe.id) ?? 0;
-            const offsetPoints = offset !== 0 ? offsetPolyline(pipe.points, offset) : pipe.points;
-            const projected = projectPoints(offsetPoints, projection);
+            const projected = projectedPointsById.get(pipe.id) ?? [];
             const segment = pickPipeLabelSegment(projected);
             if (!segment || segment.length < 56) return null;
             const labelInfo = buildPipeLabel(pipe);

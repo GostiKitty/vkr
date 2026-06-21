@@ -49,6 +49,27 @@ export interface ModelEngineeringSummary {
 const DEFAULT_SUPPLY_TEMPERATURE_C = 70;
 const DEFAULT_RETURN_DELTA_K = 20;
 const HEATING_EQUIPMENT_TYPES = new Set(["radiator", "fancoil", "boiler", "heat_exchanger", "pump"]);
+const ENGINEERING_EMITTER_TYPES = new Set(["convector"]);
+const ENGINEERING_ADDITIVE_POWER_TYPES = new Set(["convector"]);
+const ENGINEERING_AIR_MEDIA = new Set(["airSupply", "airExhaust"]);
+const ENGINEERING_AIR_EQUIPMENT_TYPES = new Set([
+  "airHandlingUnit",
+  "ductFan",
+  "roofFan",
+  "airDamper",
+  "airCheckValve",
+  "fireDamper",
+  "airFilter",
+  "airFlowRegulatorConst",
+  "airFlowRegulatorVar",
+  "silencer",
+  "airHeater",
+  "airCooler",
+  "airHumidifier",
+  "airDehumidifier",
+  "supplyDiffuser",
+  "exhaustGrille",
+]);
 const WATER_DENSITY_KG_M3 = 1000;
 const VOLUME_FLOW_M3H_TO_MASS_FLOW_KGS = WATER_DENSITY_KG_M3 / 3600;
 
@@ -176,6 +197,9 @@ function summarizeEngineeringSystemsModel(systems: EngineeringSystemsModel | und
   const emitterLabels: string[] = [];
 
   for (const pipe of systems.pipes) {
+    if (ENGINEERING_AIR_MEDIA.has(pipe.medium)) {
+      continue;
+    }
     totalPipeLengthM += polylineLengthM(pipe.points);
     if (pipe.diameter > 0) {
       diameters.push(pipe.diameter);
@@ -198,7 +222,12 @@ function summarizeEngineeringSystemsModel(systems: EngineeringSystemsModel | und
   }
 
   for (const item of systems.equipment) {
-    emitterLabels.push(item.type);
+    if (ENGINEERING_AIR_EQUIPMENT_TYPES.has(item.type)) {
+      continue;
+    }
+    if (ENGINEERING_EMITTER_TYPES.has(item.type)) {
+      emitterLabels.push(item.type);
+    }
     const params = item.parameters;
     const supplyTemperatureC =
       readParamNumber(params, "supplyTemperatureC") ??
@@ -216,11 +245,14 @@ function summarizeEngineeringSystemsModel(systems: EngineeringSystemsModel | und
       readParamNumber(params, "powerKW") ??
       readParamNumber(params, "heatPowerKW");
     const nominalPowerW = readParamNumber(params, "nominalPowerW");
-    if (powerKW != null) {
-      installedPowerW = Math.max(installedPowerW, powerKW * 1000);
-    }
-    if (nominalPowerW != null) {
-      installedPowerW = Math.max(installedPowerW, nominalPowerW);
+    const resolvedPowerW =
+      powerKW != null
+        ? powerKW * 1000
+        : nominalPowerW;
+    if (resolvedPowerW != null) {
+      installedPowerW = ENGINEERING_ADDITIVE_POWER_TYPES.has(item.type)
+        ? installedPowerW + Math.max(0, resolvedPowerW)
+        : Math.max(installedPowerW, Math.max(0, resolvedPowerW));
     }
     const flowRateM3H = readParamNumber(params, "flowRateM3H");
     if (flowRateM3H != null) {
