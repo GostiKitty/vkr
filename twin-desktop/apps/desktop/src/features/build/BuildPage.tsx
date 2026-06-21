@@ -42,8 +42,6 @@ import ThermalCalibrationPanel from "./components/ThermalCalibrationPanel";
 import { Badge } from "../../shared/ui/Badge";
 import { ToolbarTooltip } from "../../shared/ui/ToolbarTooltip";
 import {
-  EngineeringCallout,
-  TemperatureScaleLegend,
   ThermalFieldLegend,
 } from "../../shared/ui/EngineeringUi";
 import SnapshotsPanel from "./components/SnapshotsPanel";
@@ -417,6 +415,7 @@ function BuildPageContent() {
   const setWalls = useBuildStore((state) => state.setWalls);
   const updateWall = useBuildStore((state) => state.updateWall);
   const removeWall = useBuildStore((state) => state.removeWall);
+  const setWallFilletAtPoint = useBuildStore((state) => state.setWallFilletAtPoint);
   const addRoof = useBuildStore((state) => state.addRoof);
   const updateRoof = useBuildStore((state) => state.updateRoof);
   const removeRoof = useBuildStore((state) => state.removeRoof);
@@ -2861,6 +2860,14 @@ function BuildPageContent() {
                       onClick={() => handleToolChange("select")}
                     />
                     <QuickToolButton
+                      icon="move"
+                      label="Перемещение"
+                      title="Перемещение объектов"
+                      active={tool === "move"}
+                      compact
+                      onClick={() => handleToolChange("move")}
+                    />
+                    <QuickToolButton
                       icon="wall"
                       label="Стены"
                       title="Нарисовать стены и ограждения"
@@ -2869,6 +2876,17 @@ function BuildPageContent() {
                       onClick={() => {
                         handleViewportChange("plan");
                         handleToolChange("wall");
+                      }}
+                    />
+                    <QuickToolButton
+                      icon="fillet"
+                      label="Скругление"
+                      title="Скругление углов: клик по стыку стен"
+                      active={tool === "fillet"}
+                      compact
+                      onClick={() => {
+                        handleViewportChange("plan");
+                        handleToolChange("fillet");
                       }}
                     />
                     <QuickToolButton
@@ -3219,6 +3237,7 @@ function BuildPageContent() {
                   onUpdateRoom={handleUpdateRoom}
                   onSetWalls={handleSetWalls}
                   onUpdateWall={updateWall}
+                  onSetWallFillet={setWallFilletAtPoint}
                   onAddRoof={addRoof}
                   onUpdateRoof={updateRoof}
                   onAddFloorSlab={addFloorSlab}
@@ -3322,11 +3341,8 @@ function BuildPageContent() {
                             />
                           ) : null}
                           {thermalVisualizationActive && !threeDTimelineActive ? (
-                            <div className="ui-overlay pointer-events-auto min-w-[18rem] flex-1 animate-fade-scale rounded-xl px-3 py-2">
-                              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                                <p className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-soft)]">
-                                  Наружная температура
-                                </p>
+                            <div className="ui-overlay pointer-events-auto animate-fade-scale rounded-xl px-3 py-2">
+                              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                                 <div className="flex items-center gap-2">
                                   <button
                                     type="button"
@@ -3510,20 +3526,6 @@ function BuildPageContent() {
                   </section>
                   <section className="space-y-4">
                     <p className="ui-build-section-title">Вероятность и калибровка</p>
-                    <div className="grid min-w-0 gap-4 lg:grid-cols-2">
-                      <EngineeringCallout variant="info" title="Калибровка">
-                        <p>
-                          Берёт 12 месячных значений потребления и подбирает несколько параметров модели так, чтобы расчёт
-                          был ближе к факту.
-                        </p>
-                      </EngineeringCallout>
-                      <EngineeringCallout variant="info" title="Разброс результатов">
-                        <p>
-                          Модель много раз пересчитывается с разной погодой, инфильтрацией и внутренними нагрузками, чтобы
-                          оценить риски и вероятный диапазон нагрузок.
-                        </p>
-                      </EngineeringCallout>
-                    </div>
                     <div className="grid min-w-0 gap-4 2xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
                       <ThermalMonteCarloPanel model={model} adjacency={adjacency} options={thermalOptions} />
                       <ThermalCalibrationPanel model={model} adjacency={adjacency} options={thermalOptions} />

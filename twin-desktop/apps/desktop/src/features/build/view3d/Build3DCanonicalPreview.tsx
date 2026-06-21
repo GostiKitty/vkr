@@ -27,6 +27,7 @@ import {
   type CanonicalTemperatureSummary,
   type CanonicalTemperatureSurface,
 } from "./buildCanonical3DModel";
+import { arcPolyline } from "../../../core/geometry/fillets";
 import {
   calculateFitCameraForBounds,
   calculateGridLayoutForBounds,
@@ -40,8 +41,10 @@ import {
   buildSurfaceFieldOverlayGroup,
 } from "./surfaceFieldScene";
 import { getRoomDisplayName } from "../../../shared/utils/roomNames";
-import { thermalColor, percentileRange } from "./thermalColormap";
+import { thermalColor, percentileRange, thermalGradientCss } from "./thermalColormap";
+import { ThermalFieldLegend } from "../../../shared/ui";
 import {
+  buildLevelElevationLabelGroup,
   buildRoomFloorLabelGroup,
   createRoomFloorLabelRenderer,
   disposeRoomFloorLabelGroup,
@@ -491,29 +494,477 @@ function createWallTemperatureMaterial(
   const color = thermalColor((temperature_C - min) / span);
   return new THREE.MeshStandardMaterial({
     color,
-    transparent: true,
-    opacity: transparent ? 0.50 : 0.78,
-    roughness: 0.78,
-    metalness: 0.02,
+    transparent: transparent,
+    opacity: transparent ? 0.55 : 0.93,
+    roughness: 0.76,
+    metalness: 0.03,
     emissive: color,
-    emissiveIntensity: 0.06,
-    depthTest: false,
-    depthWrite: false,
-    polygonOffset: true,
-    polygonOffsetFactor: -0.5,
-    polygonOffsetUnits: -0.5,
+    emissiveIntensity: 0.10,
   });
 }
 
 /**
- * Build a smooth thermal field mesh for a room floor using vertex colors.
- *
- * Instead of individual box tiles (which produce the blocky appearance), this
- * builds a single BufferGeometry with a regular grid, samples the temperature at
- * every vertex, and assigns vertex colors. WebGL interpolates colors between
- * vertices using barycentric coordinates (Gouraud shading), giving the continuous
- * ANSYS/CFD-like gradient look.
+ * Semi-transparent material for window/door thermal coloring.
+ * Windows keep glass-like roughness; doors are more opaque.
  */
+function createOpeningTemperatureMaterial(
+  temperature_C: number,
+  summary: Canonical3DModel["temperatureSummary"],
+  isWindow: boolean
+) {
+  const min = summary?.min_C ?? temperature_C;
+  const max = summary?.max_C ?? temperature_C;
+  const span = Math.max(max - min, 1e-6);
+  const color = thermalColor((temperature_C - min) / span);
+  return new THREE.MeshStandardMaterial({
+    color,
+    transparent: true,
+    opacity: isWindow ? 0.74 : 0.90,
+    roughness: isWindow ? 0.18 : 0.60,
+    metalness: isWindow ? 0.10 : 0.04,
+    emissive: color,
+    emissiveIntensity: isWindow ? 0.18 : 0.12,
+  });
+}
+
+interface WallOpeningInfo {
+  /** Normalized position along wall [0..1] at opening centre. */
+  uNorm: number;
+  /** Normalized vertical centre [0..1]. */
+  vCenterNorm: number;
+  /** Normalized half-width (opening.width_m / 2 / wallLength). */
+  uHalfNorm: number;
+  /** Normalized half-height (opening.height_m / 2 / wallHeight). */
+  vHalfNorm: number;
+}
+
+/**
+ * Per-vertex temperature for a wall grid mesh.
+ * Combines:
+ *  - base surface temperature
+ *  - horizontal gradient from adjacent room temperatures at each wall end
+ *  - vertical air-stratification gradient
+ *  - corner thermal bridges (exponential decay from each wall end)
+ *  - window/door frame thermal bridges (cold band around every opening)
+ */
+function wallVertexTemp(
+  uNorm: number,
+  vNorm: number,
+  baseTemp_C: number,
+  wallLength_m: number,
+  wallHeight_m: number,
+  isExterior: boolean,
+  cornerCoolingStart_C: number,
+  cornerCoolingEnd_C: number,
+  openings: WallOpeningInfo[],
+  startRoomTemp_C: number | null,
+  endRoomTemp_C: number | null
+): number {
+  // Horizontal gradient from adjacent room temps at each endpoint.
+  // Exterior walls transmit ~18% of room temp difference to interior surface;
+  // interior walls transmit ~30% (lower thermal resistance).
+  const roomInfluenceFactor = isExterior ? 0.18 : 0.30;
+  const startDelta = startRoomTemp_C != null ? (startRoomTemp_C - baseTemp_C) * roomInfluenceFactor : 0;
+  const endDelta   = endRoomTemp_C   != null ? (endRoomTemp_C   - baseTemp_C) * roomInfluenceFactor : 0;
+  const horizontalGradient = startDelta * (1 - uNorm) + endDelta * uNorm;
+
+  // Vertical stratification
+  const stratBot = isExterior ? -2.2 : -1.1;
+  const stratTop = isExterior ? 1.0 : 0.5;
+  const strat = stratBot + (stratTop - stratBot) * vNorm;
+
+  // Corner thermal bridges — decay in physical metres
+  const physU = uNorm * wallLength_m;
+  const cornerDecay = 0.55;
+  const cornerPenalty =
+    cornerCoolingStart_C * Math.exp(-physU / cornerDecay) +
+    cornerCoolingEnd_C * Math.exp(-(wallLength_m - physU) / cornerDecay);
+
+  // Frame thermal bridges — cold band around each opening perimeter
+  let framePenalty = 0;
+  for (const op of openings) {
+    const distU_m = Math.max(0, Math.abs(uNorm - op.uNorm) - op.uHalfNorm) * wallLength_m;
+    const distV_m = Math.max(0, Math.abs(vNorm - op.vCenterNorm) - op.vHalfNorm) * wallHeight_m;
+    const distFrame_m = Math.sqrt(distU_m * distU_m + distV_m * distV_m);
+    const framePeak = isExterior ? 4.5 : 2.2;
+    const frameDecay = 0.28;
+    framePenalty += framePeak * Math.exp(-distFrame_m / frameDecay);
+  }
+
+  // Floor-wall junction thermal bridge — cold strip at the base of the wall.
+  // In IR thermography this is always the coldest zone: the slab edge bridges heat outward.
+  const floorJunctionThreshold = 0.10; // bottom 10% of wall height
+  const floorPeak = isExterior ? 2.0 : 0.8;
+  const floorJunctionPenalty = vNorm < floorJunctionThreshold
+    ? floorPeak * (1 - vNorm / floorJunctionThreshold)
+    : 0;
+
+  return baseTemp_C + horizontalGradient + strat - cornerPenalty - framePenalty - floorJunctionPenalty;
+}
+
+/**
+ * Physics-based wall thermal mesh with vertex colours.
+ * Models horizontal room-temp gradient, vertical stratification,
+ * corner thermal bridges, window-frame bridges, and floor-wall junction.
+ */
+function addWallThermalMesh(
+  root: THREE.Object3D,
+  wall: { id: string; start: Vec2; end: Vec2; elevation_m: number; height_m: number; temperature_C: number },
+  openings: WallOpeningInfo[],
+  cornerCoolingStart_C: number,
+  cornerCoolingEnd_C: number,
+  colorScale: NonNullable<Canonical3DModel["temperatureSummary"]>,
+  isExterior: boolean,
+  startRoomTemp_C: number | null,
+  endRoomTemp_C: number | null
+): void {
+  // Extra params stored in userData so hover handler can recompute accurate temperature
+  const { min_C, max_C } = colorScale;
+  const span = Math.max(max_C - min_C, 1e-6);
+
+  const a = wall.start;
+  const b = wall.end;
+  const wallDx = b.x - a.x;
+  const wallDz = b.y - a.y;
+  const wallLength = Math.sqrt(wallDx * wallDx + wallDz * wallDz);
+  const wallHeight = Math.max(wall.height_m, 2.4);
+  const y0 = wall.elevation_m;
+
+  if (wallLength < 0.05) return;
+
+  // Higher resolution grid — more detail near corners / openings
+  const nu = Math.max(8, Math.ceil(wallLength / 0.25));
+  const nv = Math.max(5, Math.ceil(wallHeight / 0.32));
+  const vertCount = (nu + 1) * (nv + 1);
+
+  const positions = new Float32Array(vertCount * 3);
+  const colors = new Float32Array(vertCount * 3);
+
+  let vi = 0;
+  for (let iv = 0; iv <= nv; iv++) {
+    const vNorm = iv / nv;
+    const worldY = y0 + vNorm * wallHeight;
+    for (let iu = 0; iu <= nu; iu++) {
+      const uNorm = iu / nu;
+      // World position along wall
+      positions[vi * 3] = a.x + uNorm * wallDx;
+      positions[vi * 3 + 1] = worldY;
+      positions[vi * 3 + 2] = a.y + uNorm * wallDz;
+
+      const T = wallVertexTemp(
+        uNorm, vNorm,
+        wall.temperature_C, wallLength, wallHeight,
+        isExterior,
+        cornerCoolingStart_C, cornerCoolingEnd_C,
+        openings,
+        startRoomTemp_C,
+        endRoomTemp_C
+      );
+      const c = thermalColor((T - min_C) / span);
+      colors[vi * 3] = c.r;
+      colors[vi * 3 + 1] = c.g;
+      colors[vi * 3 + 2] = c.b;
+      vi++;
+    }
+  }
+
+  // Build triangle index buffer
+  const triCount = nu * nv * 2;
+  const indices = new Uint16Array(triCount * 3);
+  let ti = 0;
+  for (let iv = 0; iv < nv; iv++) {
+    for (let iu = 0; iu < nu; iu++) {
+      const i00 = iv * (nu + 1) + iu;
+      const i10 = i00 + 1;
+      const i01 = i00 + (nu + 1);
+      const i11 = i01 + 1;
+      indices[ti++] = i00; indices[ti++] = i10; indices[ti++] = i11;
+      indices[ti++] = i00; indices[ti++] = i11; indices[ti++] = i01;
+    }
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+  geo.setIndex(new THREE.BufferAttribute(indices, 1));
+
+  const mat = new THREE.MeshBasicMaterial({
+    vertexColors: true, transparent: true,
+    opacity: isExterior ? 0.62 : 0.48,
+    side: THREE.DoubleSide, depthWrite: false,
+    polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.renderOrder = 3;
+  setMeshIdentity(mesh, `wall-gradient:${wall.id}`, {
+    category: "wall-thermal-gradient",
+    // Store wall geometry params so hover handler can recompute T at hit point
+    wallStart: wall.start,
+    wallEnd: wall.end,
+    wallDx, wallDz, wallLength, wallHeight,
+    wallElevation_m: wall.elevation_m,
+    wallTemp_C: wall.temperature_C,
+    isExteriorWall: isExterior,
+    cornerCoolingStart_C,
+    cornerCoolingEnd_C,
+    openings,
+    startRoomTemp_C,
+    endRoomTemp_C,
+    disposeMaterial: true,
+  });
+  root.add(mesh);
+}
+
+/**
+ * Minimal polygon-edge distance (metres) from point (px, py) to a 2-D polygon.
+ * Used for roof thermal gradient (perimeter is coldest).
+ */
+function distToPolygonBoundary(px: number, py: number, poly: Vec2[]): number {
+  let min = Infinity;
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i];
+    const b = poly[(i + 1) % poly.length];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len2 = dx * dx + dy * dy;
+    const t = len2 < 1e-12 ? 0 : Math.max(0, Math.min(1, ((px - a.x) * dx + (py - a.y) * dy) / len2));
+    const cx = a.x + t * dx;
+    const cy = a.y + t * dy;
+    min = Math.min(min, Math.sqrt((px - cx) ** 2 + (py - cy) ** 2));
+  }
+  return min;
+}
+
+/** Ray-cast point-in-polygon test for 2-D Vec2 polygons. */
+function pointInPolygon2D(px: number, py: number, poly: Vec2[]): boolean {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i].x, yi = poly[i].y;
+    const xj = poly[j].x, yj = poly[j].y;
+    if ((yi > py) !== (yj > py) && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+/**
+ * Horizontal vertex-coloured thermal gradient mesh for flat roofs.
+ * Simulates the IR-thermography pattern: coolest near perimeter (slab-edge bridge),
+ * warmest toward centre (well-insulated field).
+ */
+function addRoofThermalMesh(
+  root: THREE.Object3D,
+  roof: { id: string; boundary: Vec2[]; elevation_m: number; thickness_m: number },
+  baseTemp_C: number,
+  colorScale: NonNullable<Canonical3DModel["temperatureSummary"]>
+): void {
+  if (roof.boundary.length < 3) return;
+  const { min_C, max_C } = colorScale;
+  const span = Math.max(max_C - min_C, 1e-6);
+
+  // Bounding box of roof polygon
+  let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
+  for (const v of roof.boundary) {
+    if (v.x < minX) minX = v.x; if (v.x > maxX) maxX = v.x;
+    if (v.y < minZ) minZ = v.y; if (v.y > maxZ) maxZ = v.y;
+  }
+  const step = 0.40;
+  const yWorld = roof.elevation_m + Math.max(roof.thickness_m, 0.05) + 0.022;
+
+  // Collect inside-polygon grid vertices
+  const verts: Array<[number, number]> = [];
+  for (let z = minZ; z <= maxZ + step * 0.5; z += step) {
+    for (let x = minX; x <= maxX + step * 0.5; x += step) {
+      if (pointInPolygon2D(x, z, roof.boundary)) verts.push([x, z]);
+    }
+  }
+  if (verts.length < 3) return;
+
+  // Build unindexed triangle fan per interior quad — simple enough for roofs
+  const positions: number[] = [];
+  const colors: number[] = [];
+  const EDGE_PEAK = 2.2;  // perimeter thermal bridge penalty
+  const edgeDecay = 1.2;  // decay length in metres
+
+  const addVert = (x: number, z: number) => {
+    const dist = distToPolygonBoundary(x, z, roof.boundary);
+    const T = baseTemp_C - EDGE_PEAK * Math.exp(-dist / edgeDecay);
+    const c = thermalColor((T - min_C) / span);
+    positions.push(x, yWorld, z);
+    colors.push(c.r, c.g, c.b);
+  };
+
+  // Reconstruct quads from the regular grid, emit two triangles per quad
+  const cols = Math.round((maxX - minX) / step) + 2;
+  const rows = Math.round((maxZ - minZ) / step) + 2;
+  for (let row = 0; row < rows - 1; row++) {
+    for (let col = 0; col < cols - 1; col++) {
+      const x0 = minX + col * step;
+      const z0 = minZ + row * step;
+      const x1 = x0 + step;
+      const z1 = z0 + step;
+      const p00 = pointInPolygon2D(x0, z0, roof.boundary);
+      const p10 = pointInPolygon2D(x1, z0, roof.boundary);
+      const p01 = pointInPolygon2D(x0, z1, roof.boundary);
+      const p11 = pointInPolygon2D(x1, z1, roof.boundary);
+      if (p00 && p10 && p11) { addVert(x0, z0); addVert(x1, z0); addVert(x1, z1); }
+      if (p00 && p11 && p01) { addVert(x0, z0); addVert(x1, z1); addVert(x0, z1); }
+    }
+  }
+  if (positions.length === 0) return;
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+
+  const mat = new THREE.MeshBasicMaterial({
+    vertexColors: true, transparent: true, opacity: 0.68,
+    side: THREE.DoubleSide, depthWrite: false,
+    polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.renderOrder = 3;
+  setMeshIdentity(mesh, `roof-gradient:${roof.id}`, {
+    category: "roof-thermal-gradient", temperature_C: baseTemp_C, disposeMaterial: true,
+  });
+  root.add(mesh);
+}
+
+/**
+ * Coloured edge frame around a thermally-highlighted window.
+ * Makes cold thermal bridges at window perimeters immediately visible.
+ */
+function addWindowThermalEdges(
+  root: THREE.Object3D,
+  opening: CanonicalOpeningModel,
+  colorScale: NonNullable<Canonical3DModel["temperatureSummary"]>
+): void {
+  const { min_C, max_C } = colorScale;
+  const span = Math.max(max_C - min_C, 1e-6);
+  const c = thermalColor(((opening.temperature_C as number) - min_C) / span);
+
+  const margin = 0.045;
+  const boxGeo = new THREE.BoxGeometry(
+    opening.width_m + margin,
+    opening.height_m + margin,
+    opening.depth_m + margin * 2
+  );
+  const edgesGeo = new THREE.EdgesGeometry(boxGeo, 12);
+  boxGeo.dispose();
+
+  const mat = new THREE.LineBasicMaterial({
+    color: new THREE.Color(c.r, c.g, c.b),
+    transparent: true, opacity: 0.88,
+  });
+  const lines = new THREE.LineSegments(edgesGeo, mat);
+  lines.rotation.y = opening.rotationY_rad;
+  lines.position.set(opening.center.x, opening.center.y, opening.center.z);
+  lines.renderOrder = 4;
+  lines.name = `window-edges:${opening.id}`;
+  lines.userData = { category: "window-thermal-edges", disposeMaterial: true };
+  root.add(lines);
+}
+
+/**
+ * Vertex-coloured face mesh layered on a window or door.
+ * Models the glass-centre warm zone and the cold frame thermal bridge.
+ * Placed on the inner (room-facing) face of the opening.
+ */
+function addWindowFaceThermalMesh(
+  root: THREE.Object3D,
+  opening: CanonicalOpeningModel,
+  colorScale: NonNullable<Canonical3DModel["temperatureSummary"]>
+): void {
+  const { min_C, max_C } = colorScale;
+  const span = Math.max(max_C - min_C, 1e-6);
+  const baseTemp = opening.temperature_C as number;
+  const isWin = opening.type === "window";
+  const W = opening.width_m;
+  const H = opening.height_m;
+
+  // Frame bridge: exterior glazing has strong frame cooling; doors less so
+  const framePeak = opening.isExterior ? (isWin ? 3.5 : 2.0) : (isWin ? 1.5 : 0.7);
+  const frameDecay = opening.isExterior ? 0.09 : 0.06;
+  // Centre of double/triple glazing is slightly warmer than base (argon fill)
+  const centerBonus = isWin ? 0.55 : 0.20;
+
+  const nu = Math.max(5, Math.ceil(W / 0.14));
+  const nv = Math.max(6, Math.ceil(H / 0.14));
+  const vertCount = (nu + 1) * (nv + 1);
+
+  const positions = new Float32Array(vertCount * 3);
+  const colors = new Float32Array(vertCount * 3);
+  const zFace = -opening.depth_m * 0.5 - 0.006; // inner room-facing surface
+
+  let vi = 0;
+  for (let iv = 0; iv <= nv; iv++) {
+    const vNorm = iv / nv;
+    for (let iu = 0; iu <= nu; iu++) {
+      const uNorm = iu / nu;
+      positions[vi * 3]     = (uNorm - 0.5) * W;
+      positions[vi * 3 + 1] = (vNorm - 0.5) * H;
+      positions[vi * 3 + 2] = zFace;
+
+      // Distance from nearest frame edge (metres)
+      const distEdge = Math.min(uNorm * W, (1 - uNorm) * W, vNorm * H, (1 - vNorm) * H);
+      // Smooth bump: 0 at edges, 1 at centre
+      const bump = uNorm * (1 - uNorm) * 4 * (vNorm * (1 - vNorm) * 4);
+      const T = baseTemp + centerBonus * bump - framePeak * Math.exp(-distEdge / frameDecay);
+      const c = thermalColor((T - min_C) / span);
+      colors[vi * 3] = c.r; colors[vi * 3 + 1] = c.g; colors[vi * 3 + 2] = c.b;
+      vi++;
+    }
+  }
+
+  const indices = new Uint16Array(nu * nv * 6);
+  let ti = 0;
+  for (let iv = 0; iv < nv; iv++) {
+    for (let iu = 0; iu < nu; iu++) {
+      const i00 = iv * (nu + 1) + iu;
+      const i10 = i00 + 1;
+      const i01 = i00 + (nu + 1);
+      const i11 = i01 + 1;
+      indices[ti++] = i00; indices[ti++] = i10; indices[ti++] = i11;
+      indices[ti++] = i00; indices[ti++] = i11; indices[ti++] = i01;
+    }
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+  geo.setIndex(new THREE.BufferAttribute(indices, 1));
+
+  const mat = new THREE.MeshBasicMaterial({
+    vertexColors: true, transparent: true,
+    opacity: isWin ? 0.70 : 0.82,
+    side: THREE.DoubleSide, depthWrite: false,
+    polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.rotation.y = opening.rotationY_rad;
+  mesh.position.set(opening.center.x, opening.center.y, opening.center.z);
+  mesh.renderOrder = 5;
+  mesh.name = `window-face:${opening.id}`;
+  mesh.userData = {
+    category: "window-face-gradient",
+    sourceType: opening.type,
+    temperature_C: baseTemp,
+    isExterior: opening.isExterior,
+    disposeMaterial: true,
+  };
+  root.add(mesh);
+}
+
+/**
+ * Convert a thermal color (Three.Color sRGB) to a CSS rgb() string,
+ * darkened for text legibility on white backgrounds.
+ */
+function thermalColorToCss(color: THREE.Color, darken = 0.72): string {
+  const r = Math.round(Math.min(color.r * darken, 1) * 255);
+  const g = Math.round(Math.min(color.g * darken, 1) * 255);
+  const b = Math.round(Math.min(color.b * darken, 1) * 255);
+  return `rgb(${r},${g},${b})`;
+}
+
 /**
  * Build a smooth thermal field mesh using vertex colors on a horizontal plan patch.
  */
@@ -719,6 +1170,43 @@ function addBoxBetween(
   return mesh;
 }
 
+/** Криволинейная плита скруглённого угла стыка стен (кольцевой сектор). */
+function addWallFillet(
+  root: THREE.Object3D,
+  fillet: Canonical3DModel["wallFillets"][number],
+  material: THREE.Material,
+  options?: { name?: string; userData?: Record<string, unknown> }
+) {
+  const half = fillet.thickness_m / 2;
+  const outerRadius = fillet.radius_m + half;
+  const innerRadius = Math.max(0.001, fillet.radius_m - half);
+  const height = Math.max(fillet.height_m, 2.4);
+  const segments = Math.max(4, Math.ceil((fillet.turnAngle / Math.PI) * 24));
+  const outer = arcPolyline(fillet.center, outerRadius, fillet.startAngle, fillet.signedSweep, segments);
+  const inner = arcPolyline(fillet.center, innerRadius, fillet.startAngle, fillet.signedSweep, segments).reverse();
+  const shape = new THREE.Shape();
+  [...outer, ...inner].forEach((point, index) => {
+    // План (x, y) → footprint Shape; ось Y инвертируется, т.к. rotateX(-90°) переводит план-Y в мировой Z.
+    const sx = point.x - fillet.center.x;
+    const sy = -(point.y - fillet.center.y);
+    if (index === 0) {
+      shape.moveTo(sx, sy);
+    } else {
+      shape.lineTo(sx, sy);
+    }
+  });
+  shape.closePath();
+  const geometry = new THREE.ExtrudeGeometry(shape, { depth: height, bevelEnabled: false });
+  geometry.rotateX(-Math.PI / 2);
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.position.set(fillet.center.x, fillet.elevation_m, fillet.center.y);
+  if (options?.name || options?.userData) {
+    setMeshIdentity(mesh, options?.name ?? mesh.name, options?.userData ?? {});
+  }
+  root.add(mesh);
+  return mesh;
+}
+
 function addCylinderBetween(
   root: THREE.Object3D,
   start: THREE.Vector3,
@@ -743,13 +1231,38 @@ function addCylinderBetween(
   return mesh;
 }
 
-function createOpeningMesh(opening: CanonicalOpeningModel, selection: Selection | null) {
-  const baseMaterial =
-    opening.type === "window"
-      ? getSelectionMaterial(selection, "window", opening.id, OPENING_WINDOW_MATERIAL)
-      : getSelectionMaterial(selection, "door", opening.id, OPENING_DOOR_MATERIAL);
+function createOpeningMesh(
+  opening: CanonicalOpeningModel,
+  selection: Selection | null,
+  temperatureEnabled: boolean,
+  colorScale: Canonical3DModel["temperatureSummary"]
+) {
+  const isWindow = opening.type === "window";
+  const hasTemperature =
+    temperatureEnabled && Number.isFinite(opening.temperature_C) && colorScale !== null;
+
+  let baseMaterial: THREE.Material;
+  let disposeThermalMaterial = false;
+  if (hasTemperature) {
+    baseMaterial = createOpeningTemperatureMaterial(
+      opening.temperature_C as number,
+      colorScale!,
+      isWindow
+    );
+    disposeThermalMaterial = true;
+  } else {
+    baseMaterial = isWindow ? OPENING_WINDOW_MATERIAL : OPENING_DOOR_MATERIAL;
+  }
+
+  const kind = isWindow ? ("window" as const) : ("door" as const);
+  const finalMaterial = getSelectionMaterial(selection, kind, opening.id, baseMaterial);
+  if (finalMaterial !== baseMaterial && disposeThermalMaterial) {
+    (baseMaterial as THREE.Material).dispose();
+    disposeThermalMaterial = false;
+  }
+
   const geometry = new THREE.BoxGeometry(opening.width_m, opening.height_m, opening.depth_m);
-  const mesh = new THREE.Mesh(geometry, baseMaterial);
+  const mesh = new THREE.Mesh(geometry, finalMaterial);
   mesh.rotation.y = opening.rotationY_rad;
   mesh.position.set(opening.center.x, opening.center.y, opening.center.z);
   return setMeshIdentity(mesh, `${opening.type}:${opening.id}`, {
@@ -757,6 +1270,9 @@ function createOpeningMesh(opening: CanonicalOpeningModel, selection: Selection 
     sourceId: opening.id,
     wallId: opening.wallId,
     category: "opening",
+    temperature_C: opening.temperature_C,
+    isExterior: opening.isExterior,
+    disposeMaterial: disposeThermalMaterial,
     selection: { kind: opening.type, id: opening.id } satisfies Selection,
   });
 }
@@ -950,6 +1466,43 @@ export const Build3DCanonicalPreview = React.forwardRef<Build3DCanonicalPreviewH
       () => new Map(model.rooms.map((room, index) => [room.id, getRoomDisplayName(room, index)])),
       [model.rooms]
     );
+    const levelElevationLabels = useMemo(() => {
+      if (activeLevelId !== null) {
+        return [];
+      }
+      const pointsByLevel = new Map<string, Vec2[]>();
+      const appendPoints = (levelId: string | null | undefined, points: Vec2[]) => {
+        if (!levelId || points.length === 0) {
+          return;
+        }
+        const bucket = pointsByLevel.get(levelId) ?? [];
+        bucket.push(...points);
+        pointsByLevel.set(levelId, bucket);
+      };
+
+      canonicalModel.rooms.forEach((room) => appendPoints(room.levelId, room.boundary));
+      canonicalModel.walls.forEach((wall) => appendPoints(wall.levelId, [wall.start, wall.end]));
+      canonicalModel.roofs.forEach((roof) => appendPoints(roof.levelId, roof.boundary));
+      canonicalModel.slabs.forEach((slab) => appendPoints(slab.levelId, slab.boundary));
+      canonicalModel.stairs.forEach((stair) => appendPoints(stair.levelId, stair.boundary));
+
+      return model.levels
+        .filter((level) => (pointsByLevel.get(level.id)?.length ?? 0) > 0)
+        .map((level) => ({
+          id: level.id,
+          text: `${level.elevation_m >= 0 ? "+" : ""}${level.elevation_m.toFixed(2)} м`,
+          points: pointsByLevel.get(level.id) ?? [],
+          elevation_m: level.elevation_m,
+        }));
+    }, [
+      activeLevelId,
+      canonicalModel.rooms,
+      canonicalModel.roofs,
+      canonicalModel.slabs,
+      canonicalModel.stairs,
+      canonicalModel.walls,
+      model.levels,
+    ]);
 
     useEffect(() => {
       roomLabelByIdRef.current = roomLabelById;
@@ -969,6 +1522,20 @@ export const Build3DCanonicalPreview = React.forwardRef<Build3DCanonicalPreviewH
     const coloredInterfloorSlabCount = useMemo(
       () => (temperatureEnabled && thermalField ? interfloorSlabs.length : 0),
       [interfloorSlabs.length, temperatureEnabled, thermalField]
+    );
+    const coloredWindowCount = useMemo(
+      () =>
+        temperatureEnabled && viewer.showOpenings
+          ? canonicalModel.windows.filter((w) => Number.isFinite(w.temperature_C)).length
+          : 0,
+      [canonicalModel.windows, temperatureEnabled, viewer.showOpenings]
+    );
+    const coloredDoorCount = useMemo(
+      () =>
+        temperatureEnabled && viewer.showOpenings
+          ? canonicalModel.doors.filter((d) => Number.isFinite(d.temperature_C)).length
+          : 0,
+      [canonicalModel.doors, temperatureEnabled, viewer.showOpenings]
     );
 
     // Реактивное обновление положения солнца → позиция ключевого света
@@ -1159,16 +1726,16 @@ export const Build3DCanonicalPreview = React.forwardRef<Build3DCanonicalPreviewH
       const keyLight = new THREE.DirectionalLight(0xfff4e0, 1.15);
       keyLight.position.set(18, 22, 14);
       keyLight.castShadow = true;
-      keyLight.shadow.mapSize.width = 1024;
-      keyLight.shadow.mapSize.height = 1024;
+      keyLight.shadow.mapSize.width = 2048;
+      keyLight.shadow.mapSize.height = 2048;
       keyLight.shadow.camera.near = 0.5;
-      keyLight.shadow.camera.far = 200;
-      keyLight.shadow.camera.left = -45;
-      keyLight.shadow.camera.right = 45;
-      keyLight.shadow.camera.top = 45;
-      keyLight.shadow.camera.bottom = -45;
-      keyLight.shadow.bias = -0.0008;
-      keyLight.shadow.radius = 2.5;
+      keyLight.shadow.camera.far = 300;
+      keyLight.shadow.camera.left = -60;
+      keyLight.shadow.camera.right = 60;
+      keyLight.shadow.camera.top = 60;
+      keyLight.shadow.camera.bottom = -60;
+      keyLight.shadow.bias = -0.0005;
+      keyLight.shadow.radius = 3;
       scene.add(keyLight);
       sunLightRef.current = keyLight;
 
@@ -1254,7 +1821,11 @@ export const Build3DCanonicalPreview = React.forwardRef<Build3DCanonicalPreviewH
         pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
         raycaster.setFromCamera(pointer, camera);
         const hits = raycaster.intersectObjects(content.children, true);
-        const hit = hits.find((entry) => {
+        const screenX = event.clientX - rect.left;
+        const screenY = event.clientY - rect.top;
+
+        // Priority 1: surface-field overlay (patch-level tooltip)
+        const surfaceHit = hits.find((entry) => {
           const category = entry.object.userData?.category;
           return (
             category === "surface-field" ||
@@ -1263,20 +1834,147 @@ export const Build3DCanonicalPreview = React.forwardRef<Build3DCanonicalPreviewH
           );
         });
         const currentSurfaceField = surfaceFieldRef.current;
-        if (!hit || !currentSurfaceField) {
-          onHoverInfoRef.current?.(null);
+        if (surfaceHit && currentSurfaceField) {
+          onHoverInfoRef.current?.(
+            buildSurfaceFieldHoverInfo({
+              intersection: surfaceHit,
+              result: currentSurfaceField,
+              mode: surfaceFieldModeRef.current,
+              roomLabelById: roomLabelByIdRef.current,
+              screenX,
+              screenY,
+            })
+          );
           return;
         }
-        onHoverInfoRef.current?.(
-          buildSurfaceFieldHoverInfo({
-            intersection: hit,
-            result: currentSurfaceField,
-            mode: surfaceFieldModeRef.current,
-            roomLabelById: roomLabelByIdRef.current,
-            screenX: event.clientX - rect.left,
-            screenY: event.clientY - rect.top,
-          })
-        );
+
+        // Priority 2: thermally-coloured shell (wall / opening / floor overlay / gradient / edges)
+        const thermalHit = hits.find((entry) => {
+          const cat = entry.object.userData?.category as string | undefined;
+          return (
+            cat === "shell" ||
+            cat === "opening" ||
+            cat === "temperature-floor" ||
+            cat === "temperature-slab" ||
+            cat === "wall-thermal-gradient" ||
+            cat === "window-thermal-edges" ||
+            cat === "window-face-gradient" ||
+            cat === "roof-thermal-gradient"
+          );
+        });
+        if (thermalHit) {
+          const ud = thermalHit.object.userData;
+          const rawCat = ud.category as string | undefined;
+
+          // For wall-thermal-gradient: compute accurate temperature at the exact hit point
+          // using stored wall geometry params rather than the base temperature.
+          let accurateWallTemp: number | null = null;
+          if (rawCat === "wall-thermal-gradient") {
+            const wd = ud as {
+              wallDx: number; wallDz: number; wallLength: number; wallHeight: number;
+              wallStart: Vec2; wallElevation_m: number; wallTemp_C: number;
+              isExteriorWall: boolean; cornerCoolingStart_C: number; cornerCoolingEnd_C: number;
+              openings: WallOpeningInfo[]; startRoomTemp_C: number | null; endRoomTemp_C: number | null;
+            };
+            const pt = thermalHit.point;
+            const uNorm = Math.max(0, Math.min(1,
+              ((pt.x - wd.wallStart.x) * wd.wallDx + (pt.z - wd.wallStart.y) * wd.wallDz) /
+              (wd.wallLength * wd.wallLength)
+            ));
+            const vNorm = Math.max(0, Math.min(1,
+              (pt.y - wd.wallElevation_m) / wd.wallHeight
+            ));
+            accurateWallTemp = wallVertexTemp(
+              uNorm, vNorm,
+              wd.wallTemp_C, wd.wallLength, wd.wallHeight,
+              wd.isExteriorWall,
+              wd.cornerCoolingStart_C, wd.cornerCoolingEnd_C,
+              wd.openings,
+              wd.startRoomTemp_C, wd.endRoomTemp_C
+            );
+          }
+
+          // gradient/edge overlays: fall through to parent mesh data for selection info
+          let resolvedUd = ud;
+          if (
+            rawCat === "wall-thermal-gradient" ||
+            rawCat === "window-thermal-edges" ||
+            rawCat === "window-face-gradient"
+          ) {
+            const parts = (thermalHit.object.name ?? "").split(":");
+            const parentId = parts.slice(1).join(":");
+            const parentName =
+              rawCat === "wall-thermal-gradient" ? `wall:${parentId}` : `window:${parentId}`;
+            let parentObj: THREE.Object3D | undefined;
+            thermalHit.object.parent?.traverse((o) => {
+              if (o.name === parentName) parentObj = o;
+            });
+            if (parentObj?.userData) resolvedUd = parentObj.userData;
+          }
+
+          const baseTempC = resolvedUd.temperature_C as number | null | undefined;
+          const tempC = accurateWallTemp ?? baseTempC;
+          const hasTempC = typeof tempC === "number" && Number.isFinite(tempC);
+          const cat = resolvedUd.category as string;
+          const srcType = resolvedUd.sourceType as string | undefined;
+
+          let title = "Поверхность";
+          let subtitle: string | undefined;
+          const details: Array<{ label: string; value: string }> = [];
+
+          if (cat === "opening") {
+            title = srcType === "window" ? "Окно" : "Дверь";
+            if (hasTempC) {
+              subtitle = resolvedUd.isExterior
+                ? `Внутр. пов. (наружный контур): ${(tempC as number).toFixed(1)} °C`
+                : `Внутренний проём: ${(tempC as number).toFixed(1)} °C`;
+            }
+          } else if (cat === "shell" && srcType === "wall") {
+            title = resolvedUd.isExteriorWall ? "Наружная стена" : "Внутренняя стена";
+            if (hasTempC) {
+              subtitle = `Температура поверхности: ${(tempC as number).toFixed(1)} °C`;
+              // SP50.13330 Δt_n check: normative inner-surface drop ≤ 4°C (residential exterior)
+              const roomT = resolvedUd.adjacentRoomTemp_C as number | null | undefined;
+              if (typeof roomT === "number" && Number.isFinite(roomT)) {
+                const deltaT = roomT - (tempC as number);
+                const norm = resolvedUd.isExteriorWall ? 4.0 : 8.0;
+                details.push({ label: "Комната", value: `${roomT.toFixed(1)} °C` });
+                details.push({ label: "ΔT поверхности", value: `${deltaT.toFixed(1)} °C` });
+                details.push({
+                  label: "СП 50 норма ΔT",
+                  value: deltaT <= norm ? `≤ ${norm} °C ✓` : `> ${norm} °C ⚠`,
+                });
+              }
+            }
+          } else if (cat === "temperature-floor") {
+            title = "Пол";
+            if (hasTempC) {
+              subtitle = `Температура: ${(tempC as number).toFixed(1)} °C`;
+            }
+          } else if (cat === "temperature-slab") {
+            title = "Межэтажное перекрытие";
+            if (hasTempC) {
+              subtitle = `Температура: ${(tempC as number).toFixed(1)} °C`;
+            }
+          } else if (rawCat === "roof-thermal-gradient") {
+            title = "Крыша";
+            if (hasTempC) {
+              subtitle = `Температура поверхности: ${(tempC as number).toFixed(1)} °C`;
+            }
+          }
+
+          onHoverInfoRef.current?.({
+            title,
+            subtitle: subtitle ?? (hasTempC ? `${(tempC as number).toFixed(1)} °C` : "Нет данных"),
+            temperatureC: hasTempC ? (tempC as number) : null,
+            details: details.length > 0 ? details : undefined,
+            screenX,
+            screenY,
+          });
+          return;
+        }
+
+        onHoverInfoRef.current?.(null);
       };
 
       const handlePointerLeave = () => {
@@ -1434,8 +2132,26 @@ export const Build3DCanonicalPreview = React.forwardRef<Build3DCanonicalPreviewH
       });
 
       if (viewer.showRooms && canonicalModel.rooms.length > 0) {
-        labelsRoot.add(buildRoomFloorLabelGroup(canonicalModel.rooms, model.rooms, roomLabelById));
+        const roomsForLabels = colorScale
+          ? canonicalModel.rooms.map((room) => {
+              if (!Number.isFinite(room.temperature_C)) return room;
+              const { min_C, max_C } = colorScale;
+              const span = Math.max(max_C - min_C, 1e-6);
+              const c = thermalColor(((room.temperature_C as number) - min_C) / span);
+              return { ...room, temperatureColorCss: thermalColorToCss(c) };
+            })
+          : canonicalModel.rooms;
+        labelsRoot.add(buildRoomFloorLabelGroup(roomsForLabels, model.rooms, roomLabelById));
       }
+      if (levelElevationLabels.length > 0) {
+        labelsRoot.add(buildLevelElevationLabelGroup(levelElevationLabels));
+      }
+
+      const roomTempById = new Map(
+        canonicalModel.rooms
+          .filter((r) => Number.isFinite(r.temperature_C))
+          .map((r) => [r.id, r.temperature_C as number])
+      );
 
       canonicalModel.walls.forEach((wall) => {
         if (!viewer.showWalls) {
@@ -1446,13 +2162,18 @@ export const Build3DCanonicalPreview = React.forwardRef<Build3DCanonicalPreviewH
             ? createWallTemperatureMaterial(wall.temperature_C as number, colorScale, viewer.transparentWalls)
             : wallMaterial;
         const wallMeshMaterial = getSelectionMaterial(selection, "wall", wall.id, baseWallMaterial);
+        const wallH = Math.max(wall.height_m, 2.4);
+        const isExteriorWall =
+          wall.adjacentRoomId === null || wall.temperatureSource === "thermalField.boundaries";
+        const adjacentRoomTemp_C =
+          wall.adjacentRoomId != null ? (roomTempById.get(wall.adjacentRoomId) ?? null) : null;
         addBoxBetween(
           shellRoot,
           wall.start,
           wall.end,
           Math.max(wall.thickness_m, 0.08),
-          Math.max(wall.height_m, 2.4),
-          wall.elevation_m + wall.height_m * 0.5,
+          wallH,
+          wall.elevation_m + wallH * 0.5,
           wallMeshMaterial,
           {
             name: `wall:${wall.id}`,
@@ -1463,6 +2184,8 @@ export const Build3DCanonicalPreview = React.forwardRef<Build3DCanonicalPreviewH
               levelId: wall.levelId,
               temperature_C: wall.temperature_C,
               adjacentRoomId: wall.adjacentRoomId,
+              adjacentRoomTemp_C,
+              isExteriorWall,
               disposeMaterial: baseWallMaterial !== wallMaterial,
               selection: { kind: "wall", id: wall.id } satisfies Selection,
             },
@@ -1473,10 +2196,48 @@ export const Build3DCanonicalPreview = React.forwardRef<Build3DCanonicalPreviewH
         }
       });
 
-      if (viewer.showOpenings) {
-        canonicalModel.doors.forEach((door) => shellRoot.add(createOpeningMesh(door, selection)));
-        canonicalModel.windows.forEach((windowItem) => shellRoot.add(createOpeningMesh(windowItem, selection)));
+      if (viewer.showWalls) {
+        canonicalModel.wallFillets.forEach((fillet) => {
+          const filletMaterial =
+            wallTemperatureEnabled && Number.isFinite(fillet.temperature_C) && colorScale
+              ? createWallTemperatureMaterial(fillet.temperature_C as number, colorScale, viewer.transparentWalls)
+              : wallMaterial;
+          addWallFillet(shellRoot, fillet, filletMaterial, {
+            name: `wall-fillet:${fillet.id}`,
+            userData: {
+              category: "shell",
+              sourceType: "wall",
+              levelId: fillet.levelId,
+              disposeMaterial: filletMaterial !== wallMaterial,
+            },
+          });
+        });
       }
+
+      if (viewer.showOpenings) {
+        canonicalModel.doors.forEach((door) =>
+          shellRoot.add(createOpeningMesh(door, selection, temperatureEnabled, colorScale))
+        );
+        canonicalModel.windows.forEach((windowItem) =>
+          shellRoot.add(createOpeningMesh(windowItem, selection, temperatureEnabled, colorScale))
+        );
+      }
+
+      // Thermal coloring for roofs: exterior surface temperature per level
+      const roofLevelAvgRoomTemp = new Map<string, number>();
+      if (temperatureEnabled && colorScale) {
+        const tempsByLevel = new Map<string, number[]>();
+        canonicalModel.rooms.forEach((room) => {
+          if (!Number.isFinite(room.temperature_C)) return;
+          const arr = tempsByLevel.get(room.levelId) ?? [];
+          arr.push(room.temperature_C as number);
+          tempsByLevel.set(room.levelId, arr);
+        });
+        tempsByLevel.forEach((temps, levelId) => {
+          roofLevelAvgRoomTemp.set(levelId, temps.reduce((s, t) => s + t, 0) / temps.length);
+        });
+      }
+      const sceneOutdoorTempC = thermalField?.outdoorTemperatureC ?? null;
 
       canonicalModel.roofs.forEach((roof) => {
         if (shellPlanBoundary.length >= 3 && getSurfaceShellIntersectionRatio(roof.boundary, shellPlanBoundary) < 0.7) {
@@ -1486,30 +2247,54 @@ export const Build3DCanonicalPreview = React.forwardRef<Build3DCanonicalPreviewH
           }
           return;
         }
-        const selectionMat = (base: THREE.Material) => getSelectionMaterial(selection, "roof", roof.id, base);
+
+        // Compute roof exterior surface temperature (heavily outdoor-biased for well-insulated roof)
+        let roofThermalMat: THREE.MeshStandardMaterial | null = null;
+        let roofSurfaceTemp: number | null = null;
+        if (temperatureEnabled && colorScale) {
+          const roomTemp = roofLevelAvgRoomTemp.get(roof.levelId) ?? null;
+          if (roomTemp !== null) {
+            roofSurfaceTemp = sceneOutdoorTempC !== null
+              ? sceneOutdoorTempC + 0.08 * (roomTemp - sceneOutdoorTempC)
+              : roomTemp;
+            roofThermalMat = createWallTemperatureMaterial(roofSurfaceTemp, colorScale, false);
+          }
+        }
+
+        const defaultMat = roof.kind === "pitched" ? ROOF_PITCHED_MATERIAL : ROOF_FLAT_MATERIAL;
+        const baseMat = roofThermalMat ?? defaultMat;
+        const finalRoofMat = getSelectionMaterial(selection, "roof", roof.id, baseMat);
+        if (finalRoofMat !== baseMat && roofThermalMat) {
+          roofThermalMat.dispose();
+          roofThermalMat = null;
+        }
+        const disposeRoofMat = roofThermalMat !== null && finalRoofMat === roofThermalMat;
+
         const identity = {
           category: "roof" as const,
           sourceType: "roof" as const,
           sourceId: roof.id,
           levelId: roof.levelId,
+          temperature_C: roofSurfaceTemp,
+          disposeMaterial: disposeRoofMat,
           selection: { kind: "roof", id: roof.id } satisfies Selection,
         };
 
         if (roof.kind === "pitched" && roof.slope) {
           // Скатная крыша — вальмовая геометрия
-          const mat = selectionMat(ROOF_PITCHED_MATERIAL);
-          const mesh = buildPitchedRoofMesh(roof.boundary, roof.elevation_m, roof.slope, mat);
+          const mesh = buildPitchedRoofMesh(roof.boundary, roof.elevation_m, roof.slope, finalRoofMat);
           setMeshIdentity(mesh, `roof:${roof.id}`, identity);
           shellRoot.add(mesh);
         } else {
           // Плоская крыша — экструзия-плита
           const shape = buildShape(roof.boundary);
           if (!shape) {
+            if (disposeRoofMat && roofThermalMat) roofThermalMat.dispose();
             return;
           }
           const roofDepth = Math.max(roof.thickness_m, 0.05);
           const geometry = new THREE.ExtrudeGeometry(shape, { depth: roofDepth, bevelEnabled: false });
-          const mesh = new THREE.Mesh(geometry, selectionMat(ROOF_FLAT_MATERIAL));
+          const mesh = new THREE.Mesh(geometry, finalRoofMat);
           mesh.rotation.x = Math.PI / 2;
           mesh.position.y = roof.elevation_m + roofDepth;
           setMeshIdentity(mesh, `roof:${roof.id}`, identity);
@@ -1712,6 +2497,18 @@ export const Build3DCanonicalPreview = React.forwardRef<Build3DCanonicalPreviewH
         const gridLayout = calculateGridLayoutForBounds(bounds);
         grid.position.set(gridLayout.position.x, gridLayout.position.y, gridLayout.position.z);
         grid.scale.set(Math.max(gridLayout.size / 20, 1), 1, Math.max(gridLayout.size / 20, 1));
+
+        // Подгоняем фрустум теневой камеры под реальные размеры модели
+        const sunLight = sunLightRef.current;
+        if (sunLight) {
+          const half = Math.max(bounds.maxDim * 0.7, 25);
+          sunLight.shadow.camera.left = -half;
+          sunLight.shadow.camera.right = half;
+          sunLight.shadow.camera.top = half;
+          sunLight.shadow.camera.bottom = -half;
+          sunLight.shadow.camera.far = half * 4 + 30;
+          sunLight.shadow.camera.updateProjectionMatrix();
+        }
       }
 
       const modelKey = [
@@ -1740,18 +2537,36 @@ export const Build3DCanonicalPreview = React.forwardRef<Build3DCanonicalPreviewH
         scheduleInitialFit();
       }
 
-      // Enable shadow casting/receiving on all shell geometry
+      // Тени + архитектурные контурные рёбра на всей оболочке
       shellRoot.traverse((obj) => {
-        if ((obj as THREE.Mesh).isMesh) {
-          (obj as THREE.Mesh).castShadow = true;
-          (obj as THREE.Mesh).receiveShadow = true;
-        }
+        const mesh = obj as THREE.Mesh;
+        if (!mesh.isMesh) return;
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+
+        const cat = mesh.userData?.category as string | undefined;
+        const isShellSolid = cat === "shell" || cat === "roof" || cat === "slab";
+        if (!isShellSolid || !mesh.geometry) return;
+        // Не дублируем рёбра для уже обработанных мешей
+        if (mesh.children.some((c) => c.name.startsWith("edges:"))) return;
+
+        const edgesGeo = new THREE.EdgesGeometry(mesh.geometry, 18);
+        const linesMat = new THREE.LineBasicMaterial({
+          color: 0x334155,
+          transparent: true,
+          opacity: 0.22,
+        });
+        const lines = new THREE.LineSegments(edgesGeo, linesMat);
+        lines.name = `edges:${mesh.name}`;
+        lines.renderOrder = mesh.renderOrder + 1;
+        mesh.add(lines);
       });
 
       renderCurrentScene();
     }, [
       canonicalModel,
       model.rooms,
+      levelElevationLabels,
       roomLabelById,
       selection,
       showHeatSources,
@@ -1761,6 +2576,8 @@ export const Build3DCanonicalPreview = React.forwardRef<Build3DCanonicalPreviewH
       surfaceFieldMode,
       surfaceFieldOpacity,
       viewer,
+      temperatureEnabled,
+      temperatureColorScale,
       wallTemperatureEnabled,
     ]);
 
@@ -1773,7 +2590,16 @@ export const Build3DCanonicalPreview = React.forwardRef<Build3DCanonicalPreviewH
         shellRoot.children
           .filter((child) => {
             const name = child.name ?? "";
-            return name.startsWith("temperature:") || child.userData?.category === "temperature-floor" || child.userData?.category === "temperature-slab";
+            const cat = child.userData?.category as string | undefined;
+            return (
+              name.startsWith("temperature:") ||
+              cat === "temperature-floor" ||
+              cat === "temperature-slab" ||
+              cat === "wall-thermal-gradient" ||
+              cat === "window-thermal-edges" ||
+              cat === "window-face-gradient" ||
+              cat === "roof-thermal-gradient"
+            );
           })
           .forEach((child) => {
             shellRoot.remove(child);
@@ -1828,6 +2654,148 @@ export const Build3DCanonicalPreview = React.forwardRef<Build3DCanonicalPreviewH
           addInterfloorSlabThermalMeshes(shellRoot, slab, thermalField, temperatureColorScale, levelAdjacency);
         });
       }
+
+      // Physics-based wall thermal meshes (stratification + corner bridges + frame bridges)
+      if (wallTemperatureEnabled && viewer.showWalls) {
+        // Build endpoint → wallId[] map for corner adjacency (5cm tolerance grid)
+        const ptKey = (v: Vec2) => `${Math.round(v.x * 20)}_${Math.round(v.y * 20)}`;
+        const endpointWalls = new Map<string, string[]>();
+        const wallById = new Map(canonicalModel.walls.map((w) => [w.id, w]));
+        canonicalModel.walls.forEach((w) => {
+          const sk = ptKey(w.start);
+          const ek = ptKey(w.end);
+          endpointWalls.set(sk, [...(endpointWalls.get(sk) ?? []), w.id]);
+          endpointWalls.set(ek, [...(endpointWalls.get(ek) ?? []), w.id]);
+        });
+        const isWallExterior = (w: (typeof canonicalModel.walls)[number]) =>
+          w.adjacentRoomId === null || w.temperatureSource === "thermalField.boundaries";
+
+        const getCornerCooling = (wallId: string, pt: Vec2): number => {
+          const wall = wallById.get(wallId);
+          if (!wall) return 0;
+          const thisExt = isWallExterior(wall);
+          const neighbors = (endpointWalls.get(ptKey(pt)) ?? []).filter((id) => id !== wallId);
+          let cooling = neighbors.length === 0 ? 0.3 : 0;
+          for (const nId of neighbors) {
+            const nb = wallById.get(nId);
+            if (!nb) continue;
+            const nbExt = isWallExterior(nb);
+            const c = thisExt && nbExt ? 3.2 : thisExt || nbExt ? 1.6 : 0.5;
+            cooling = Math.max(cooling, c);
+          }
+          return cooling;
+        };
+
+        // Adjacent room temperature at each wall endpoint — drives horizontal gradient.
+        // Collects room temps from all walls meeting at that corner, returns their average.
+        const roomTempByIdOverlay = new Map(
+          canonicalModel.rooms
+            .filter((r) => Number.isFinite(r.temperature_C))
+            .map((r) => [r.id, r.temperature_C as number])
+        );
+        const getCornerRoomTemp = (pt: Vec2, excludeWallId: string): number | null => {
+          const neighbors = (endpointWalls.get(ptKey(pt)) ?? []).filter((id) => id !== excludeWallId);
+          const temps: number[] = [];
+          for (const nId of neighbors) {
+            const nb = wallById.get(nId);
+            if (!nb?.adjacentRoomId) continue;
+            const t = roomTempByIdOverlay.get(nb.adjacentRoomId);
+            if (typeof t === "number") temps.push(t);
+          }
+          // Also check this wall's own adjacent room
+          const ownWall = wallById.get(excludeWallId);
+          if (ownWall?.adjacentRoomId) {
+            const t = roomTempByIdOverlay.get(ownWall.adjacentRoomId);
+            if (typeof t === "number") temps.push(t);
+          }
+          if (temps.length === 0) return null;
+          return temps.reduce((a, b) => a + b, 0) / temps.length;
+        };
+
+        // Build openings-per-wall lookup
+        const openingsByWallId = new Map<string, CanonicalOpeningModel[]>();
+        [...canonicalModel.windows, ...canonicalModel.doors].forEach((op) => {
+          const arr = openingsByWallId.get(op.wallId) ?? [];
+          arr.push(op);
+          openingsByWallId.set(op.wallId, arr);
+        });
+
+        canonicalModel.walls.forEach((wall) => {
+          if (!Number.isFinite(wall.temperature_C)) return;
+          const wallDx = wall.end.x - wall.start.x;
+          const wallDz = wall.end.y - wall.start.y;
+          const wallLen = Math.sqrt(wallDx * wallDx + wallDz * wallDz);
+          const wallHeight = Math.max(wall.height_m, 2.4);
+          if (wallLen < 0.05) return;
+
+          // Project each opening centre onto this wall's u-axis
+          const openingInfos: WallOpeningInfo[] = (openingsByWallId.get(wall.id) ?? [])
+            .filter((op) => Number.isFinite(op.temperature_C))
+            .map((op): WallOpeningInfo => {
+              const dx = op.center.x - wall.start.x;
+              const dz = op.center.z - wall.start.y;
+              const projLen = (dx * wallDx + dz * wallDz) / wallLen;
+              return {
+                uNorm: projLen / wallLen,
+                vCenterNorm: (op.center.y - wall.elevation_m) / wallHeight,
+                uHalfNorm: op.width_m / 2 / wallLen,
+                vHalfNorm: op.height_m / 2 / wallHeight,
+              };
+            });
+
+          addWallThermalMesh(
+            shellRoot,
+            {
+              id: wall.id,
+              start: wall.start,
+              end: wall.end,
+              elevation_m: wall.elevation_m,
+              height_m: wall.height_m,
+              temperature_C: wall.temperature_C as number,
+            },
+            openingInfos,
+            getCornerCooling(wall.id, wall.start),
+            getCornerCooling(wall.id, wall.end),
+            temperatureColorScale,
+            isWallExterior(wall),
+            getCornerRoomTemp(wall.start, wall.id),
+            getCornerRoomTemp(wall.end, wall.id)
+          );
+        });
+      }
+
+      // Coloured edge frames + inner face gradients for thermally-highlighted openings
+      if (viewer.showOpenings) {
+        [...canonicalModel.windows, ...canonicalModel.doors].forEach((opening) => {
+          if (!Number.isFinite(opening.temperature_C)) return;
+          addWindowThermalEdges(shellRoot, opening, temperatureColorScale);
+          addWindowFaceThermalMesh(shellRoot, opening, temperatureColorScale);
+        });
+      }
+
+      // Flat-roof thermal gradient overlays
+      if (thermalField) {
+        const roofTempsByLevel = new Map<string, number[]>();
+        canonicalModel.rooms.forEach((room) => {
+          if (!Number.isFinite(room.temperature_C)) return;
+          const arr = roofTempsByLevel.get(room.levelId) ?? [];
+          arr.push(room.temperature_C as number);
+          roofTempsByLevel.set(room.levelId, arr);
+        });
+        const outdoorC = thermalField.outdoorTemperatureC;
+        canonicalModel.roofs
+          .filter((r) => r.kind === "flat")
+          .forEach((roof) => {
+            const roomTemps = roofTempsByLevel.get(roof.levelId) ?? [];
+            if (roomTemps.length === 0) return;
+            const roomAvg = roomTemps.reduce((s, t) => s + t, 0) / roomTemps.length;
+            const baseTemp = outdoorC != null
+              ? outdoorC + 0.08 * (roomAvg - outdoorC)
+              : roomAvg;
+            addRoofThermalMesh(shellRoot, roof, baseTemp, temperatureColorScale);
+          });
+      }
+
       renderCurrentScene();
     }, [
       canonicalModel,
@@ -1837,6 +2805,9 @@ export const Build3DCanonicalPreview = React.forwardRef<Build3DCanonicalPreviewH
       temperatureEnabled,
       thermalField,
       viewer.showRooms,
+      viewer.showWalls,
+      viewer.showOpenings,
+      wallTemperatureEnabled,
     ]);
 
     useImperativeHandle(
@@ -1872,19 +2843,37 @@ export const Build3DCanonicalPreview = React.forwardRef<Build3DCanonicalPreviewH
         {!suppressTemperatureSummaryOverlay &&
         temperatureEnabled &&
         temperatureColorScale &&
-        (coloredRoomFloorCount > 0 || coloredWallCount > 0 || coloredInterfloorSlabCount > 0) ? (
-          <div className="pointer-events-none absolute bottom-3 left-3 z-10">
-            <div className="ui-overlay max-w-[15rem] px-3 py-2.5">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Температурное поле</p>
-              <p className="mt-1 text-sm font-semibold text-slate-900">
-                {temperatureColorScale.min_C.toFixed(1)}–{temperatureColorScale.max_C.toFixed(1)} °C
-              </p>
-              <p className="mt-1 text-xs text-slate-500">Средняя {temperatureColorScale.average_C.toFixed(1)} °C</p>
-              <p className="mt-1 text-xs text-slate-500">
-                Пол: {coloredRoomFloorCount} · Плиты: {coloredInterfloorSlabCount} · Стены: {coloredWallCount}
-              </p>
-              {partialTemperatureWarning ? <p className="mt-1 text-xs text-amber-700">{partialTemperatureWarning}</p> : null}
-            </div>
+        (coloredRoomFloorCount > 0 ||
+          coloredWallCount > 0 ||
+          coloredInterfloorSlabCount > 0 ||
+          coloredWindowCount > 0 ||
+          coloredDoorCount > 0) ? (
+          <div className="pointer-events-none absolute bottom-3 left-3 z-10 max-w-[15rem]">
+            <ThermalFieldLegend
+              title="Температурное поле"
+              minC={temperatureColorScale.min_C}
+              maxC={temperatureColorScale.max_C}
+              avgC={temperatureColorScale.average_C}
+              gradientCss={thermalGradientCss()}
+              source={[
+                coloredRoomFloorCount > 0 ? `пол ${coloredRoomFloorCount}` : "",
+                coloredInterfloorSlabCount > 0 ? `плиты ${coloredInterfloorSlabCount}` : "",
+                coloredWallCount > 0 ? `стены ${coloredWallCount}` : "",
+                coloredWindowCount > 0 ? `окна ${coloredWindowCount}` : "",
+                coloredDoorCount > 0 ? `двери ${coloredDoorCount}` : "",
+                thermalField?.outdoorTemperatureC != null
+                  ? `наружн. ${thermalField.outdoorTemperatureC.toFixed(1)} °C`
+                  : "",
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+              warnings={partialTemperatureWarning ? [partialTemperatureWarning] : undefined}
+              thresholds={
+                temperatureColorScale.min_C < 0 && temperatureColorScale.max_C > 0
+                  ? [{ value_C: 0, label: "0 °C — граница замерзания", color: "rgba(255,255,255,0.90)" }]
+                  : undefined
+              }
+            />
           </div>
         ) : null}
       </div>

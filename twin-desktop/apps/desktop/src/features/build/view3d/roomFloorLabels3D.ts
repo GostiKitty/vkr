@@ -7,6 +7,17 @@ export interface RoomFloorLabelSource {
   id: string;
   boundary: Vec2[];
   elevation_m: number;
+  /** Surface temperature to show below the room name (°C). */
+  temperature_C?: number | null;
+  /** CSS color string for the temperature line, e.g. "rgb(14,122,214)". */
+  temperatureColorCss?: string;
+}
+
+export interface LevelElevationLabelSource {
+  id: string;
+  text: string;
+  points: Vec2[];
+  elevation_m: number;
 }
 
 function computePlanCentroid(boundary: Vec2[]): { x: number; y: number } {
@@ -24,6 +35,20 @@ function computePlanCentroid(boundary: Vec2[]): { x: number; y: number } {
     x: (minX + maxX) * 0.5,
     y: (minY + maxY) * 0.5,
   };
+}
+
+function computePlanBounds(points: Vec2[]) {
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  points.forEach((point) => {
+    minX = Math.min(minX, point.x);
+    minY = Math.min(minY, point.y);
+    maxX = Math.max(maxX, point.x);
+    maxY = Math.max(maxY, point.y);
+  });
+  return { minX, minY, maxX, maxY };
 }
 
 export function createRoomFloorLabelRenderer(host: HTMLElement): CSS2DRenderer {
@@ -55,9 +80,47 @@ export function buildRoomFloorLabelGroup(
     const center = computePlanCentroid(room.boundary);
     const labelElement = document.createElement("div");
     labelElement.className = "build-3d-room-label";
-    labelElement.textContent = label;
+
+    const nameEl = document.createElement("span");
+    nameEl.textContent = label;
+    labelElement.appendChild(nameEl);
+
+    const tempC = room.temperature_C;
+    if (typeof tempC === "number" && Number.isFinite(tempC)) {
+      const tempEl = document.createElement("span");
+      tempEl.className = "build-3d-room-label__temp";
+      tempEl.textContent = `${tempC.toFixed(1)} °C`;
+      if (room.temperatureColorCss) {
+        tempEl.style.color = room.temperatureColorCss;
+      }
+      labelElement.appendChild(tempEl);
+    }
+
     const labelObject = new CSS2DObject(labelElement);
     labelObject.position.set(center.x, room.elevation_m + 0.08, center.y);
+    group.add(labelObject);
+  });
+
+  return group;
+}
+
+export function buildLevelElevationLabelGroup(levels: LevelElevationLabelSource[]): THREE.Group {
+  const group = new THREE.Group();
+  group.name = "group:level-elevation-labels";
+
+  levels.forEach((level) => {
+    if (!level.points.length) {
+      return;
+    }
+    const bounds = computePlanBounds(level.points);
+    if (!Number.isFinite(bounds.maxX) || !Number.isFinite(bounds.minY)) {
+      return;
+    }
+    const labelElement = document.createElement("div");
+    labelElement.className = "build-3d-level-label";
+    labelElement.textContent = level.text;
+    const labelObject = new CSS2DObject(labelElement);
+    labelObject.position.set(bounds.maxX + 0.45, level.elevation_m + 0.06, bounds.minY - 0.08);
     group.add(labelObject);
   });
 

@@ -35,6 +35,7 @@ import { MonteCarloScatterChart } from "./charts/MonteCarloScatterChart";
 import { ThermalTimeSeriesChartBlock } from "./charts/ThermalTimeSeriesChartBlock";
 import { resultsMetricInfo, type MetricInfoDefinition } from "./resultsMetricInfo";
 import { MonteCarloRunControls } from "../scenarios/MonteCarloRunControls";
+import { DEFAULT_MONTE_CARLO_RUNS, runThermalMonteCarloAnalysis } from "../scenarios/runThermalMonteCarloAnalysis";
 
 interface MonteCarloResultsSectionProps {
   baseResult: ThermalSimulationResult | null;
@@ -264,15 +265,25 @@ export function MonteCarloResultsSection({
 
   const runControls = (
     <>
-      {!baseResult ? (
+      {!monteCarloResult ? (
         <WorkspaceInlineNotice
-          message="Сначала базовый RC-расчёт."
+          message={
+            !baseResult
+              ? `Сначала базовый RC-расчёт. Для первой оценки риска обычно достаточно 50-100 прогонов; ${DEFAULT_MONTE_CARLO_RUNS} дают стабильнее P10/P90.`
+              : `Для первой оценки риска обычно достаточно 50-100 прогонов; ${DEFAULT_MONTE_CARLO_RUNS} дают стабильнее P10/P90.`
+          }
           actions={
-            onRunCalculation ? (
-              <button type="button" onClick={onRunCalculation} className="ui-btn-primary px-4 py-2 text-sm">
-                Запустить расчёт
-              </button>
-            ) : null
+            !baseResult
+              ? onRunCalculation ? (
+                  <button type="button" onClick={onRunCalculation} className="ui-btn-primary px-4 py-2 text-sm">
+                    Запустить расчёт
+                  </button>
+                ) : null
+              : (
+                  <button type="button" onClick={() => runThermalMonteCarloAnalysis()} className="ui-btn-primary px-4 py-2 text-sm">
+                    Запустить Monte Carlo
+                  </button>
+                )
           }
         />
       ) : null}

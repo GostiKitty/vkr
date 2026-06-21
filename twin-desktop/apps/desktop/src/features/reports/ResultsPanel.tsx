@@ -114,11 +114,12 @@ export function ResultsPanel({ projectId: _projectId }: ResultsPanelProps) {
       return [];
     }
     const zoneById = new Map(zoneRows.map((row) => [row.zoneId, row]));
+    const roomNameById = new Map(buildModel.rooms.map((room) => [room.id, room.name?.trim() || room.id]));
     const roomRiskById = new Map(
       (visibleMonteCarloResult?.roomRiskSummary ?? []).map((room) => [room.roomId, room])
     );
 
-    return Object.values(visibleThermalResult.rooms).map((room, index) => {
+    return Object.values(visibleThermalResult.rooms).map((room) => {
       const temperatures = room.timeline.map((point) => point.temperatureC).filter((value) => Number.isFinite(value));
       const avgTemperature =
         temperatures.length > 0 ? temperatures.reduce((sum, value) => sum + value, 0) / temperatures.length : null;
@@ -127,7 +128,7 @@ export function ResultsPanel({ projectId: _projectId }: ResultsPanelProps) {
       const zone = zoneById.get(room.roomId);
       return {
         roomId: room.roomId,
-        roomName: zone?.zoneName ?? buildModel.rooms[index]?.name ?? room.roomId,
+        roomName: zone?.zoneName ?? roomNameById.get(room.roomId) ?? room.roomId,
         energyKWh: room.dailyEnergyKWh,
         avgTemperatureC: avgTemperature,
         minTemperatureC: minTemperature,

@@ -95,7 +95,7 @@ function createRoomSeed(model, room, surfaces, levelMap, options, networkContext
     const heatRecoveryFactor = Math.min(1, Math.max(0, options.heatRecoveryFactor ?? 0));
     const scheduledVentilationUA_W_K = AIR_DENSITY_KG_M3 * AIR_CP_J_KG_K * airflowFromACH(scheduledVentilationAch, volumeM3) * (1 - heatRecoveryFactor);
     const mechanicalSupplyUA_W_K = roomSupply
-        ? AIR_DENSITY_KG_M3 * AIR_CP_J_KG_K * Math.max(0, roomSupply.airflow_m3_s) * (1 - heatRecoveryFactor)
+        ? AIR_DENSITY_KG_M3 * AIR_CP_J_KG_K * getRoomMechanicalAirflowM3s(roomSupply) * (1 - heatRecoveryFactor)
         : 0;
     const ventilationUA_W_K = infiltrationUA_W_K + scheduledVentilationUA_W_K + mechanicalSupplyUA_W_K;
     const supplyAirTemperatureC = roomSupply?.supplyTemperatureC ?? options.supplyAirTemperatureC ?? options.outdoorTemperatureC;
@@ -291,6 +291,101 @@ function buildCouplingLinks(surfaces) {
         conductance_W_K: surface.conductance_W_K,
     }));
 }
+function readEngineeringParameterNumber(parameters, key) {
+    const value = parameters?.[key];
+    return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+function readEngineeringAirflowM3s(parameters) {
+    const airflowM3H = readEngineeringParameterNumber(parameters, "airflowM3H") ??
+        readEngineeringParameterNumber(parameters, "designAirflowM3H");
+    if (airflowM3H != null) {
+        return Math.max(0, airflowM3H) / 3600;
+    }
+    const airflowM3S = readEngineeringParameterNumber(parameters, "airflowM3S") ??
+        readEngineeringParameterNumber(parameters, "designAirflowM3S");
+    return airflowM3S != null ? Math.max(0, airflowM3S) : 0;
+}
+function readEngineeringPipeAirflowM3s(pipe) {
+    return typeof pipe.flowRate === "number" && Number.isFinite(pipe.flowRate) ? Math.max(0, pipe.flowRate) / 3600 : 0;
+}
+function getConnectedEngineeringAirPipes(pipesByEquipmentId, equipmentId, medium) {
+    return (pipesByEquipmentId.get(equipmentId) ?? []).filter((pipe) => pipe.medium === medium);
+}
+function resolveEngineeringAirTerminalAirflowM3s(equipment, medium, pipesByEquipmentId, equipmentById) {
+    const connectedPipes = getConnectedEngineeringAirPipes(pipesByEquipmentId, equipment.id, medium);
+    const pipeAirflow = connectedPipes
+        .map((pipe) => readEngineeringPipeAirflowM3s(pipe))
+        .find((value) => value > 0);
+    if (pipeAirflow != null) {
+        return pipeAirflow;
+    }
+    const ownAirflow = readEngineeringAirflowM3s(equipment.parameters);
+    if (ownAirflow > 0) {
+        return ownAirflow;
+    }
+    for (const pipe of connectedPipes) {
+        const otherEquipmentId = pipe.fromEquipmentId === equipment.id ? pipe.toEquipmentId : pipe.fromEquipmentId;
+        const otherEquipment = equipmentById.get(otherEquipmentId);
+        if (!otherEquipment) {
+            continue;
+        }
+        const otherAirflow = readEngineeringAirflowM3s(otherEquipment.parameters);
+        if (otherAirflow > 0) {
+            return otherAirflow;
+        }
+    }
+    return 0;
+}
+function resolveEngineeringSupplyTemperatureC(equipment, pipesByEquipmentId, equipmentById, fallbackC) {
+    const connectedPipes = getConnectedEngineeringAirPipes(pipesByEquipmentId, equipment.id, "airSupply");
+    const pipeTemperature = connectedPipes.find((pipe) => typeof pipe.temperature === "number" && Number.isFinite(pipe.temperature))?.temperature;
+    if (pipeTemperature != null) {
+        return pipeTemperature;
+    }
+    const ownTemperature = readEngineeringParameterNumber(equipment.parameters, "supplyTemperatureC") ??
+        readEngineeringParameterNumber(equipment.parameters, "temperatureC");
+    if (ownTemperature != null) {
+        return ownTemperature;
+    }
+    for (const pipe of connectedPipes) {
+        const otherEquipmentId = pipe.fromEquipmentId === equipment.id ? pipe.toEquipmentId : pipe.fromEquipmentId;
+        const otherEquipment = equipmentById.get(otherEquipmentId);
+        if (!otherEquipment) {
+            continue;
+        }
+        const otherTemperature = readEngineeringParameterNumber(otherEquipment.parameters, "supplyTemperatureC") ??
+            readEngineeringParameterNumber(otherEquipment.parameters, "temperatureC");
+        if (otherTemperature != null) {
+            return otherTemperature;
+        }
+    }
+    return fallbackC;
+}
+function accumulateRoomMechanicalAir(roomSupplyAir, roomId, input) {
+    const current = roomSupplyAir.get(roomId) ?? {
+        supplyAirflow_m3_s: 0,
+        exhaustAirflow_m3_s: 0,
+        supplyTemperatureC: input.supplyTemperatureC,
+    };
+    const addedSupplyAirflow = Math.max(0, input.supplyAirflow_m3_s ?? 0);
+    const supplyAirflow_m3_s = current.supplyAirflow_m3_s + addedSupplyAirflow;
+    const exhaustAirflow_m3_s = current.exhaustAirflow_m3_s + Math.max(0, input.exhaustAirflow_m3_s ?? 0);
+    const supplyTemperatureC = addedSupplyAirflow > 0
+        ? (current.supplyAirflow_m3_s * current.supplyTemperatureC + addedSupplyAirflow * input.supplyTemperatureC) /
+            Math.max(supplyAirflow_m3_s, 1e-6)
+        : current.supplyTemperatureC;
+    roomSupplyAir.set(roomId, {
+        supplyAirflow_m3_s,
+        exhaustAirflow_m3_s,
+        supplyTemperatureC,
+    });
+}
+function getRoomMechanicalAirflowM3s(state) {
+    if (!state) {
+        return 0;
+    }
+    return Math.max(0, Math.max(state.supplyAirflow_m3_s, state.exhaustAirflow_m3_s));
+}
 function buildThermalNetworkContext(model, options) {
     const snapshot = buildSmartModelSnapshot(model, null, 0);
     const equipmentStateById = new Map(snapshot.equipmentStates.map((entry) => [entry.equipmentId, entry]));
@@ -302,6 +397,18 @@ function buildThermalNetworkContext(model, options) {
     const heatLoadMultiplier = snapshot.scenario?.impact.heatLoadMultiplier ?? 1;
     const networkFlowMultiplier = snapshot.scenario?.impact.networkFlowMultiplier ?? 1;
     const roomById = new Map(model.rooms.map((room) => [room.id, room]));
+    const engineeringEquipment = model.engineeringSystems?.equipment ?? [];
+    const engineeringEquipmentById = new Map(engineeringEquipment.map((item) => [item.id, item]));
+    const engineeringAirPipes = (model.engineeringSystems?.pipes ?? []).filter((pipe) => pipe.medium === "airSupply" || pipe.medium === "airExhaust");
+    const engineeringAirPipesByEquipmentId = new Map();
+    engineeringAirPipes.forEach((pipe) => {
+        const fromPipes = engineeringAirPipesByEquipmentId.get(pipe.fromEquipmentId) ?? [];
+        fromPipes.push(pipe);
+        engineeringAirPipesByEquipmentId.set(pipe.fromEquipmentId, fromPipes);
+        const toPipes = engineeringAirPipesByEquipmentId.get(pipe.toEquipmentId) ?? [];
+        toPipes.push(pipe);
+        engineeringAirPipesByEquipmentId.set(pipe.toEquipmentId, toPipes);
+    });
     model.equipment.forEach((item) => {
         const state = equipmentStateById.get(item.id);
         if (!state || state.effectiveState !== "on") {
@@ -363,18 +470,41 @@ function buildThermalNetworkContext(model, options) {
         if (designAirflow > 0 && (item.type === "ahu" || item.type === "diffuser" || item.type === "fancoil")) {
             const airflow_m3_s = designAirflow * Math.max(0, ductSupport || networkFlowMultiplier * 0.25);
             if (airflow_m3_s > 0) {
-                const current = roomSupplyAir.get(roomId) ?? {
-                    airflow_m3_s: 0,
+                accumulateRoomMechanicalAir(roomSupplyAir, roomId, {
+                    supplyAirflow_m3_s: airflow_m3_s,
                     supplyTemperatureC: item.params.supplyTemperatureC ?? options.supplyAirTemperatureC ?? options.outdoorTemperatureC,
-                };
-                const supplyTemperatureC = item.params.supplyTemperatureC ?? current.supplyTemperatureC;
-                const mixedSupplyTemperatureC = (current.airflow_m3_s * current.supplyTemperatureC + airflow_m3_s * supplyTemperatureC) /
-                    Math.max(airflow_m3_s + current.airflow_m3_s, 1e-6);
-                roomSupplyAir.set(roomId, {
-                    airflow_m3_s: current.airflow_m3_s + airflow_m3_s,
-                    supplyTemperatureC: mixedSupplyTemperatureC,
                 });
             }
+        }
+    });
+    engineeringEquipment.forEach((item) => {
+        if (!item.levelId) {
+            return;
+        }
+        const room = resolveRoomAtPoint(model.rooms, item.levelId, { x: item.x, y: item.y });
+        if (!room) {
+            return;
+        }
+        if (item.type === "supplyDiffuser") {
+            const airflow_m3_s = resolveEngineeringAirTerminalAirflowM3s(item, "airSupply", engineeringAirPipesByEquipmentId, engineeringEquipmentById);
+            if (airflow_m3_s <= 0) {
+                return;
+            }
+            accumulateRoomMechanicalAir(roomSupplyAir, room.id, {
+                supplyAirflow_m3_s: airflow_m3_s,
+                supplyTemperatureC: resolveEngineeringSupplyTemperatureC(item, engineeringAirPipesByEquipmentId, engineeringEquipmentById, options.supplyAirTemperatureC ?? options.outdoorTemperatureC),
+            });
+            return;
+        }
+        if (item.type === "exhaustGrille") {
+            const airflow_m3_s = resolveEngineeringAirTerminalAirflowM3s(item, "airExhaust", engineeringAirPipesByEquipmentId, engineeringEquipmentById);
+            if (airflow_m3_s <= 0) {
+                return;
+            }
+            accumulateRoomMechanicalAir(roomSupplyAir, room.id, {
+                exhaustAirflow_m3_s: airflow_m3_s,
+                supplyTemperatureC: options.supplyAirTemperatureC ?? options.outdoorTemperatureC,
+            });
         }
     });
     model.pipes.forEach((pipe) => {
@@ -559,6 +689,15 @@ function resolveBridgeFactor(model) {
     }
     return 1;
 }
+/**
+ * Солнечный приток через остекление, Вт.
+ * Раскладывает излучение на прямую (зависит от высоты солнца и ориентации фасада)
+ * и рассеянную (небо + отражение земли, не зависит от ориентации).
+ * Прямая составляющая: I_dir = 320 · sin(altitude) — эмпирическое приближение
+ * нормальной прямой радиации для умеренных широт в зимний день.
+ * Рассеянная: I_dif ≈ 55 Вт/м² (стандартное значение для зимы, СП 131).
+ * SHGC типового стеклопакета 0.5 заложен в solarGainFactor (DEFAULT = 0.4–0.5).
+ */
 function computeSolarGainW(windowAreaM2, orientation, options) {
     if (windowAreaM2 <= 0 || !orientation) {
         return 0;
@@ -572,7 +711,15 @@ function computeSolarGainW(windowAreaM2, orientation, options) {
     });
     const facadeAzimuth = orientationToAzimuthDeg(orientation);
     const accessFactor = computeFacadeSolarAccessFactor(solarPosition, facadeAzimuth);
-    return windowAreaM2 * 115 * factor * accessFactor;
+    // Прямая составляющая: масштабируется sin(altitude) — при alt=0 прямое излучение = 0
+    const sinAlt = solarPosition.isAboveHorizon
+        ? Math.sin(solarPosition.altitudeDeg * (Math.PI / 180))
+        : 0;
+    const directIrradiance = 320 * Math.max(0, sinAlt); // Вт/м², вертикальная поверхность
+    // Рассеянная от неба (коэф. видимости вертикальной поверхности ≈ 0.5)
+    const diffuseIrradiance = 55 * 0.5;
+    const totalIrradiance = directIrradiance * accessFactor + diffuseIrradiance;
+    return windowAreaM2 * totalIrradiance * factor;
 }
 function resolveRoomAtPoint(rooms, levelId, point) {
     return rooms.find((room) => room.levelId === levelId && polygonContainsPoint(point, room.polygon)) ?? null;

@@ -49,6 +49,7 @@ import {
   getSensorWorldPosition,
 } from "./equipmentMeshes";
 import { computeWallJoinData, type WallCornerPatchInput, type WallJoinExtension } from "./wallJoins";
+import { arcPolyline } from "../../../core/geometry/fillets";
 
 const MIN_WALL_SEGMENT = 0.05;
 const OPENING_CLEARANCE_M = 0.1;
@@ -2023,6 +2024,39 @@ const buildCornerPatch = (corner: WallCornerPatchInput, sectionHeight: number): 
   const height = Math.min(sectionHeight, corner.maxHeight);
   if (height <= 0.05) {
     return null;
+  }
+  // Скруглённый стык — криволинейная плита (кольцевой сектор), а не квадратная заплатка.
+  if (corner.rounded) {
+    const rounded = corner.rounded;
+    const half = corner.thickness / 2;
+    const outerRadius = rounded.radius + half;
+    const innerRadius = Math.max(0.001, rounded.radius - half);
+    const segments = Math.max(4, Math.ceil((rounded.turnAngle / Math.PI) * 24));
+    const outer = arcPolyline(rounded.center, outerRadius, rounded.startAngle, rounded.signedSweep, segments);
+    const inner = arcPolyline(rounded.center, innerRadius, rounded.startAngle, rounded.signedSweep, segments).reverse();
+    const shape = new THREE.Shape();
+    [...outer, ...inner].forEach((point, index) => {
+      // План (x, y) → footprint Shape; ось Y инвертируется, т.к. ниже rotateX(-90°)
+      // переводит план-Y в мировой Z.
+      const sx = point.x - rounded.center.x;
+      const sy = -(point.y - rounded.center.y);
+      if (index === 0) {
+        shape.moveTo(sx, sy);
+      } else {
+        shape.lineTo(sx, sy);
+      }
+    });
+    shape.closePath();
+    const geometry = new THREE.ExtrudeGeometry(shape, { depth: height, bevelEnabled: false });
+    geometry.rotateX(-Math.PI / 2);
+    const material = new THREE.MeshStandardMaterial({
+      color: 0xb3becb,
+      metalness: 0.06,
+      roughness: 0.72,
+    });
+    const mesh = new THREE.Mesh(geometry, material) as MeshWithSelection;
+    mesh.position.set(rounded.center.x, corner.levelElevation, rounded.center.y);
+    return mesh;
   }
   const diagLength = Math.sqrt(corner.trimA * corner.trimA + corner.trimB * corner.trimB);
   if (diagLength <= MIN_WALL_SEGMENT) {

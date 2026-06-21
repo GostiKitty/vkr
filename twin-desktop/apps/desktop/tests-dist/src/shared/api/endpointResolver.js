@@ -1,3 +1,5 @@
+import { isWebProductionRuntime, WEB_API_REQUEST_TIMEOUT_MS } from "../runtime/webProduction";
+import { fetchWithTimeout } from "../http/fetchWithTimeout";
 import { buildUrl } from "./client";
 export const importCandidates = ["/import/ifc", "/import", "/api/import", "/ifc/import"];
 export const twinCandidates = [
@@ -9,8 +11,11 @@ export const twinCandidates = [
 let cachedImportPath = null;
 let cachedTwinConfig = null;
 async function fetchDocs() {
+    if (isWebProductionRuntime()) {
+        return null;
+    }
     try {
-        const response = await fetch(buildUrl("/docs"), { method: "GET" });
+        const response = await fetchWithTimeout(buildUrl("/docs"), { method: "GET" }, WEB_API_REQUEST_TIMEOUT_MS);
         if (!response.ok) {
             return null;
         }
@@ -21,8 +26,11 @@ async function fetchDocs() {
     }
 }
 async function probePath(path) {
+    if (isWebProductionRuntime()) {
+        return false;
+    }
     try {
-        const response = await fetch(buildUrl(path), { method: "OPTIONS" });
+        const response = await fetchWithTimeout(buildUrl(path), { method: "OPTIONS" }, WEB_API_REQUEST_TIMEOUT_MS);
         if (response.ok) {
             return true;
         }
@@ -37,6 +45,10 @@ async function probePath(path) {
 }
 export async function resolveImportPath() {
     if (cachedImportPath) {
+        return cachedImportPath;
+    }
+    if (isWebProductionRuntime()) {
+        cachedImportPath = importCandidates[0];
         return cachedImportPath;
     }
     const docs = await fetchDocs();
@@ -58,6 +70,10 @@ export async function resolveImportPath() {
 }
 export async function resolveTwinConfig() {
     if (cachedTwinConfig) {
+        return cachedTwinConfig;
+    }
+    if (isWebProductionRuntime()) {
+        cachedTwinConfig = twinCandidates[0];
         return cachedTwinConfig;
     }
     const docs = await fetchDocs();

@@ -384,7 +384,8 @@ function resolveRoofConductance(
     (building.roofs ?? []).find((r) => r.levelId === levelId) ??
     (building.roofs ?? [])[0];
   if (!roof) return 0;
-  const u = resolveLayersConductance(roof.layers, roof.envelopePresetId, "roof") ?? 0.35;
+  // Запасное U=0.22 Вт/(м²·К) → R=4.55 м²·К/Вт — на уровне требования СП 50 для Москвы (ГСОП≈5000)
+  const u = resolveLayersConductance(roof.layers, roof.envelopePresetId, "roof") ?? 0.22;
   return u * areaM2;
 }
 
@@ -397,7 +398,8 @@ function resolveGroundFloorConductance(
     (s) => s.levelId === levelId && s.kind === "ground"
   );
   if (!slab) return 0;
-  const u = resolveLayersConductance(slab.layers, slab.envelopePresetId, "slab") ?? 0.5;
+  // Запасное U=0.35 Вт/(м²·К) → R=2.86 м²·К/Вт (пол по грунту с тепловой изоляцией).
+  const u = resolveLayersConductance(slab.layers, slab.envelopePresetId, "slab") ?? 0.35;
   // Поправка на температуру грунта: грунт ≈ +2 °C при расчётном t_out = −25 °C
   return u * areaM2 * GROUND_FLOOR_CORRECTION;
 }

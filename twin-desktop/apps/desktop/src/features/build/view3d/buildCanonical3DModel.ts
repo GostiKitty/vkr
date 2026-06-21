@@ -1,5 +1,7 @@
 import { polygonContainsPoint, validateRoomPolygon } from "../../../entities/geometry/geom";
 import type { BuildingModel, FloorSlab, Stair, Vec2, Wall } from "../../../entities/geometry/types";
+import { computeWallJoinData } from "./wallJoins";
+import { roundedContourPoints } from "../../../core/geometry/fillets";
 import type { Equipment } from "../../../entities/networks/types";
 import type { ThermalFieldModel } from "../../../core/thermal/field";
 import {
@@ -10,6 +12,9 @@ import {
 } from "../../../core/geometry/bimPipeline";
 
 export const DEBUG_CANONICAL_3D_ALIGNMENT = false;
+
+/** Нахлёст стены под дугу скругления в 3D — убирает шов/z-fighting между стеной и плитой угла. */
+const FILLET_WALL_OVERLAP_M = 0.06;
 
 export interface CanonicalScenePoint {
   x: number;
@@ -64,6 +69,10 @@ export interface CanonicalOpeningModel {
   depth_m: number;
   rotationY_rad: number;
   wallId: string;
+  /** Interior surface temperature (°C). Null when thermal field is unavailable. */
+  temperature_C: number | null;
+  /** True when the opening is in an exterior wall (facing outdoors). */
+  isExterior: boolean;
 }
 
 export interface CanonicalRoofModel {
@@ -138,12 +147,31 @@ export interface CanonicalTemperatureSummary {
   warnings: string[];
 }
 
+/** Скруглённый угол стыка стен — кольцевой сектор (дуга) для 3D. */
+export interface CanonicalWallFilletModel {
+  id: string;
+  levelId: string;
+  /** Центр дуги в плане. */
+  center: Vec2;
+  /** Радиус осевой линии скругления, м. */
+  radius_m: number;
+  thickness_m: number;
+  height_m: number;
+  elevation_m: number;
+  startAngle: number;
+  signedSweep: number;
+  turnAngle: number;
+  /** Температура угла (среднее по двум примыкающим стенам) — для совпадения материала со стенами. */
+  temperature_C: number | null;
+}
+
 export interface Canonical3DModel {
   levelId: string | null;
   canonicalSource: "renderGeometry";
   rooms: CanonicalRoomModel[];
   temperatureSurfaces: CanonicalTemperatureSurface[];
   walls: CanonicalWallModel[];
+  wallFillets: CanonicalWallFilletModel[];
   windows: CanonicalOpeningModel[];
   doors: CanonicalOpeningModel[];
   roofs: CanonicalRoofModel[];
@@ -261,6 +289,8 @@ function buildCanonicalOpeningModel(
     depth_m: Math.max(wall.thickness_m * (opening.type === "window" ? 0.4 : 0.55), opening.type === "window" ? 0.06 : 0.08),
     rotationY_rad: -Math.atan2(dz, dx),
     wallId: wall.id,
+    temperature_C: null,
+    isExterior: false,
   };
 }
 
@@ -627,8 +657,24 @@ export function buildCanonical3DModel(
   const roomIds = new Set([...acceptedRoomGeometries.keys(), ...roomsOnActiveLevelIds]);
   const temperatureMap = getCanonicalRoomTemperatureMap(options.thermalField, activeLevelId, roomIds);
 
+  // Скругляем контур комнаты по тем же стыкам, чтобы пол/объём/температурные поверхности
+  // повторяли скруглённые стены, а не торчали квадратным углом за круглую геометрию здания.
+  const roundRoomBoundary = (poly: Vec2[], levelId: string): Vec2[] => {
+    const levelFillets = (model.wallFillets ?? []).filter((fillet) => fillet.levelId === levelId);
+    if (!levelFillets.length) {
+      return poly;
+    }
+    const radiusForIndex = (index: number): number => {
+      const vertex = poly[index];
+      const match = levelFillets.find(
+        (fillet) => Math.hypot(fillet.point.x - vertex.x, fillet.point.y - vertex.y) <= 0.3
+      );
+      return match?.radius_m ?? 0;
+    };
+    return roundedContourPoints(poly, radiusForIndex, 8);
+  };
   const rooms = [...acceptedRoomGeometries.entries()].map(([roomId, geometry]) => {
-    const boundary = clonePolygon(geometry.boundary);
+    const boundary = roundRoomBoundary(clonePolygon(geometry.boundary), geometry.levelId);
     const center = computePolygonCenter(boundary);
     const mapped = temperatureMap.roomTemperatures.get(roomId)?.temperature_C ?? null;
     let temperature_C: number | null = Number.isFinite(mapped as number) ? (mapped as number) : null;
@@ -715,10 +761,30 @@ export function buildCanonical3DModel(
     }
   }
 
+  // Скругления стыков стен: подрезка концов стен и дуги углов (общий резолвер).
+  const filletWalls = renderGeometry.walls
+    .filter((entry) => !activeLevelId || entry.wall.levelId === activeLevelId)
+    .map((entry) => entry.wall);
+  const wallJoinData = computeWallJoinData({
+    walls: filletWalls,
+    levels: model.levels,
+    wallFillets: model.wallFillets,
+  });
+
   const walls = renderGeometry.walls
     .filter((entry) => !activeLevelId || entry.wall.levelId === activeLevelId)
     .map(({ wall }) => {
       const boundary = options.thermalField?.boundaryByWallId.get(wall.id);
+      const trim = wallJoinData.filletTrims.get(wall.id);
+      const wallLength = Math.hypot(wall.b.x - wall.a.x, wall.b.y - wall.a.y) || 1;
+      const ux = (wall.b.x - wall.a.x) / wallLength;
+      const uy = (wall.b.y - wall.a.y) / wallLength;
+      // Небольшой нахлёст: стена заходит под дугу скругления на FILLET_WALL_OVERLAP_M, чтобы между
+      // торцом стены и гранью плиты не было шва / z-fighting (как обычные стены перекрываются в углах).
+      const startTrim = trim?.start ? Math.max(0, trim.start - FILLET_WALL_OVERLAP_M) : 0;
+      const endTrim = trim?.end ? Math.max(0, trim.end - FILLET_WALL_OVERLAP_M) : 0;
+      const start = startTrim > 0 ? { x: wall.a.x + ux * startTrim, y: wall.a.y + uy * startTrim } : { ...wall.a };
+      const end = endTrim > 0 ? { x: wall.b.x - ux * endTrim, y: wall.b.y - uy * endTrim } : { ...wall.b };
 
       const resolveAirC = (roomId: string | null | undefined): number | null => {
         if (roomId == null) {
@@ -758,8 +824,8 @@ export function buildCanonical3DModel(
       return {
         id: wall.id,
         levelId: wall.levelId,
-        start: { ...wall.a },
-        end: { ...wall.b },
+        start,
+        end,
         elevation_m: levelMap.get(wall.levelId)?.elevation_m ?? 0,
         height_m: wall.height_m,
         thickness_m: wall.thickness_m,
@@ -774,12 +840,68 @@ export function buildCanonical3DModel(
       };
     });
 
+  const wallMap = new Map(walls.map((w) => [w.id, w]));
+  const outdoorTemp = options.thermalField?.outdoorTemperatureC ?? null;
+
+  const wallFillets: CanonicalWallFilletModel[] = wallJoinData.corners
+    .filter((corner) => corner.rounded)
+    .map((corner, index) => {
+      const rounded = corner.rounded!;
+      // Температура угла — среднее по двум примыкающим стенам (для совпадения материала).
+      const armTemps = filletWalls
+        .filter(
+          (w) =>
+            Math.hypot(w.a.x - corner.point.x, w.a.y - corner.point.y) <= 0.3 ||
+            Math.hypot(w.b.x - corner.point.x, w.b.y - corner.point.y) <= 0.3
+        )
+        .map((w) => wallMap.get(w.id)?.temperature_C)
+        .filter((t): t is number => typeof t === "number" && Number.isFinite(t));
+      const temperature_C = armTemps.length
+        ? armTemps.reduce((sum, t) => sum + t, 0) / armTemps.length
+        : null;
+      return {
+        id: `wall-fillet-${index}`,
+        levelId: activeLevelId ?? "",
+        center: { ...rounded.center },
+        radius_m: rounded.radius,
+        thickness_m: corner.thickness,
+        height_m: corner.maxHeight,
+        elevation_m: corner.levelElevation,
+        startAngle: rounded.startAngle,
+        signedSweep: rounded.signedSweep,
+        turnAngle: rounded.turnAngle,
+        temperature_C,
+      };
+    });
+
   const openings = renderGeometry.walls
     .filter((entry) => !activeLevelId || entry.wall.levelId === activeLevelId)
     .flatMap(({ wall, openings: wallOpenings }) => {
       const levelElevation = levelMap.get(wall.levelId)?.elevation_m ?? 0;
+      const wallBoundary = options.thermalField?.boundaryByWallId.get(wall.id);
+      const isExterior = !wallBoundary || wallBoundary.kind === "external";
+      const wallData = wallMap.get(wall.id);
+
       return wallOpenings
-        .map((opening) => buildCanonicalOpeningModel(wall, opening, levelElevation))
+        .map((opening): CanonicalOpeningModel | null => {
+          const base = buildCanonicalOpeningModel(wall, opening, levelElevation);
+          if (!base) return null;
+
+          let temperature_C: number | null = null;
+          const roomTemp = wallData?.temperature_C ?? null;
+          if (roomTemp !== null) {
+            if (isExterior && outdoorTemp !== null) {
+              // Interior surface temperature: biased toward outdoor for exterior openings.
+              // Windows (~U=2.0 W/m²K) lose heat faster than doors (~U=1.5).
+              const bias = opening.type === "window" ? 0.65 : 0.50;
+              temperature_C = roomTemp - bias * (roomTemp - outdoorTemp);
+            } else {
+              temperature_C = roomTemp;
+            }
+          }
+
+          return { ...base, temperature_C, isExterior };
+        })
         .filter((opening): opening is CanonicalOpeningModel => Boolean(opening));
     });
 
@@ -872,6 +994,7 @@ export function buildCanonical3DModel(
     rooms,
     temperatureSurfaces,
     walls,
+    wallFillets,
     windows: openings.filter((opening) => opening.type === "window"),
     doors: openings.filter((opening) => opening.type === "door"),
     roofs,

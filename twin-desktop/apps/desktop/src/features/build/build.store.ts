@@ -16,6 +16,8 @@ import type {
   Room,
   Stair,
 
+  Vec2,
+
   Wall,
 
   Window,
@@ -35,6 +37,7 @@ import { DEFAULT_LOCAL_PROJECT_KEY } from "../../shared/utils/projectRuntime";
 import { detectRoomsFromWalls, type RoomLoopCandidate, type RoomProblem } from "./auto/detectRoomsFromWalls";
 import { pruneSubdividedManualRooms, reassignEntitiesFromRemovedRooms } from "./auto/pruneSubdividedManualRooms";
 import { splitWallsAtJunctions } from "./auto/splitWallsAtJunctions";
+import { syncWallFillets } from "./auto/wallFillets";
 import { normalizeWallTopology } from "./auto/wallTopology";
 import { createPipeDefaults } from "./defaults";
 import { normalizeEngineeringEquipment,
@@ -50,6 +53,7 @@ import { isWebProductionRuntime } from "../../shared/runtime/webProduction";
 export type BuildTool =
   | "select"
   | "move"
+  | "fillet"
   | "roomRect"
   | "room"
   | "wall"
@@ -219,6 +223,8 @@ interface BuildStoreState {
   updateWall: (wallId: string, patch: Partial<Wall>) => void;
 
   removeWall: (wallId: string) => void;
+
+  setWallFilletAtPoint: (levelId: string, point: Vec2, radius: number) => void;
 
   addRoof: (roof: Roof) => void;
 
@@ -585,6 +591,24 @@ const normalizeModel = (model: BuildingModel | null | undefined): BuildingModel 
           assemblyId: slab.assemblyId ?? null,
           heatedSide: slab.heatedSide === "above" ? "above" : "below",
         }))
+      : [],
+
+    wallFillets: Array.isArray(model.wallFillets)
+      ? model.wallFillets
+          .filter(
+            (fillet) =>
+              fillet &&
+              typeof fillet.levelId === "string" &&
+              typeof fillet.radius_m === "number" &&
+              Number.isFinite(fillet.radius_m) &&
+              fillet.radius_m > 0
+          )
+          .map((fillet) => ({
+            id: typeof fillet.id === "string" ? fillet.id : createId("fillet"),
+            levelId: fillet.levelId,
+            point: { x: fillet.point?.x ?? 0, y: fillet.point?.y ?? 0 },
+            radius_m: fillet.radius_m,
+          }))
       : [],
 
     doors: Array.isArray(model.doors)
@@ -1053,6 +1077,8 @@ const cloneModel = (model: BuildingModel): BuildingModel => ({
 
   stairs: (model.stairs ?? []).map(cloneStairEntity),
 
+  wallFillets: (model.wallFillets ?? []).map((fillet) => ({ ...fillet, point: { ...fillet.point } })),
+
   doors: model.doors.map(cloneDoorEntity),
 
   windows: model.windows.map(cloneWindowEntity),
@@ -1158,7 +1184,8 @@ const prepareModelForEditing = (
 ): { model: BuildingModel; problems: RoomProblem[]; loops: RoomLoopCandidate[] } => {
 
   const wallNormalized = reconcileWallModel(model, splitWallsAtJunctions(model.walls));
-  return mergeAutoRooms(wallNormalized);
+  const withFillets: BuildingModel = { ...wallNormalized, wallFillets: syncWallFillets(wallNormalized) };
+  return mergeAutoRooms(withFillets);
 
 };
 
@@ -1615,6 +1642,31 @@ export const useBuildStore = create<BuildStoreState>((set, get) => {
 
         { resetSelection: true, recalcRooms: true }
 
+      ),
+
+    setWallFilletAtPoint: (levelId, point, radius) =>
+
+      applyModelUpdate(
+        (model) => {
+          const existing = model.wallFillets ?? [];
+          const index = existing.findIndex(
+            (fillet) =>
+              fillet.levelId === levelId &&
+              Math.hypot(fillet.point.x - point.x, fillet.point.y - point.y) <= 0.25
+          );
+          const next = existing.slice();
+          if (radius <= 0) {
+            if (index >= 0) {
+              next.splice(index, 1);
+            }
+          } else if (index >= 0) {
+            next[index] = { ...next[index], point: { ...point }, radius_m: radius };
+          } else {
+            next.push({ id: createId("fillet"), levelId, point: { ...point }, radius_m: radius });
+          }
+          return { ...model, wallFillets: next };
+        },
+        { recalcRooms: true }
       ),
 
     addRoof: (roof) =>
