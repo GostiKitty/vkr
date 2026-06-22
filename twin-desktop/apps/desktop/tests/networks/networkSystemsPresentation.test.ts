@@ -11,7 +11,7 @@ test("networks: presentation summarizes pipe and air systems together", () => {
     rooms: [
       {
         id: "room-1",
-        name: "РљРѕРјРЅР°С‚Р° 1",
+        name: "Комната 1",
         levelId: "l1",
         polygon: [
           { x: -1, y: -1 },
@@ -167,7 +167,7 @@ test("networks: presentation summarizes pipe and air systems together", () => {
 test("networks: presentation warns about unconnected engineering air equipment", () => {
   const diffuser = createEngineeringEquipmentInstance("supplyDiffuser", { x: 1, y: 1 }, {
     levelId: "l1",
-    name: "Рџ1",
+    name: "П1",
     parameters: { airflowM3H: 450 },
   });
   const model: BuildingModel = {
@@ -176,7 +176,7 @@ test("networks: presentation warns about unconnected engineering air equipment",
     rooms: [
       {
         id: "room-1",
-        name: "РљРѕРјРЅР°С‚Р° 1",
+        name: "Комната 1",
         levelId: "l1",
         polygon: [
           { x: 0, y: 0 },
@@ -286,17 +286,17 @@ test("networks: presentation overview hides empty pipe metrics for air-only mode
 test("networks: presentation includes engineering air branches from schematic systems", () => {
   const ahu = createEngineeringEquipmentInstance("airHandlingUnit", { x: 0, y: 0 }, {
     levelId: "l1",
-    name: "РџР’РЈ-1",
+    name: "ПВУ-1",
     parameters: { airflowM3H: 900, heatRecoveryEfficiency: 0.78 },
   });
   const diffuser = createEngineeringEquipmentInstance("supplyDiffuser", { x: 4, y: -1 }, {
     levelId: "l1",
-    name: "РџСЂРёС‚РѕРє-1",
+    name: "Приток-1",
     parameters: { airflowM3H: 900 },
   });
   const grille = createEngineeringEquipmentInstance("exhaustGrille", { x: 4, y: 1 }, {
     levelId: "l1",
-    name: "Р’С‹С‚СЏР¶РєР°-1",
+    name: "Вытяжка-1",
     parameters: { airflowM3H: 900 },
   });
   const supplyBranch = createEngineeringPipeConnection({
@@ -387,17 +387,17 @@ test("networks: presentation uses roof fan as exhaust pressure source", () => {
 test("networks: presentation warns about pressure deficit and room air imbalance in engineering air systems", () => {
   const ahu = createEngineeringEquipmentInstance("airHandlingUnit", { x: 0, y: 1.5 }, {
     levelId: "l1",
-    name: "РџР’РЈ-1",
+    name: "ПВУ-1",
     parameters: { airflowM3H: 900, pressurePa: 90, supplyTemperatureC: 20 },
   });
   const heater = createEngineeringEquipmentInstance("airHeater", { x: 2.2, y: 1.5 }, {
     levelId: "l1",
-    name: "РљР°Р»РѕСЂРёС„РµСЂ-1",
+    name: "Калорифер-1",
     parameters: { airflowM3H: 900, powerKW: 18, pressureDropPa: 120, supplyTemperatureC: 26 },
   });
   const diffuser = createEngineeringEquipmentInstance("supplyDiffuser", { x: 4.3, y: 1.5 }, {
     levelId: "l1",
-    name: "Рџ1",
+    name: "П1",
     parameters: { airflowM3H: 900, pressureDropPa: 40, supplyTemperatureC: 24 },
   });
   const branchA = createEngineeringPipeConnection({
@@ -426,7 +426,7 @@ test("networks: presentation warns about pressure deficit and room air imbalance
     rooms: [
       {
         id: "room-1",
-        name: "РљРѕРјРЅР°С‚Р° 1",
+        name: "Комната 1",
         levelId: "l1",
         polygon: [
           { x: 3.2, y: 0.4 },
@@ -456,22 +456,22 @@ test("networks: presentation warns about pressure deficit and room air imbalance
 test("networks: presentation accounts for air filter losses and closed fire damper", () => {
   const fan = createEngineeringEquipmentInstance("ductFan", { x: 0, y: 1.5 }, {
     levelId: "l1",
-    name: "Р’Рљ-1",
+    name: "ВК-1",
     parameters: { airflowM3H: 600, pressurePa: 400, powerKW: 0.8 },
   });
   const filter = createEngineeringEquipmentInstance("airFilter", { x: 2, y: 1.5 }, {
     levelId: "l1",
-    name: "Р¤Р’-1",
+    name: "ФВ-1",
     parameters: { airflowM3H: 600, pressureDropPa: 80, contaminationPercent: 50 },
   });
   const fireDamper = createEngineeringEquipmentInstance("fireDamper", { x: 4, y: 1.5 }, {
     levelId: "l1",
-    name: "РљРџ-1",
+    name: "КП-1",
     parameters: { pressureDropPa: 35, state: "closed" },
   });
   const diffuser = createEngineeringEquipmentInstance("supplyDiffuser", { x: 6, y: 1.5 }, {
     levelId: "l1",
-    name: "Рџ1",
+    name: "П1",
     parameters: { airflowM3H: 600, pressureDropPa: 30 },
   });
   const branchA = createEngineeringPipeConnection({
@@ -513,7 +513,7 @@ test("networks: presentation accounts for air filter losses and closed fire damp
 
   const snapshot = buildSmartModelSnapshot(model, null, Date.UTC(2026, 0, 1));
   const presentation = buildNetworkSystemsPresentation(model, snapshot);
-  const filterBranch = presentation.duct.branches.find((branch) => branch.label.includes("Р’Рљ-1") && branch.label.includes("Р¤Р’-1"));
+  const filterBranch = presentation.duct.branches.find((branch) => branch.label.includes("ВК-1") && branch.label.includes("ФВ-1"));
 
   if (!filterBranch || (filterBranch.estimatedPressureDropPa ?? 0) <= 110) {
     throw new Error("Expected air filter contamination to increase branch pressure loss.");
@@ -583,12 +583,12 @@ test("networks: presentation warns about a closed air check valve in an exhaust 
 test("networks: presentation uses rectangular engineering air sections for branch label and velocity", () => {
   const fan = createEngineeringEquipmentInstance("ductFan", { x: 0, y: 0 }, {
     levelId: "l1",
-    name: "Р’Рљ-1",
+    name: "ВК-1",
     parameters: { airflowM3H: 600, pressurePa: 250, sectionWidthMm: 600, sectionHeightMm: 300 },
   });
   const filter = createEngineeringEquipmentInstance("airFilter", { x: 2.4, y: 0 }, {
     levelId: "l1",
-    name: "Р¤Р’-1",
+    name: "ФВ-1",
     parameters: { sectionWidthMm: 600, sectionHeightMm: 300, pressureDropPa: 80 },
   });
   const branch = createEngineeringPipeConnection({
@@ -614,7 +614,7 @@ test("networks: presentation uses rectangular engineering air sections for branc
 
   const snapshot = buildSmartModelSnapshot(model, null, Date.UTC(2026, 0, 1));
   const presentation = buildNetworkSystemsPresentation(model, snapshot);
-  const airBranch = presentation.duct.branches.find((item) => item.label.includes("Р’Рљ-1") && item.label.includes("Р¤Р’-1"));
+  const airBranch = presentation.duct.branches.find((item) => item.label.includes("ВК-1") && item.label.includes("ФВ-1"));
 
   if (!airBranch) {
     throw new Error("Expected rectangular engineering air branch in presentation.");
@@ -630,12 +630,12 @@ test("networks: presentation uses rectangular engineering air sections for branc
 test("networks: presentation warns about high velocity and abrupt section reduction in engineering air branch", () => {
   const fan = createEngineeringEquipmentInstance("ductFan", { x: 0, y: 0 }, {
     levelId: "l1",
-    name: "Р вЂ™Р С™-2",
+    name: "ВК-2",
     parameters: { airflowM3H: 1500, pressurePa: 320, sectionWidthMm: 600, sectionHeightMm: 300 },
   });
   const regulator = createEngineeringEquipmentInstance("airFlowRegulatorVar", { x: 2.4, y: 0 }, {
     levelId: "l1",
-    name: "РљР Р’-1",
+    name: "КРВ-1",
     parameters: {
       airflowM3H: 1500,
       sectionWidthMm: 200,
@@ -667,7 +667,7 @@ test("networks: presentation warns about high velocity and abrupt section reduct
 
   const snapshot = buildSmartModelSnapshot(model, null, Date.UTC(2026, 0, 1));
   const presentation = buildNetworkSystemsPresentation(model, snapshot);
-  const airBranch = presentation.duct.branches.find((item) => item.label.includes("Р вЂ™Р С™-2") && item.label.includes("РљР Р’-1"));
+  const airBranch = presentation.duct.branches.find((item) => item.label.includes("ВК-2") && item.label.includes("КРВ-1"));
 
   if (!airBranch) {
     throw new Error("Expected engineering air regulator branch in presentation.");

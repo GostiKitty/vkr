@@ -25,17 +25,17 @@ export function NetworkSystemsPanel({ model, snapshot, onSetActiveScenario }: Ne
     <section className="ui-panel p-4 sm:p-5">
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--text-soft)]">РЎРµС‚Рё</p>
-          <h3 className="truncate text-base font-semibold text-[color:var(--text-base)]">РўСЂСѓР±С‹ Рё РІРѕР·РґСѓС…</h3>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--text-soft)]">Сети</p>
+          <h3 className="truncate text-base font-semibold text-[color:var(--text-base)]">Трубы и воздух</h3>
         </div>
         <label className="flex shrink-0 items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--text-soft)]">
-          РЎС†РµРЅР°СЂРёР№
+          Сценарий
           <select
             value={model.activeScenarioId ?? ""}
             onChange={(event) => onSetActiveScenario(event.target.value || null)}
             className="max-w-[220px] rounded-xl border border-[color:var(--border-soft)] bg-[color:var(--surface-elevated)] px-3 py-2 text-sm normal-case tracking-normal text-[color:var(--text-base)]"
           >
-            {!model.scenarios.length ? <option value="">РќРµС‚ СЃС†РµРЅР°СЂРёРµРІ</option> : null}
+            {!model.scenarios.length ? <option value="">Нет сценариев</option> : null}
             {model.scenarios.map((item) => (
               <option key={item.id} value={item.id}>
                 {item.name}
@@ -54,15 +54,15 @@ export function NetworkSystemsPanel({ model, snapshot, onSetActiveScenario }: Ne
       ) : null}
 
       <div className="mt-4 grid gap-3 xl:grid-cols-2">
-        <InsightCard title="РўСЂСѓР±С‹" className={hasPipeNetworks ? "" : "hidden"}>
+        <InsightCard title="Трубы" className={hasPipeNetworks ? "" : "hidden"}>
           <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-            <StatPill label="РџРѕРґРєР»СЋС‡РµРЅРѕ" value={`${presentation.pipe.connectedBranchCount}/${presentation.pipe.branchCount}`} />
-            <StatPill label="РљРѕРЅС‚СѓСЂС‹" value={`${presentation.pipe.connectedSystemCount}/${presentation.pipe.systemCount}`} />
-            <StatPill label="РќР°РіСЂСѓР·РєР°" value={formatPower(presentation.pipe.totalLoadW)} />
-            <StatPill label="О”p" value={formatPa(presentation.pipe.estimatedPressureDropPa)} />
+            <StatPill label="Подключено" value={`${presentation.pipe.connectedBranchCount}/${presentation.pipe.branchCount}`} />
+            <StatPill label="Контуры" value={`${presentation.pipe.connectedSystemCount}/${presentation.pipe.systemCount}`} />
+            <StatPill label="Нагрузка" value={formatPower(presentation.pipe.totalLoadW)} />
+            <StatPill label="Δp" value={formatPa(presentation.pipe.estimatedPressureDropPa)} />
           </div>
 
-          <SectionTitle className={presentation.pipe.families.length ? "mt-4" : "hidden"}>РЎРµРјРµР№СЃС‚РІР°</SectionTitle>
+          <SectionTitle className={presentation.pipe.families.length ? "mt-4" : "hidden"}>Семейства</SectionTitle>
           {presentation.pipe.families.length ? (
             <ul className="space-y-2">
               {presentation.pipe.families.map((family) => (
@@ -72,7 +72,7 @@ export function NetworkSystemsPanel({ model, snapshot, onSetActiveScenario }: Ne
                 >
                   <div className="min-w-0">
                     <p className="truncate text-sm font-semibold text-[color:var(--text-base)]">{family.label}</p>
-                    <p className="text-xs text-[color:var(--text-soft)]">{formatMeters(family.totalLength_m)} Рј</p>
+                    <p className="text-xs text-[color:var(--text-soft)]">{formatMeters(family.totalLength_m)} м</p>
                   </div>
                   <p className="shrink-0 text-right text-xs text-[color:var(--text-muted)]">
                     {family.connectedCount}/{family.count}
@@ -82,7 +82,7 @@ export function NetworkSystemsPanel({ model, snapshot, onSetActiveScenario }: Ne
             </ul>
           ) : null}
 
-          <SectionTitle className={presentation.pipe.systems.length ? "mt-4" : "hidden"}>РљРѕРЅС‚СѓСЂС‹</SectionTitle>
+          <SectionTitle className={presentation.pipe.systems.length ? "mt-4" : "hidden"}>Контуры</SectionTitle>
           {presentation.pipe.systems.length ? (
             <ul className="space-y-2">
               {presentation.pipe.systems.map((system) => (
@@ -93,15 +93,15 @@ export function NetworkSystemsPanel({ model, snapshot, onSetActiveScenario }: Ne
                   <div className="flex items-center justify-between gap-3">
                     <span className="min-w-0 truncate font-semibold text-[color:var(--text-base)]">{system.name}</span>
                     <ToneBadge tone={system.connected ? "success" : "warning"}>
-                      {system.connected ? "СЃРѕР±СЂР°РЅ" : `${system.issueCount} Р·Р°РјРµС‡.`}
+                      {system.connected ? "собран" : `${system.issueCount} замеч.`}
                     </ToneBadge>
                   </div>
                   <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[color:var(--text-soft)]">
-                    <span>{system.branchCount} РІРµС‚РѕРє</span>
-                    <span>{formatMeters(system.totalLength_m)} Рј</span>
+                    <span>{system.branchCount} веток</span>
+                    <span>{formatMeters(system.totalLength_m)} м</span>
                     <span>{formatPower(system.totalLoadW)}</span>
-                    <span>РїРѕС‚РµСЂРё {formatPower(system.totalHeatLossW)}</span>
-                    <span>{system.roomCount} РїРѕРјРµС‰РµРЅРёР№</span>
+                    <span>потери {formatPower(system.totalHeatLossW)}</span>
+                    <span>{system.roomCount} помещений</span>
                   </div>
                 </li>
               ))}
@@ -109,15 +109,15 @@ export function NetworkSystemsPanel({ model, snapshot, onSetActiveScenario }: Ne
           ) : null}
         </InsightCard>
 
-        <InsightCard title="Р’РѕР·РґСѓС…" className={hasAirNetworks ? "" : "hidden"}>
+        <InsightCard title="Воздух" className={hasAirNetworks ? "" : "hidden"}>
           <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-            <StatPill label="РџРѕРґРєР»СЋС‡РµРЅРѕ" value={`${presentation.duct.connectedBranchCount}/${presentation.duct.branchCount}`} />
-            <StatPill label="Р Р°СЃС…РѕРґ" value={`${formatNumber(presentation.duct.totalAirflow_m3_s, 2)} РјВі/СЃ`} />
-            <StatPill label="РЎРєРѕСЂРѕСЃС‚СЊ" value={`${formatNumber(presentation.duct.averageAirVelocity_m_s, 1)} Рј/СЃ`} />
-            <StatPill label="О”p" value={formatPa(presentation.duct.estimatedPressureDropPa)} />
+            <StatPill label="Подключено" value={`${presentation.duct.connectedBranchCount}/${presentation.duct.branchCount}`} />
+            <StatPill label="Расход" value={`${formatNumber(presentation.duct.totalAirflow_m3_s, 2)} м³/с`} />
+            <StatPill label="Скорость" value={`${formatNumber(presentation.duct.averageAirVelocity_m_s, 1)} м/с`} />
+            <StatPill label="Δp" value={formatPa(presentation.duct.estimatedPressureDropPa)} />
           </div>
 
-          <SectionTitle className={presentation.duct.branches.length ? "mt-4" : "hidden"}>Р’РµС‚РєРё</SectionTitle>
+          <SectionTitle className={presentation.duct.branches.length ? "mt-4" : "hidden"}>Ветки</SectionTitle>
           {presentation.duct.branches.length ? (
             <ul className="space-y-2">
               {presentation.duct.branches.map((branch) => (
@@ -128,7 +128,7 @@ export function NetworkSystemsPanel({ model, snapshot, onSetActiveScenario }: Ne
                   <div className="flex items-center justify-between gap-3">
                     <span className="min-w-0 truncate font-semibold text-[color:var(--text-base)]">{branch.label}</span>
                     <div className="shrink-0 text-right text-xs font-semibold text-[color:var(--text-soft)]">
-                      <div>{formatNumber(branch.airflow_m3_s, 2)} РјВі/СЃ</div>
+                      <div>{formatNumber(branch.airflow_m3_s, 2)} м³/с</div>
                       {branch.estimatedPressureDropPa != null ? (
                         <div className={branchPressureClass(branch.estimatedPressureDropPa, branch.availablePressurePa)}>
                           {formatBranchPressure(branch.estimatedPressureDropPa, branch.availablePressurePa)}
@@ -138,8 +138,8 @@ export function NetworkSystemsPanel({ model, snapshot, onSetActiveScenario }: Ne
                   </div>
                   <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[color:var(--text-soft)]">
                     <span>{branch.sectionLabel}</span>
-                    <span>{formatMeters(branch.totalLength_m)} Рј</span>
-                    <span>{formatNumber(branch.airVelocity_m_s, 1)} Рј/СЃ</span>
+                    <span>{formatMeters(branch.totalLength_m)} м</span>
+                    <span>{formatNumber(branch.airVelocity_m_s, 1)} м/с</span>
                   </div>
                 </li>
               ))}
@@ -147,10 +147,10 @@ export function NetworkSystemsPanel({ model, snapshot, onSetActiveScenario }: Ne
           ) : null}
         </InsightCard>
 
-        <InsightCard title="Р”РёР°РіРЅРѕСЃС‚РёРєР°" className={hasDiagnostics ? "" : "hidden"}>
+        <InsightCard title="Диагностика" className={hasDiagnostics ? "" : "hidden"}>
           {presentation.diagnostics.warnings.length ? (
             <>
-              <SectionTitle>Р—Р°РјРµС‡Р°РЅРёСЏ</SectionTitle>
+              <SectionTitle>Замечания</SectionTitle>
               <div className="space-y-2">
                 {presentation.diagnostics.warnings.map((warning) => (
                   <WarningRow key={warning.id} warning={warning} />
@@ -161,7 +161,7 @@ export function NetworkSystemsPanel({ model, snapshot, onSetActiveScenario }: Ne
 
           {presentation.diagnostics.suggestions.length ? (
             <>
-              <SectionTitle className={presentation.diagnostics.warnings.length ? "mt-4" : ""}>РЎРІСЏР·Рё</SectionTitle>
+              <SectionTitle className={presentation.diagnostics.warnings.length ? "mt-4" : ""}>Связи</SectionTitle>
               <div className="space-y-2">
                 {presentation.diagnostics.suggestions.map((suggestion) => (
                   <SuggestionRow key={suggestion.id} suggestion={suggestion} />
@@ -171,15 +171,15 @@ export function NetworkSystemsPanel({ model, snapshot, onSetActiveScenario }: Ne
           ) : null}
         </InsightCard>
 
-        <InsightCard title="РњРѕРЅРёС‚РѕСЂРёРЅРі" className={hasMonitoring ? "" : "hidden"}>
+        <InsightCard title="Мониторинг" className={hasMonitoring ? "" : "hidden"}>
           <div className="grid gap-2 sm:grid-cols-2">
-            <StatPill label="РЎРѕР±С‹С‚РёСЏ" value={`${presentation.monitoring.events.length}`} />
-            <StatPill label="РўСЂРµРІРѕРіРё" value={`${presentation.monitoring.sensorAlerts.length}`} />
+            <StatPill label="События" value={`${presentation.monitoring.events.length}`} />
+            <StatPill label="Тревоги" value={`${presentation.monitoring.sensorAlerts.length}`} />
           </div>
 
           {presentation.monitoring.sensorAlerts.length ? (
             <>
-              <SectionTitle className="mt-4">Р”Р°С‚С‡РёРєРё</SectionTitle>
+              <SectionTitle className="mt-4">Датчики</SectionTitle>
               <div className="space-y-2">
                 {presentation.monitoring.sensorAlerts.map((alert) => (
                   <div
@@ -196,7 +196,7 @@ export function NetworkSystemsPanel({ model, snapshot, onSetActiveScenario }: Ne
 
           {presentation.monitoring.events.length ? (
             <>
-              <SectionTitle className={presentation.monitoring.sensorAlerts.length ? "mt-4" : ""}>РЎРѕР±С‹С‚РёСЏ</SectionTitle>
+              <SectionTitle className={presentation.monitoring.sensorAlerts.length ? "mt-4" : ""}>События</SectionTitle>
               <div className="flex flex-wrap gap-2">
                 {presentation.monitoring.events.map((event) => (
                   <EventBadge key={event.id} event={event} />
@@ -287,11 +287,11 @@ function SuggestionRow({ suggestion }: { suggestion: NetworkSuggestionPresentati
       <div className="flex items-center justify-between gap-3">
         <span className="min-w-0 truncate font-semibold text-[color:var(--text-base)]">{suggestion.title}</span>
         <ToneBadge tone={suggestion.status === "compatible" ? "success" : "danger"}>
-          {suggestion.status === "compatible" ? "РґРѕРїСѓСЃС‚РёРјРѕ" : "РєРѕРЅС„Р»РёРєС‚"}
+          {suggestion.status === "compatible" ? "допустимо" : "конфликт"}
         </ToneBadge>
       </div>
       <p className="mt-1 text-[11px] font-medium text-[color:var(--text-soft)]">
-        {formatNumber(suggestion.distance_m, 2)} Рј
+        {formatNumber(suggestion.distance_m, 2)} м
       </p>
     </div>
   );
@@ -327,9 +327,9 @@ function sensorAlertClass(status: "warning" | "alarm"): string {
 
 function formatBranchPressure(estimatedPressureDropPa: number, availablePressurePa?: number): string {
   if (availablePressurePa != null && availablePressurePa > 0) {
-    return `О”p ${formatPa(estimatedPressureDropPa)} / P ${formatPa(availablePressurePa)}`;
+    return `Δp ${formatPa(estimatedPressureDropPa)} / P ${formatPa(availablePressurePa)}`;
   }
-  return `О”p ${formatPa(estimatedPressureDropPa)}`;
+  return `Δp ${formatPa(estimatedPressureDropPa)}`;
 }
 
 function branchPressureClass(estimatedPressureDropPa: number, availablePressurePa?: number): string {
@@ -343,11 +343,11 @@ function branchPressureClass(estimatedPressureDropPa: number, availablePressureP
 }
 
 function formatPower(value: number): string {
-  return value >= 1000 ? `${formatNumber(value / 1000, 1)} РєР’С‚` : `${formatNumber(value, 0)} Р’С‚`;
+  return value >= 1000 ? `${formatNumber(value / 1000, 1)} кВт` : `${formatNumber(value, 0)} Вт`;
 }
 
 function formatPa(value: number): string {
-  return `${formatNumber(value, 0)} РџР°`;
+  return `${formatNumber(value, 0)} Па`;
 }
 
 function formatMeters(value: number): string {

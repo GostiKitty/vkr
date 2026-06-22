@@ -69,6 +69,28 @@ test("engineering 2d: schematic symbols fit a common drawing box", () => {
   }
 });
 
+test("engineering 2d: schematic normalization preserves GOST symbol proportions", () => {
+  const heatExchangerBox = resolveEngineeringEquipmentRenderSize("heatExchanger", 140, 220, "schematic");
+  const controlValveBox = resolveEngineeringEquipmentRenderSize("controlValve", 125, 120, "schematic");
+  const manifoldBox = resolveEngineeringEquipmentRenderSize("manifold", 260, 75, "schematic");
+
+  if (heatExchangerBox.width < 34 || heatExchangerBox.height > 24) {
+    throw new Error(
+      `Expected heat exchanger to stay wide in schematic mode, got ${heatExchangerBox.width}×${heatExchangerBox.height}.`
+    );
+  }
+  if (controlValveBox.height < 27 || controlValveBox.width > 26) {
+    throw new Error(
+      `Expected control valve to stay vertically accentuated in schematic mode, got ${controlValveBox.width}×${controlValveBox.height}.`
+    );
+  }
+  if (manifoldBox.width / manifoldBox.height < 2.5) {
+    throw new Error(
+      `Expected manifold to preserve a slim horizontal proportion, got ${manifoldBox.width}×${manifoldBox.height}.`
+    );
+  }
+});
+
 test("engineering 2d: pump render rotation follows connected branch direction", () => {
   const rotation = resolveEngineeringEquipmentRenderRotation(
     { id: "pump-1", type: "pump", rotation: 0 },

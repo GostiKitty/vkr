@@ -1,7 +1,6 @@
 import { polygonContainsPoint, validateRoomPolygon } from "../../../entities/geometry/geom";
 import type { BuildingModel, FloorSlab, Stair, Vec2, Wall } from "../../../entities/geometry/types";
 import { computeWallJoinData } from "./wallJoins";
-import { roundedContourPoints } from "../../../core/geometry/fillets";
 import type { Equipment } from "../../../entities/networks/types";
 import type { ThermalFieldModel } from "../../../core/thermal/field";
 import {
@@ -657,24 +656,8 @@ export function buildCanonical3DModel(
   const roomIds = new Set([...acceptedRoomGeometries.keys(), ...roomsOnActiveLevelIds]);
   const temperatureMap = getCanonicalRoomTemperatureMap(options.thermalField, activeLevelId, roomIds);
 
-  // Скругляем контур комнаты по тем же стыкам, чтобы пол/объём/температурные поверхности
-  // повторяли скруглённые стены, а не торчали квадратным углом за круглую геометрию здания.
-  const roundRoomBoundary = (poly: Vec2[], levelId: string): Vec2[] => {
-    const levelFillets = (model.wallFillets ?? []).filter((fillet) => fillet.levelId === levelId);
-    if (!levelFillets.length) {
-      return poly;
-    }
-    const radiusForIndex = (index: number): number => {
-      const vertex = poly[index];
-      const match = levelFillets.find(
-        (fillet) => Math.hypot(fillet.point.x - vertex.x, fillet.point.y - vertex.y) <= 0.3
-      );
-      return match?.radius_m ?? 0;
-    };
-    return roundedContourPoints(poly, radiusForIndex, 8);
-  };
   const rooms = [...acceptedRoomGeometries.entries()].map(([roomId, geometry]) => {
-    const boundary = roundRoomBoundary(clonePolygon(geometry.boundary), geometry.levelId);
+    const boundary = clonePolygon(geometry.boundary);
     const center = computePolygonCenter(boundary);
     const mapped = temperatureMap.roomTemperatures.get(roomId)?.temperature_C ?? null;
     let temperature_C: number | null = Number.isFinite(mapped as number) ? (mapped as number) : null;

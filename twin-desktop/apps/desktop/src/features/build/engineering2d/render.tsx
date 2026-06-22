@@ -7,7 +7,7 @@ import type {
   EngineeringPort,
   EngineeringPortDirection,
 } from "../../../entities/engineering/types";
-import { buildEngineeringPorts, ENGINEERING_MEDIUM_STYLES, getEngineeringEquipmentPreset } from "./catalog";
+import { buildEngineeringPorts, ENGINEERING_MEDIUM_STYLES } from "./catalog";
 
 type RenderPalette = {
   stroke: string;
@@ -45,6 +45,50 @@ const SCHEMATIC_SYMBOL_TARGET_BOX = {
   width: 36,
   height: 28,
 } as const;
+
+const SCHEMATIC_SYMBOL_MIN_READABLE_SIZE = 14;
+
+const ENGINEERING_SYMBOL_NOMINAL_SIZES: Record<EngineeringEquipmentType, { width: number; height: number }> = {
+  pump: { width: 28, height: 28 },
+  heatExchanger: { width: 46, height: 30 },
+  filter: { width: 28, height: 28 },
+  valve: { width: 28, height: 22 },
+  checkValve: { width: 26, height: 20 },
+  controlValve: { width: 30, height: 34 },
+  expansionTank: { width: 28, height: 32 },
+  manifold: { width: 48, height: 18 },
+  heatMeter: { width: 34, height: 22 },
+  automationCabinet: { width: 30, height: 40 },
+  sensorTemperature: { width: 18, height: 18 },
+  sensorPressure: { width: 18, height: 18 },
+  gateValve: { width: 26, height: 28 },
+  ballValve: { width: 24, height: 22 },
+  threeWayValve: { width: 28, height: 34 },
+  balancingValve: { width: 28, height: 28 },
+  safetyValve: { width: 26, height: 32 },
+  pressureRegulator: { width: 30, height: 38 },
+  thermostaticValve: { width: 26, height: 34 },
+  flowMeter: { width: 32, height: 18 },
+  convector: { width: 36, height: 26 },
+  sensorFlow: { width: 18, height: 18 },
+  sensorHumidity: { width: 18, height: 18 },
+  airHandlingUnit: { width: 58, height: 28 },
+  ductFan: { width: 30, height: 24 },
+  roofFan: { width: 30, height: 24 },
+  airDamper: { width: 28, height: 18 },
+  airCheckValve: { width: 30, height: 18 },
+  fireDamper: { width: 30, height: 18 },
+  airFilter: { width: 32, height: 18 },
+  airFlowRegulatorConst: { width: 30, height: 18 },
+  airFlowRegulatorVar: { width: 30, height: 18 },
+  silencer: { width: 34, height: 18 },
+  airHeater: { width: 32, height: 18 },
+  airCooler: { width: 32, height: 18 },
+  airHumidifier: { width: 32, height: 18 },
+  airDehumidifier: { width: 32, height: 18 },
+  supplyDiffuser: { width: 20, height: 20 },
+  exhaustGrille: { width: 24, height: 16 },
+};
 
 type ResolvedSymbolMetrics = {
   center: { x: number; y: number };
@@ -267,16 +311,21 @@ export function resolveEngineeringEquipmentRenderSize(
   if (sizeMode !== "schematic") {
     return { width: resolvedWidth, height: resolvedHeight };
   }
-  const preset = getEngineeringEquipmentPreset(type);
-  const baseWidth = Math.max(0.4, preset.width);
-  const baseHeight = Math.max(0.4, preset.height);
-  const scale = Math.min(
-    SCHEMATIC_SYMBOL_TARGET_BOX.width / baseWidth,
-    SCHEMATIC_SYMBOL_TARGET_BOX.height / baseHeight
+  const nominal = ENGINEERING_SYMBOL_NOMINAL_SIZES[type];
+  const fitScale = Math.min(
+    SCHEMATIC_SYMBOL_TARGET_BOX.width / nominal.width,
+    SCHEMATIC_SYMBOL_TARGET_BOX.height / nominal.height
   );
+  const minSize = Math.min(nominal.width, nominal.height);
+  const readableScale = SCHEMATIC_SYMBOL_MIN_READABLE_SIZE / minSize;
+  const scale =
+    nominal.width * readableScale <= SCHEMATIC_SYMBOL_TARGET_BOX.width &&
+    nominal.height * readableScale <= SCHEMATIC_SYMBOL_TARGET_BOX.height
+      ? Math.max(fitScale, readableScale)
+      : fitScale;
   return {
-    width: Math.max(16, baseWidth * scale),
-    height: Math.max(16, baseHeight * scale),
+    width: nominal.width * scale,
+    height: nominal.height * scale,
   };
 }
 

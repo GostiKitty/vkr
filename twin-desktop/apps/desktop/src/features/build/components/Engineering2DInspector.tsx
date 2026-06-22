@@ -275,11 +275,11 @@ function EngineeringEquipmentParameterFields({
     case "roofFan":
       return (
         <div className="grid grid-cols-2 gap-2">
-          <NumberField label="Р Р°СЃС…РѕРґ РІРѕР·РґСѓС…Р°, РјВі/С‡" value={toNumber(equipment.parameters.airflowM3H)} step={10} onChange={(value) => onPatch({ airflowM3H: value })} />
-          <NumberField label="Р”Р°РІР»РµРЅРёРµ, РџР°" value={toNumber(equipment.parameters.pressurePa)} step={10} onChange={(value) => onPatch({ pressurePa: value })} />
-          <NumberField label="РњРѕС‰РЅРѕСЃС‚СЊ, РєР’С‚" value={toNumber(equipment.parameters.powerKW)} step={0.1} onChange={(value) => onPatch({ powerKW: value })} />
+          <NumberField label="Расход воздуха, м³/ч" value={toNumber(equipment.parameters.airflowM3H)} step={10} onChange={(value) => onPatch({ airflowM3H: value })} />
+          <NumberField label="Давление, Па" value={toNumber(equipment.parameters.pressurePa)} step={10} onChange={(value) => onPatch({ pressurePa: value })} />
+          <NumberField label="Мощность, кВт" value={toNumber(equipment.parameters.powerKW)} step={0.1} onChange={(value) => onPatch({ powerKW: value })} />
           <SelectField
-            label="РЎСЂРµРґР°"
+            label="Среда"
             value={String(equipment.parameters.airMedium ?? "airExhaust")}
             options={AIR_MEDIUM_OPTIONS}
             onChange={(value) => onUpdateEquipment(equipment.id, buildAirMediumEquipmentPatch(equipment, value as "airSupply" | "airExhaust"))}
@@ -309,17 +309,17 @@ function EngineeringEquipmentParameterFields({
     case "airCheckValve":
       return (
         <div className="grid grid-cols-2 gap-2">
-          <NumberField label="РЁРёСЂРёРЅР°, РјРј" value={toNumber(equipment.parameters.sectionWidthMm)} step={10} onChange={(value) => onPatch({ sectionWidthMm: value })} />
-          <NumberField label="Р’С‹СЃРѕС‚Р°, РјРј" value={toNumber(equipment.parameters.sectionHeightMm)} step={10} onChange={(value) => onPatch({ sectionHeightMm: value })} />
+          <NumberField label="Ширина, мм" value={toNumber(equipment.parameters.sectionWidthMm)} step={10} onChange={(value) => onPatch({ sectionWidthMm: value })} />
+          <NumberField label="Высота, мм" value={toNumber(equipment.parameters.sectionHeightMm)} step={10} onChange={(value) => onPatch({ sectionHeightMm: value })} />
           <SelectField
-            label="РЎРѕСЃС‚РѕСЏРЅРёРµ"
+            label="Состояние"
             value={String(equipment.parameters.state ?? "open")}
             options={FIRE_DAMPER_STATE_OPTIONS}
             onChange={(value) => onPatch({ state: value })}
           />
-          <NumberField label="РџРѕС‚РµСЂРё РґР°РІР»РµРЅРёСЏ, РџР°" value={toNumber(equipment.parameters.pressureDropPa)} step={5} onChange={(value) => onPatch({ pressureDropPa: value })} />
+          <NumberField label="Потери давления, Па" value={toNumber(equipment.parameters.pressureDropPa)} step={5} onChange={(value) => onPatch({ pressureDropPa: value })} />
           <SelectField
-            label="РЎСЂРµРґР°"
+            label="Среда"
             value={String(equipment.parameters.airMedium ?? "airSupply")}
             options={AIR_MEDIUM_OPTIONS}
             onChange={(value) => onUpdateEquipment(equipment.id, buildAirMediumEquipmentPatch(equipment, value as "airSupply" | "airExhaust"))}

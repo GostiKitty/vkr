@@ -6,10 +6,10 @@ import { ENGINEERING_EQUIPMENT_LABELS, EQUIPMENT_VARIANT_DEFAULT, EQUIPMENT_VARI
 type LibTab = "valves" | "equipment" | "air" | "sensors";
 
 const TAB_LABELS: Record<LibTab, string> = {
-  valves: "РђСЂРјР°С‚СѓСЂР°",
-  equipment: "РћР±РѕСЂСѓРґРѕРІР°РЅРёРµ",
-  air: "Р’РѕР·РґСѓС…",
-  sensors: "Р”Р°С‚С‡РёРєРё",
+  valves: "Арматура",
+  equipment: "Оборудование",
+  air: "Воздух",
+  sensors: "Датчики",
 };
 
 const VALVE_BUTTONS: Array<{ type: EngineeringEquipmentType; avokCode: string }> = [
@@ -31,33 +31,33 @@ const EQUIPMENT_BUTTONS: Array<{ type: EngineeringEquipmentType; avokCode: strin
   { type: "pump", avokCode: "3.6.02" },
   { type: "convector", avokCode: "3.1.04" },
   { type: "expansionTank", avokCode: "3.7.06" },
-  { type: "manifold", avokCode: "вЂ”" },
-  { type: "heatMeter", avokCode: "вЂ”" },
-  { type: "automationCabinet", avokCode: "вЂ”" },
+  { type: "manifold", avokCode: "—" },
+  { type: "heatMeter", avokCode: "—" },
+  { type: "automationCabinet", avokCode: "—" },
 ];
 
 const AIR_BUTTONS: Array<{ type: EngineeringEquipmentType; avokCode: string }> = [
-  { type: "airHandlingUnit", avokCode: "вЂ”" },
-  { type: "ductFan", avokCode: "вЂ”" },
-  { type: "roofFan", avokCode: "вЂ”" },
-  { type: "airFilter", avokCode: "вЂ”" },
-  { type: "airDamper", avokCode: "вЂ”" },
+  { type: "airHandlingUnit", avokCode: "—" },
+  { type: "ductFan", avokCode: "—" },
+  { type: "roofFan", avokCode: "—" },
+  { type: "airFilter", avokCode: "—" },
+  { type: "airDamper", avokCode: "—" },
   { type: "airCheckValve", avokCode: "—" },
-  { type: "fireDamper", avokCode: "вЂ”" },
-  { type: "silencer", avokCode: "вЂ”" },
-  { type: "airHeater", avokCode: "вЂ”" },
-  { type: "airCooler", avokCode: "вЂ”" },
-  { type: "airHumidifier", avokCode: "вЂ”" },
-  { type: "airDehumidifier", avokCode: "вЂ”" },
-  { type: "supplyDiffuser", avokCode: "вЂ”" },
-  { type: "exhaustGrille", avokCode: "вЂ”" },
+  { type: "fireDamper", avokCode: "—" },
+  { type: "silencer", avokCode: "—" },
+  { type: "airHeater", avokCode: "—" },
+  { type: "airCooler", avokCode: "—" },
+  { type: "airHumidifier", avokCode: "—" },
+  { type: "airDehumidifier", avokCode: "—" },
+  { type: "supplyDiffuser", avokCode: "—" },
+  { type: "exhaustGrille", avokCode: "—" },
 ];
 
 AIR_BUTTONS.splice(
   5,
   0,
-  { type: "airFlowRegulatorConst", avokCode: "вЂ”" },
-  { type: "airFlowRegulatorVar", avokCode: "вЂ”" }
+  { type: "airFlowRegulatorConst", avokCode: "—" },
+  { type: "airFlowRegulatorVar", avokCode: "—" }
 );
 
 const SENSOR_BUTTONS: Array<{ type: EngineeringEquipmentType; avokCode: string }> = [
@@ -68,23 +68,23 @@ const SENSOR_BUTTONS: Array<{ type: EngineeringEquipmentType; avokCode: string }
 ];
 
 const AIR_GOST_REFERENCE: Partial<Record<EngineeringEquipmentType, string>> = {
-  airHandlingUnit: "Р“РћРЎРў 21.205-2016",
-  ductFan: "Р“РћРЎРў 21.205-2016, РїРѕР·. 20",
-  airFilter: "Р“РћРЎРў 21.205-2016, РїРѕР·. 23",
-  airDamper: "Р“РћРЎРў 21.205-2016, РїРѕР·. 24",
-  fireDamper: "Р“РћРЎРў 21.205-2016, РїРѕР·. 15",
-  silencer: "Р“РћРЎРў 21.205-2016, РїРѕР·. 27",
-  airHeater: "Р“РћРЎРў 21.205-2016, РїРѕР·. 2",
-  airCooler: "Р“РћРЎРў 21.205-2016, РїРѕР·. 3",
-  airHumidifier: "Р“РћРЎРў 21.205-2016",
-  airDehumidifier: "Р“РћРЎРў 21.205-2016",
-  supplyDiffuser: "Р“РћРЎРў 21.205-2016, С‚Р°Р±Р». 10, РїРѕР·. 1",
-  exhaustGrille: "Р“РћРЎРў 21.205-2016, С‚Р°Р±Р». 10, РїРѕР·. 2",
+  airHandlingUnit: "ГОСТ 21.205-2016",
+  ductFan: "ГОСТ 21.205-2016, поз. 20",
+  airFilter: "ГОСТ 21.205-2016, поз. 23",
+  airDamper: "ГОСТ 21.205-2016, поз. 24",
+  fireDamper: "ГОСТ 21.205-2016, поз. 15",
+  silencer: "ГОСТ 21.205-2016, поз. 27",
+  airHeater: "ГОСТ 21.205-2016, поз. 2",
+  airCooler: "ГОСТ 21.205-2016, поз. 3",
+  airHumidifier: "ГОСТ 21.205-2016",
+  airDehumidifier: "ГОСТ 21.205-2016",
+  supplyDiffuser: "ГОСТ 21.205-2016, табл. 10, поз. 1",
+  exhaustGrille: "ГОСТ 21.205-2016, табл. 10, поз. 2",
 };
 
-AIR_GOST_REFERENCE.airFlowRegulatorConst = "Р“РћРЎРў 21.205-2016, РїРѕР·. 17";
-AIR_GOST_REFERENCE.airFlowRegulatorVar = "Р“РћРЎРў 21.205-2016, РїРѕР·. 18";
-AIR_GOST_REFERENCE.roofFan = "Р“РћРЎРў 21.205-2016";
+AIR_GOST_REFERENCE.airFlowRegulatorConst = "ГОСТ 21.205-2016, поз. 17";
+AIR_GOST_REFERENCE.airFlowRegulatorVar = "ГОСТ 21.205-2016, поз. 18";
+AIR_GOST_REFERENCE.roofFan = "ГОСТ 21.205-2016";
 AIR_GOST_REFERENCE.airCheckValve = "ГОСТ 21.205-2016";
 
 interface EngineeringLibraryPanelProps {
@@ -104,12 +104,12 @@ function buildEquipmentTitle(type: EngineeringEquipmentType, code: string): stri
   const label = ENGINEERING_EQUIPMENT_LABELS[type];
   const gostRef = AIR_GOST_REFERENCE[type];
   if (gostRef) {
-    return `${label} В· ${gostRef}`;
+    return `${label} · ${gostRef}`;
   }
-  if (code === "вЂ”" || code === "РІР‚вЂ”") {
+  if (code === "—") {
     return label;
   }
-  return `${label} В· ${code}`;
+  return `${label} · ${code}`;
 }
 
 function QuickActionButton({
@@ -225,7 +225,7 @@ function EquipmentListItem({
         {hasVariants ? (
           <button
             type="button"
-            aria-label={`Р’Р°СЂРёР°РЅС‚: ${variantLabel ?? "РЅРµ РІС‹Р±СЂР°РЅ"}`}
+            aria-label={`Вариант: ${variantLabel ?? "не выбран"}`}
             aria-expanded={dropdownOpen}
             onClick={(event) => {
               event.stopPropagation();
@@ -233,8 +233,8 @@ function EquipmentListItem({
             }}
             className={`ui-engineering-lib__variant-trigger ${active ? "ui-engineering-lib__variant-trigger--active" : ""}`}
           >
-            <span className="max-w-[5.5rem] truncate">{variantLabel ?? "Р’Р°СЂРёР°РЅС‚"}</span>
-            <span aria-hidden="true">в–ѕ</span>
+            <span className="max-w-[5.5rem] truncate">{variantLabel ?? "Вариант"}</span>
+            <span aria-hidden="true">▾</span>
           </button>
         ) : null}
       </div>
@@ -290,24 +290,24 @@ export function EngineeringLibraryPanel({
   return (
     <div className="ui-engineering-lib">
       <section className="ui-engineering-lib__section">
-        <SectionLabel>РџРѕРґРєР»СЋС‡РµРЅРёРµ</SectionLabel>
+        <SectionLabel>Подключение</SectionLabel>
         <div className="ui-engineering-lib__actions">
           <QuickActionButton
-            label="РЎРѕРµРґРёРЅРёС‚СЊ С‚СЂСѓР±РѕР№"
-            title="РРЅР¶РµРЅРµСЂРЅС‹Р№ С‚СЂСѓР±РѕРїСЂРѕРІРѕРґ"
+            label="Соединить трубой"
+            title="Инженерный трубопровод"
             active={currentTool === "engineeringPipe"}
             onClick={onPickPipe}
           />
           <QuickActionButton
-            label="РРўРџ РїР°СЂР°Р». Р“Р’РЎ + Р·Р°РІ. РѕС‚РѕРїР»РµРЅРёРµ"
-            title="РРўРџ РїР°СЂР°Р». Р“Р’РЎ + Р·Р°РІ. РѕС‚РѕРїР»РµРЅРёРµ"
+            label="ИТП парал. ГВС + зав. отопление"
+            title="ИТП парал. ГВС + зав. отопление"
             onClick={onAddItpParallelDhw}
           />
         </div>
       </section>
 
       <section className="ui-engineering-lib__section">
-        <div className="ui-segmented-control flex w-full" role="tablist" aria-label="РљР°С‚РµРіРѕСЂРёСЏ РѕР±РѕСЂСѓРґРѕРІР°РЅРёСЏ">
+        <div className="ui-segmented-control flex w-full" role="tablist" aria-label="Категория оборудования">
           {(Object.entries(TAB_LABELS) as [LibTab, string][]).map(([id, label]) => (
             <button
               key={id}
