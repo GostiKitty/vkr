@@ -34,6 +34,7 @@ import "./view3d/build3dRenderPath.test.js";
 import "./view3d/wallJoins.test.js";
 import "./ui/mojibake.test.js";
 import "./ui/resultsRender.test.js";
+import "./ui/levelsPanel.test.js";
 import "./geometry/polygonArea.test.js";
 import "./thermal/singleZone.test.js";
 import "./thermal/infiltrationModes.test.js";
