@@ -755,11 +755,16 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
       onAddEngineeringEquipment,
       onUpdateEngineeringEquipment,
       onAddEngineeringPipe,
+      onUpdateEngineeringPipe,
       onRemoveSelection,
       layoutFitEpoch = 0,
     },
     ref
   ) => {
+    const multiSelectionItems = useMemo(
+      () => multiSelection.filter((item): item is NonNullable<Selection> => item != null),
+      [multiSelection]
+    );
     const containerRef = useRef<HTMLDivElement | null>(null);
     const svgRef = useRef<SVGSVGElement | null>(null);
     const lastObservedSizeRef = useRef({ width: 0, height: 0 });
@@ -893,7 +898,7 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
 
     const isSelected = (kind: NonNullable<Selection>["kind"], id: string): boolean =>
       (selection?.kind === kind && selection.id === id) ||
-      multiSelection.some((s) => s.kind === kind && s.id === id);
+      multiSelectionItems.some((s) => s.kind === kind && s.id === id);
 
     const rooms = useMemo(() => {
       const filtered = model.rooms.filter((room) => room.levelId === activeLevelId);
@@ -902,13 +907,13 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
         : filtered;
       if (multiMoveDelta) {
         result = result.map((room) =>
-          multiSelection.some((s) => s.kind === "room" && s.id === room.id)
+          multiSelectionItems.some((s) => s.kind === "room" && s.id === room.id)
             ? { ...room, polygon: room.polygon.map((p) => ({ x: p.x + multiMoveDelta.x, y: p.y + multiMoveDelta.y })) }
             : room
         );
       }
       return result;
-    }, [model.rooms, activeLevelId, roomDraft, multiMoveDelta, multiSelection]);
+    }, [model.rooms, activeLevelId, roomDraft, multiMoveDelta, multiSelectionItems]);
 
     const walls = useMemo(() => {
       const filtered = model.walls.filter((wall) => wall.levelId === activeLevelId);
@@ -917,13 +922,13 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
         : filtered;
       if (multiMoveDelta) {
         result = result.map((wall) =>
-          multiSelection.some((s) => s.kind === "wall" && s.id === wall.id)
+          multiSelectionItems.some((s) => s.kind === "wall" && s.id === wall.id)
             ? { ...wall, a: { x: wall.a.x + multiMoveDelta.x, y: wall.a.y + multiMoveDelta.y }, b: { x: wall.b.x + multiMoveDelta.x, y: wall.b.y + multiMoveDelta.y } }
             : wall
         );
       }
       return result;
-    }, [model.walls, activeLevelId, wallDraft, multiMoveDelta, multiSelection]);
+    }, [model.walls, activeLevelId, wallDraft, multiMoveDelta, multiSelectionItems]);
     const roofs = useMemo(() => {
       const filtered = (model.roofs ?? []).filter((roof) => roof.levelId === activeLevelId);
       if (boundaryDraft?.kind === "roof") {
@@ -993,13 +998,13 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
         : filtered;
       if (multiMoveDelta) {
         result = result.map((pipe) =>
-          multiSelection.some((s) => s.kind === "pipe" && s.id === pipe.id)
+          multiSelectionItems.some((s) => s.kind === "pipe" && s.id === pipe.id)
             ? { ...pipe, path: (pipe.path ?? []).map((p) => ({ x: p.x + multiMoveDelta.x, y: p.y + multiMoveDelta.y })) }
             : pipe
         );
       }
       return result;
-    }, [activeLevelId, model.pipes, networkDraft, multiMoveDelta, multiSelection]);
+    }, [activeLevelId, model.pipes, networkDraft, multiMoveDelta, multiSelectionItems]);
     const ducts = useMemo(() => {
       const filtered = model.ducts.filter((duct) => duct.levelId === activeLevelId);
       let result = networkDraft?.kind === "duct"
@@ -1007,13 +1012,13 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
         : filtered;
       if (multiMoveDelta) {
         result = result.map((duct) =>
-          multiSelection.some((s) => s.kind === "duct" && s.id === duct.id)
+          multiSelectionItems.some((s) => s.kind === "duct" && s.id === duct.id)
             ? { ...duct, path: (duct.path ?? []).map((p) => ({ x: p.x + multiMoveDelta.x, y: p.y + multiMoveDelta.y })) }
             : duct
         );
       }
       return result;
-    }, [activeLevelId, model.ducts, networkDraft, multiMoveDelta, multiSelection]);
+    }, [activeLevelId, model.ducts, networkDraft, multiMoveDelta, multiSelectionItems]);
     const equipment = useMemo(() => {
       const filtered = model.equipment.filter((item) => item.levelId === activeLevelId);
       let result = objectDraft?.kind === "equipment"
@@ -1021,13 +1026,13 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
         : filtered;
       if (multiMoveDelta) {
         result = result.map((item) =>
-          multiSelection.some((s) => s.kind === "equipment" && s.id === item.id)
+          multiSelectionItems.some((s) => s.kind === "equipment" && s.id === item.id)
             ? { ...item, position: { x: item.position.x + multiMoveDelta.x, y: item.position.y + multiMoveDelta.y } }
             : item
         );
       }
       return result;
-    }, [activeLevelId, model.equipment, objectDraft, multiMoveDelta, multiSelection]);
+    }, [activeLevelId, model.equipment, objectDraft, multiMoveDelta, multiSelectionItems]);
     const equipmentConnectionPoints = useMemo(
       () =>
         equipment.flatMap((item) =>
@@ -1172,13 +1177,13 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
         : filtered;
       if (multiMoveDelta) {
         result = result.map((item) =>
-          multiSelection.some((s) => s.kind === "sensor" && s.id === item.id)
+          multiSelectionItems.some((s) => s.kind === "sensor" && s.id === item.id)
             ? { ...item, position: { x: item.position.x + multiMoveDelta.x, y: item.position.y + multiMoveDelta.y } }
             : item
         );
       }
       return result;
-    }, [activeLevelId, model.sensors, objectDraft, multiMoveDelta, multiSelection]);
+    }, [activeLevelId, model.sensors, objectDraft, multiMoveDelta, multiSelectionItems]);
     const engineeringEquipment = useMemo(() => {
       const filtered = (model.engineeringSystems?.equipment ?? []).filter((item) => (item.levelId ?? activeLevelId) === activeLevelId);
       let result = engineeringEquipmentDraft
@@ -1186,22 +1191,38 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
         : filtered;
       if (multiMoveDelta) {
         result = result.map((item) =>
-          multiSelection.some((s) => s.kind === "engineeringEquipment" && s.id === item.id)
+          multiSelectionItems.some((s) => s.kind === "engineeringEquipment" && s.id === item.id)
             ? { ...item, x: item.x + multiMoveDelta.x, y: item.y + multiMoveDelta.y }
             : item
         );
       }
       return result;
-    }, [activeLevelId, engineeringEquipmentDraft, model.engineeringSystems?.equipment, multiMoveDelta, multiSelection]);
+    }, [activeLevelId, engineeringEquipmentDraft, model.engineeringSystems?.equipment, multiMoveDelta, multiSelectionItems]);
     const engineeringPipes = useMemo(() => {
       const filtered = (model.engineeringSystems?.pipes ?? []).filter((pipe) => (pipe.levelId ?? activeLevelId) === activeLevelId);
       if (!multiMoveDelta) return filtered;
       return filtered.map((pipe) =>
-        multiSelection.some((s) => s.kind === "engineeringPipe" && s.id === pipe.id)
+        multiSelectionItems.some((s) => s.kind === "engineeringPipe" && s.id === pipe.id)
           ? { ...pipe, points: pipe.points.map((p) => ({ x: p.x + multiMoveDelta.x, y: p.y + multiMoveDelta.y })) }
           : pipe
       );
-    }, [activeLevelId, model.engineeringSystems?.pipes, multiMoveDelta, multiSelection]);
+    }, [activeLevelId, model.engineeringSystems?.pipes, multiMoveDelta, multiSelectionItems]);
+    const worldToScreen = useCallback(
+      (point: Vec2): Vec2 => ({
+        x: (point.x - view.origin.x) * view.zoom,
+        y: (point.y - view.origin.y) * view.zoom,
+      }),
+      [view.origin.x, view.origin.y, view.zoom]
+    );
+
+    const screenToWorld = useCallback(
+      (point: Vec2): Vec2 => ({
+        x: point.x / view.zoom + view.origin.x,
+        y: point.y / view.zoom + view.origin.y,
+      }),
+      [view.origin.x, view.origin.y, view.zoom]
+    );
+
     const engineeringEquipmentById = useMemo(
       () => new Map(engineeringEquipment.map((item) => [item.id, item] as const)),
       [engineeringEquipment]
@@ -2085,22 +2106,6 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
       }
     }, [hoverLoopId, levelLoops]);
 
-    const worldToScreen = useCallback(
-      (point: Vec2): Vec2 => ({
-        x: (point.x - view.origin.x) * view.zoom,
-        y: (point.y - view.origin.y) * view.zoom,
-      }),
-      [view.origin.x, view.origin.y, view.zoom]
-    );
-
-    const screenToWorld = useCallback(
-      (point: Vec2): Vec2 => ({
-        x: point.x / view.zoom + view.origin.x,
-        y: point.y / view.zoom + view.origin.y,
-      }),
-      [view.origin.x, view.origin.y, view.zoom]
-    );
-
     const screenToWorldRef = useRef(screenToWorld);
     useLayoutEffect(() => {
       screenToWorldRef.current = screenToWorld;
@@ -2535,7 +2540,7 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
           }
         }
         if (target && event.button === 0) {
-          const inMulti = multiSelection.length > 0 && multiSelection.some((s) => s.kind === target.kind && s.id === target.id);
+          const inMulti = multiSelectionItems.length > 0 && multiSelectionItems.some((s) => s.kind === target.kind && s.id === target.id);
           if (inMulti) {
             // Move all multi-selected items together
             areaDragInputRef.current = "pointer";
@@ -2893,7 +2898,7 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
       }
       if (dragState?.type === "move-multi" && multiMoveDelta) {
         const delta = multiMoveDelta;
-        multiSelection.forEach((item) => {
+        multiSelectionItems.forEach((item) => {
           if (item.kind === "room") {
             const orig = model.rooms.find((r) => r.id === item.id);
             if (orig && orig.source !== "auto") {
@@ -4851,7 +4856,7 @@ const Canvas2D = React.forwardRef<CanvasHandle, Canvas2DProps>(
                     if (tool === "duct") {
                       return entry.point.medium === "duct";
                     }
-                    return selection?.kind === "equipment" ? selection.id === entry.equipmentId : multiSelection.some(s => s.kind === "equipment" && s.id === entry.equipmentId);
+                    return selection?.kind === "equipment" ? selection.id === entry.equipmentId : multiSelectionItems.some((s) => s.kind === "equipment" && s.id === entry.equipmentId);
                   })
                   .map((entry) => (
                     <ConnectionPointOverlay
