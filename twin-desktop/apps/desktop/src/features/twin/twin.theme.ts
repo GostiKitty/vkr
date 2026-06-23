@@ -1,6 +1,6 @@
 import { readResolvedThemeFromDom } from "../../shared/theme/theme";
 
-const STOPS_LIGHT = [
+export const STOPS_LIGHT = [
   { stop: 0, color: "#1d4ed8" },
   { stop: 0.18, color: "#0891b2" },
   { stop: 0.4, color: "#0d9488" },
@@ -10,7 +10,7 @@ const STOPS_LIGHT = [
 ];
 
 /** Тёмная тема: приглушённая шкала без «кислотных» насыщенностей */
-const STOPS_DARK = [
+export const STOPS_DARK = [
   { stop: 0, color: "#4d7ccf" },
   { stop: 0.18, color: "#2a9db0" },
   { stop: 0.4, color: "#3d8f6f" },
